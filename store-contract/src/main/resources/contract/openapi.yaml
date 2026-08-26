@@ -1,0 +1,963 @@
+openapi: 3.1.0
+info:
+  title: Infinia Store Platform API
+  version: 1.0.0
+  summary: Catalog, publishing, review and delivery API for the Infinia / FengYu ecosystem.
+  description: |
+    Versioned REST API of the Infinia Store Platform (design §10).
+
+    * Root path `/api/v1`; breaking changes ship as `/api/v2` — never via headers.
+    * JSON is camelCase, timestamps are UTC RFC 3339, identifiers are UUIDv7/ULID.
+    * Errors use `application/problem+json` with a stable `code`, `traceId` and
+      localizable arguments.
+    * Lists use cursor pagination; write endpoints accept `Idempotency-Key`;
+      concurrent updates use `ETag/If-Match`.
+  license:
+    name: GPL-3.0
+    url: https://www.gnu.org/licenses/gpl-3.0.txt
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Catalog
+  - name: Listings
+  - name: Resolution
+  - name: Delivery
+  - name: Updates
+  - name: Account
+  - name: Library
+  - name: Telemetry
+  - name: Publisher
+  - name: Review
+  - name: Organizations
+  - name: Blobs
+
+paths:
+  /catalog:
+    get:
+      operationId: browseCatalog
+      tags: [Catalog]
+      summary: Browse the public catalog (anonymous access allowed)
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/ListingType' } }
+        - { name: query, in: query, schema: { type: string, maxLength: 128 }, description: Free-text search over name, summary and tags }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: channel, in: query, schema: { $ref: '#/components/schemas/Channel' } }
+        - { name: hostVersion, in: query, schema: { type: string }, description: Only listings with a compatible release }
+        - { name: os, in: query, schema: { $ref: '#/components/schemas/Platform' } }
+        - { name: arch, in: query, schema: { $ref: '#/components/schemas/Arch' } }
+        - { name: sort, in: query, schema: { type: string, enum: [relevance, recent, downloads, favorites], default: relevance } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 24 } }
+      responses:
+        '200':
+          description: Catalog page
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogPage' }
+
+  /listings/{namespace}/{slug}:
+    get:
+      operationId: getListing
+      tags: [Listings]
+      summary: Listing detail with visible releases
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - { name: namespace, in: path, required: true, schema: { type: string } }
+        - { name: slug, in: path, required: true, schema: { type: string } }
+        - { name: channel, in: query, schema: { $ref: '#/components/schemas/Channel' } }
+      responses:
+        '200':
+          description: Listing detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListingDetail' }
+        '404':
+          description: Not found
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /resolutions:
+    post:
+      operationId: resolve
+      tags: [Resolution]
+      summary: Resolve versions and dependency closure for a client environment
+      security:
+        - {}
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveRequest' }
+      responses:
+        '200':
+          description: Resolution plan (resolvable=false when dependencies are missing)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolveResponse' }
+
+  /releases/{releaseId}/download-ticket:
+    post:
+      operationId: createDownloadTicket
+      tags: [Delivery]
+      summary: Mint a short-lived, purpose-limited CDN download ticket
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+        - { name: artifactId, in: query, schema: { type: string }, description: Select a specific artifact; defaults to the best platform match }
+      responses:
+        '200':
+          description: Ticket
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DownloadTicket' }
+        '404': { $ref: '#/components/responses/ProblemNotFound' }
+
+  /updates/app:
+    get:
+      operationId: appUpdateFeed
+      tags: [Updates]
+      summary: Signed app update feed (design §8.4)
+      security:
+        - {}
+      parameters:
+        - { name: current, in: query, required: true, schema: { type: string } }
+        - { name: channel, in: query, schema: { $ref: '#/components/schemas/Channel' }, default: stable }
+        - { name: os, in: query, required: true, schema: { $ref: '#/components/schemas/Platform' } }
+        - { name: arch, in: query, required: true, schema: { $ref: '#/components/schemas/Arch' } }
+        - { name: installId, in: query, required: true, schema: { type: string }, description: Opaque random id used for stable rollout bucketing }
+      responses:
+        '200':
+          description: Update feed entry; latestVersion=null when up to date
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppUpdate' }
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [Account]
+      summary: Register a store account
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicUser' }
+        '409': { $ref: '#/components/responses/ProblemConflict' }
+
+  /me:
+    get:
+      operationId: getCurrentUser
+      tags: [Account]
+      summary: Current authenticated principal
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicUser' }
+        '401': { $ref: '#/components/responses/ProblemUnauthorized' }
+    put:
+      operationId: updateCurrentUser
+      tags: [Account]
+      summary: Update profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicUser' }
+
+  /me/sessions:
+    get:
+      operationId: listSessions
+      tags: [Account]
+      summary: Active sessions and grants
+      responses:
+        '200':
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Session' }
+
+  /me/sessions/{sessionId}:
+    delete:
+      operationId: revokeSession
+      tags: [Account]
+      summary: Revoke a session or grant
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Revoked }
+
+  /me/devices:
+    get:
+      operationId: listDevices
+      tags: [Account]
+      summary: Registered host devices
+      responses:
+        '200':
+          description: Devices
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Device' }
+
+  /me/devices/{deviceId}:
+    delete:
+      operationId: revokeDevice
+      tags: [Account]
+      summary: Revoke a device (refresh tokens issued to it become invalid immediately)
+      parameters:
+        - { name: deviceId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Revoked }
+
+  /me/library:
+    get:
+      operationId: getLibrary
+      tags: [Library]
+      summary: Favorites, entitlements and install history
+      responses:
+        '200':
+          description: Library
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Library' }
+
+  /me/favorites/{listingId}:
+    put:
+      operationId: addFavorite
+      tags: [Library]
+      summary: Favorite a listing
+      parameters:
+        - { name: listingId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Favorited }
+    delete:
+      operationId: removeFavorite
+      tags: [Library]
+      summary: Remove a favorite
+      parameters:
+        - { name: listingId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Removed }
+
+  /install-events:
+    post:
+      operationId: reportInstallEvents
+      tags: [Telemetry]
+      summary: Report optional, idempotent install telemetry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '#/components/schemas/InstallEvent' }
+      responses:
+        '202': { description: Accepted }
+
+  /publisher/listings:
+    get:
+      operationId: listPublisherListings
+      tags: [Publisher]
+      summary: Listings owned by the caller's namespaces
+      responses:
+        '200':
+          description: Listings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CatalogItem' }
+    post:
+      operationId: createListing
+      tags: [Publisher]
+      summary: Create a listing in a namespace the caller owns
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateListingRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListingDetail' }
+        '403': { $ref: '#/components/responses/ProblemForbidden' }
+        '409': { $ref: '#/components/responses/ProblemConflict' }
+
+  /publisher/listings/{listingId}/releases:
+    post:
+      operationId: createRelease
+      tags: [Publisher]
+      summary: Create a draft release
+      parameters:
+        - { name: listingId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateReleaseRequest' }
+      responses:
+        '201':
+          description: Draft release created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublisherRelease' }
+
+  /publisher/releases/{releaseId}/uploads:
+    post:
+      operationId: createUploadSession
+      tags: [Publisher]
+      summary: Create an upload session; returns a short-lived presigned PUT URL
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename, kind]
+              properties:
+                filename: { type: string, maxLength: 255 }
+                kind: { $ref: '#/components/schemas/ArtifactKind' }
+                platform: { $ref: '#/components/schemas/Platform' }
+                arch: { $ref: '#/components/schemas/Arch' }
+                size: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '201':
+          description: Upload session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadSession' }
+
+  /publisher/releases/{releaseId}/submit:
+    post:
+      operationId: submitRelease
+      tags: [Publisher]
+      summary: Submit a release for scanning and review
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '202':
+          description: Accepted for scanning
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmitResult' }
+
+  /publisher/releases/{releaseId}:
+    get:
+      operationId: getPublisherRelease
+      tags: [Publisher]
+      summary: Release status including scan findings
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Release
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublisherRelease' }
+
+  /reviews:
+    get:
+      operationId: listReviews
+      tags: [Review]
+      summary: Review queue (REVIEWER or PLATFORM_ADMIN)
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [IN_REVIEW, APPROVED, REJECTED, CHANGES_REQUESTED] } }
+      responses:
+        '200':
+          description: Reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Review' }
+
+  /reviews/{reviewId}/decisions:
+    post:
+      operationId: decideReview
+      tags: [Review]
+      summary: Record a review decision; APPROVE publishes and platform-signs the envelope
+      parameters:
+        - { name: reviewId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [APPROVE, REJECT, REQUEST_CHANGES] }
+                notes: { type: string, maxLength: 4000 }
+      responses:
+        '200':
+          description: Updated review
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Review' }
+
+  /admin/releases/{releaseId}/yank:
+    post:
+      operationId: yankRelease
+      tags: [Review]
+      summary: Yank (soft-withdraw) a published release — PLATFORM_ADMIN
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Yanked }
+
+  /admin/releases/{releaseId}/quarantine:
+    post:
+      operationId: quarantineRelease
+      tags: [Review]
+      summary: Quarantine a release on a security event — PLATFORM_ADMIN
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Quarantined }
+
+  /organizations:
+    post:
+      operationId: createOrganization
+      tags: [Organizations]
+      summary: Create an organization; reserves the matching namespace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, name]
+              properties:
+                slug: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }
+                name: { type: string, maxLength: 100 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+
+  /organizations/{organizationId}/webhooks:
+    get:
+      operationId: listWebhooks
+      tags: [Organizations]
+      summary: List organization webhooks
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Webhooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Webhook' }
+    post:
+      operationId: createWebhook
+      tags: [Organizations]
+      summary: Register a webhook for publishing / review / security events
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: { type: string, format: uri }
+                events:
+                  type: array
+                  items: { type: string }
+                  example: [release.published, release.quarantined]
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    ProblemUnauthorized:
+      description: Unauthorized
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemForbidden:
+      description: Forbidden
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemNotFound:
+      description: Not found
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemConflict:
+      description: Conflict
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    ListingType:
+      type: string
+      enum: [APP, PLUGIN, SKILL, MCP, FLOW]
+    Channel:
+      type: string
+      enum: [stable, beta, alpha, nightly, private]
+    Platform:
+      type: string
+      enum: [windows, macos, linux, universal]
+    Arch:
+      type: string
+      enum: [x64, arm64, universal]
+    ArtifactKind:
+      type: string
+      enum: [PACKAGE, INSTALLER, CHECKSUMS, SIGNATURE, SBOM]
+
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string, description: Stable machine-readable code }
+        detail: { type: string }
+        traceId: { type: string }
+        parameters:
+          type: object
+          additionalProperties: true
+
+    CatalogItem:
+      type: object
+      required: [coordinate, type, namespace, slug, name]
+      properties:
+        coordinate: { type: string, example: 'infinia://plugin/official/markdown' }
+        type: { $ref: '#/components/schemas/ListingType' }
+        namespace: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        summary: { type: string }
+        category: { type: string }
+        tags: { type: array, items: { type: string } }
+        iconUrl: { type: string, format: uri }
+        latestVersion: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+        downloads: { type: integer, format: int64 }
+        publisherName: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    CatalogPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CatalogItem' } }
+        nextCursor: { type: string, nullable: true }
+        totalEstimate: { type: integer, format: int64 }
+
+    Localization:
+      type: object
+      properties:
+        locale: { type: string, example: en }
+        name: { type: string }
+        summary: { type: string }
+        descriptionMarkdown: { type: string }
+        changelogMarkdown: { type: string }
+
+    Artifact:
+      type: object
+      required: [artifactId, kind, platform, arch, filename, size, sha256]
+      properties:
+        artifactId: { type: string }
+        kind: { $ref: '#/components/schemas/ArtifactKind' }
+        platform: { $ref: '#/components/schemas/Platform' }
+        arch: { $ref: '#/components/schemas/Arch' }
+        filename: { type: string }
+        size: { type: integer, format: int64 }
+        sha256: { type: string }
+        keyId: { type: string }
+        mimeType: { type: string }
+
+    Dependency:
+      type: object
+      properties:
+        coordinate: { type: string }
+        range: { type: string }
+        optional: { type: boolean }
+
+    Permission:
+      type: object
+      properties:
+        permissionId: { type: string }
+        scope: { type: string, example: network }
+        required: { type: boolean }
+        reason: { type: string }
+
+    ListingRelease:
+      type: object
+      required: [releaseId, version, status, channel]
+      properties:
+        releaseId: { type: string }
+        version: { type: string }
+        status: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+        publishedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        requiresHost: { type: string }
+        license: { type: string }
+        sourceUrl: { type: string }
+        changelogMarkdown: { type: string }
+        rolloutPercent: { type: integer, minimum: 0, maximum: 100 }
+        artifacts: { type: array, items: { $ref: '#/components/schemas/Artifact' } }
+        dependencies: { type: array, items: { $ref: '#/components/schemas/Dependency' } }
+        permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+
+    ListingDetail:
+      type: object
+      required: [listingId, coordinate, type, namespace, slug]
+      properties:
+        listingId: { type: string }
+        coordinate: { type: string }
+        type: { $ref: '#/components/schemas/ListingType' }
+        namespace: { type: string }
+        slug: { type: string }
+        visibility: { type: string, enum: [PUBLIC, UNLISTED, PRIVATE] }
+        status: { type: string }
+        category: { type: string }
+        tags: { type: array, items: { type: string } }
+        iconUrl: { type: string, format: uri, nullable: true }
+        screenshots: { type: array, items: { type: string, format: uri } }
+        defaultChannel: { $ref: '#/components/schemas/Channel' }
+        publisherName: { type: string }
+        downloads: { type: integer, format: int64 }
+        favorites: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        localizations: { type: array, items: { $ref: '#/components/schemas/Localization' } }
+        releases: { type: array, items: { $ref: '#/components/schemas/ListingRelease' } }
+
+    ClientEnvironment:
+      type: object
+      required: [hostVersion, os, arch]
+      properties:
+        hostVersion: { type: string }
+        os: { $ref: '#/components/schemas/Platform' }
+        arch: { $ref: '#/components/schemas/Arch' }
+        channel: { $ref: '#/components/schemas/Channel' }
+        installed:
+          type: array
+          items:
+            type: object
+            properties:
+              coordinate: { type: string }
+              version: { type: string }
+
+    ResolveRequest:
+      type: object
+      required: [coordinate, client]
+      properties:
+        coordinate: { type: string, example: 'infinia://flow/summer/mail-digest' }
+        range: { type: string, example: '>=1.0.0 <2.0.0' }
+        client: { $ref: '#/components/schemas/ClientEnvironment' }
+
+    ResolutionItem:
+      type: object
+      properties:
+        coordinate: { type: string }
+        releaseId: { type: string }
+        version: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+        artifacts: { type: array, items: { $ref: '#/components/schemas/Artifact' } }
+        permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+        requiresHost: { type: string }
+        alreadyInstalled: { type: boolean }
+        reason: { type: string }
+
+    MissingDependency:
+      type: object
+      properties:
+        coordinate: { type: string }
+        range: { type: string }
+        reason: { type: string }
+
+    ResolveResponse:
+      type: object
+      properties:
+        resolvable: { type: boolean }
+        rootCoordinate: { type: string }
+        plan: { type: array, items: { $ref: '#/components/schemas/ResolutionItem' } }
+        missing: { type: array, items: { $ref: '#/components/schemas/MissingDependency' } }
+        resolvedAt: { type: string, format: date-time }
+
+    DownloadTicket:
+      type: object
+      required: [releaseId, artifactId, url, sha256]
+      properties:
+        releaseId: { type: string }
+        artifactId: { type: string }
+        url: { type: string, format: uri }
+        expiresAt: { type: string, format: date-time }
+        sha256: { type: string }
+        signature: { type: string }
+        keyId: { type: string }
+        size: { type: integer, format: int64 }
+
+    AppUpdateArtifact:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+        sha256: { type: string }
+        signature: { type: string }
+        keyId: { type: string }
+        size: { type: integer, format: int64 }
+        platform: { $ref: '#/components/schemas/Platform' }
+        arch: { $ref: '#/components/schemas/Arch' }
+        kind: { type: string }
+        mimeType: { type: string }
+
+    AppUpdate:
+      type: object
+      properties:
+        latestVersion: { type: string, nullable: true }
+        mandatory: { type: boolean }
+        rollout: { type: integer, minimum: 0, maximum: 100 }
+        releaseNotes: { type: string }
+        artifacts: { type: array, items: { $ref: '#/components/schemas/AppUpdateArtifact' } }
+        sha256: { type: string }
+        signature: { type: string }
+        keyId: { type: string }
+        publishedAt: { type: string, format: date-time }
+        minimumSupportedVersion: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 8, maxLength: 128 }
+        displayName: { type: string, minLength: 1, maxLength: 64 }
+
+    PublicUser:
+      type: object
+      required: [userId, email, displayName, roles]
+      properties:
+        userId: { type: string }
+        email: { type: string }
+        displayName: { type: string }
+        roles: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+
+    Session:
+      type: object
+      properties:
+        sessionId: { type: string }
+        clientId: { type: string }
+        kind: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time }
+        remoteIpHash: { type: string }
+
+    Device:
+      type: object
+      properties:
+        deviceId: { type: string }
+        publicId: { type: string }
+        name: { type: string }
+        platform: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        revoked: { type: boolean }
+
+    Favorite:
+      type: object
+      properties:
+        listingCoordinate: { type: string }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/ListingType' }
+        latestVersion: { type: string }
+        addedAt: { type: string, format: date-time }
+
+    Entitlement:
+      type: object
+      properties:
+        listingCoordinate: { type: string }
+        free: { type: boolean }
+        acquiredAt: { type: string, format: date-time }
+
+    InstallEvent:
+      type: object
+      required: [idempotencyKey, coordinate, version, action, outcome]
+      properties:
+        idempotencyKey: { type: string, maxLength: 128 }
+        coordinate: { type: string }
+        version: { type: string }
+        type: { $ref: '#/components/schemas/ListingType' }
+        action: { type: string, enum: [install, update, rollback, uninstall] }
+        outcome: { type: string, enum: [success, failure, rolled_back] }
+        hostVersion: { type: string }
+        os: { type: string }
+        arch: { type: string }
+        occurredAt: { type: string, format: date-time }
+
+    Library:
+      type: object
+      properties:
+        favorites: { type: array, items: { $ref: '#/components/schemas/Favorite' } }
+        entitlements: { type: array, items: { $ref: '#/components/schemas/Entitlement' } }
+        installHistory: { type: array, items: { $ref: '#/components/schemas/InstallEvent' } }
+
+    CreateListingRequest:
+      type: object
+      required: [namespace, slug, type, name]
+      properties:
+        namespace: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }
+        slug: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }
+        type: { $ref: '#/components/schemas/ListingType' }
+        category: { type: string }
+        tags: { type: array, items: { type: string } }
+        defaultChannel: { $ref: '#/components/schemas/Channel' }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        summary: { type: string, maxLength: 500 }
+        descriptionMarkdown: { type: string, maxLength: 50000 }
+        locale: { type: string, default: en }
+
+    CreateReleaseRequest:
+      type: object
+      required: [version, channel]
+      properties:
+        version: { type: string, example: 1.2.0 }
+        channel: { $ref: '#/components/schemas/Channel' }
+        requiresHost: { type: string, example: '>=4.0.0-beta.5 <5.0.0' }
+        license: { type: string, example: MIT }
+        sourceUrl: { type: string, format: uri }
+        changelogMarkdown: { type: string, maxLength: 50000 }
+        dependencies: { type: array, items: { $ref: '#/components/schemas/Dependency' } }
+        permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+        rolloutPercent: { type: integer, minimum: 0, maximum: 100, default: 100 }
+
+    UploadSession:
+      type: object
+      required: [uploadId, releaseId, uploadUrl, method]
+      properties:
+        uploadId: { type: string }
+        releaseId: { type: string }
+        filename: { type: string }
+        kind: { $ref: '#/components/schemas/ArtifactKind' }
+        platform: { $ref: '#/components/schemas/Platform' }
+        arch: { $ref: '#/components/schemas/Arch' }
+        uploadUrl: { type: string, format: uri }
+        method: { type: string, enum: [PUT] }
+        expiresAt: { type: string, format: date-time }
+        maxSizeBytes: { type: integer, format: int64 }
+
+    ScanFinding:
+      type: object
+      properties:
+        severity: { type: string, enum: [INFO, WARN, ERROR, CRITICAL] }
+        rule: { type: string }
+        message: { type: string }
+
+    SubmitResult:
+      type: object
+      properties:
+        releaseId: { type: string }
+        status: { type: string }
+        reviewId: { type: string, nullable: true }
+        submittedAt: { type: string, format: date-time }
+
+    PublisherRelease:
+      type: object
+      required: [releaseId, listingCoordinate, version, status, channel]
+      properties:
+        releaseId: { type: string }
+        listingCoordinate: { type: string }
+        version: { type: string }
+        status: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+        createdAt: { type: string, format: date-time }
+        publishedAt: { type: string, format: date-time, nullable: true }
+        findings: { type: array, items: { $ref: '#/components/schemas/ScanFinding' } }
+
+    Review:
+      type: object
+      required: [reviewId, releaseId, status]
+      properties:
+        reviewId: { type: string }
+        releaseId: { type: string }
+        listingCoordinate: { type: string }
+        listingName: { type: string }
+        version: { type: string }
+        status: { type: string }
+        submittedAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        reviewerId: { type: string, nullable: true }
+        notes: { type: string }
+        findings: { type: array, items: { $ref: '#/components/schemas/ScanFinding' } }
+
+    Organization:
+      type: object
+      properties:
+        organizationId: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Webhook:
+      type: object
+      properties:
+        webhookId: { type: string }
+        organizationId: { type: string }
+        url: { type: string, format: uri }
+        events: { type: array, items: { type: string } }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
