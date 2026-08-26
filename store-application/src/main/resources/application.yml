@@ -1,0 +1,73 @@
+spring:
+  application:
+    name: infinia-store
+  datasource:
+    url: jdbc:postgresql://localhost:5432/store
+    username: store
+    password: store
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+  jackson:
+    default-property-inclusion: non_null
+  messages:
+    basename: i18n/errors
+  web:
+    resources:
+      add-mappings: true
+
+server:
+  port: 8080
+  error:
+    include-problem-details: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+store:
+  base-url: http://localhost:8080
+  blob-dir: data/blobs
+  key-dir: data/keys
+  ticket-secret: ${STORE_TICKET_SECRET:dev-only-ticket-secret-change-me}
+  rollout-secret: ${STORE_ROLLOUT_SECRET:dev-only-rollout-secret-change-me}
+  max-upload-bytes: 104857600
+  download-ticket-ttl-seconds: 300
+  upload-ticket-ttl-seconds: 900
+  allowed-origins: http://localhost:5173,http://localhost:4173
+  web-redirect-uri: http://localhost:5173/callback
+  cli-client-id: ${STORE_CLI_CLIENT_ID:store-cli}
+  cli-client-secret: ${STORE_CLI_CLIENT_SECRET:dev-only-cli-secret}
+
+---
+# H2 profile for local runs without Docker: `--spring.profiles.active=local`
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:h2:file:./data/storedb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    username: sa
+    password: ""
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+  h2:
+    console:
+      enabled: true
+
+---
+# Seeds demo data for local development.
+spring:
+  config:
+    activate:
+      on-profile: local,dev,test
+store:
+  seed:
+    enabled: true

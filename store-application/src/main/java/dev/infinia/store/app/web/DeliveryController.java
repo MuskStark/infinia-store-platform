@@ -1,0 +1,110 @@
+package dev.infinia.store.app.web;
+
+import dev.infinia.store.app.config.StoreProperties;
+import dev.infinia.store.app.service.CatalogService;
+import dev.infinia.store.app.service.CurrentPrincipal;
+import dev.infinia.store.app.service.PublisherService;
+import dev.infinia.store.app.service.TicketService;
+import dev.infinia.store.contract.api.DeliveryDtos;
+import dev.infinia.store.contract.error.StoreErrorCode;
+import dev.infinia.store.domain.DomainException;
+import dev.infinia.store.domain.model.Release;
+import dev.infinia.store.domain.port.BlobStorage;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
+import java.io.InputStream;
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * Download tickets and blob transfer (design §10.2). Upload/download tickets are
+ * HMAC-signed, short-lived and purpose-limited — the local equivalent of S3
+ * presigned URLs, so large artifacts never pass through JSON endpoints.
+ */
+@RestController
+@RequestMapping("/api/v1")
+public class DeliveryController {
+
+    private final CatalogService catalog;
+    private final PublisherService publisher;
+    private final TicketService tickets;
+    private final BlobStorage blobs;
+    private final StoreProperties properties;
+
+    public DeliveryController(CatalogService catalog, PublisherService publisher,
+            TicketService tickets, BlobStorage blobs, StoreProperties properties) {
+        this.catalog = catalog;
+        this.publisher = publisher;
+        this.tickets = tickets;
+        this.blobs = blobs;
+        this.properties = properties;
+    }
+
+    @PostMapping("/releases/{releaseId}/download-ticket")
+    public DeliveryDtos.DownloadTicketDto ticket(@PathVariable UUID releaseId,
+            @RequestParam(required = false) String artifactId,
+            @RequestParam(required = false) String os,
+            @RequestParam(required = false) String arch) {
+        Release release = catalog.releaseOrThrow(releaseId);
+        if (!release.installable()) {
+            throw new DomainException(StoreErrorCode.INVALID_STATE_TRANSITION,
+                    "Release is not installable (status " + release.status + ")");
+        }
+        Release.ArtifactInfo artifact = catalog.pickArtifact(release, artifactId, os, arch);
+        Instant expiresAt = Instant.now().plusSeconds(properties.downloadTicketTtlSeconds());
+        String signature = tickets.sign("download", artifact.blobKey(), expiresAt);
+        // Server-relative URL: clients resolve it against the API host (design §10.2).
+        String url = "/api/v1/blobs/" + artifact.blobKey() + "?"
+                + TicketService.encodeTicketParams("download", artifact.blobKey(), expiresAt,
+                        signature);
+        return new DeliveryDtos.DownloadTicketDto(release.id.toString(),
+                artifact.id() == null ? null : artifact.id().toString(), url,
+                expiresAt.toString(), artifact.sha256(), artifact.signature(), artifact.keyId(),
+                artifact.size());
+    }
+
+    /** Ticketed blob download; anonymous by design (ticket IS the authorization). */
+    @GetMapping("/blobs/{*blobKey}")
+    public ResponseEntity<StreamingResponseBody> download(@PathVariable String blobKey,
+            @RequestParam(required = false) String purpose,
+            @RequestParam(required = false) Long exp,
+            @RequestParam(required = false) String sig) {
+        String key = blobKey.startsWith("/") ? blobKey.substring(1) : blobKey;
+        if (!"download".equals(purpose) || exp == null
+                || !tickets.verify("download", key, Instant.ofEpochSecond(exp), sig)) {
+            throw new DomainException(StoreErrorCode.TICKET_INVALID,
+                    "Download ticket is invalid or expired");
+        }
+        InputStream in = blobs.open(key);
+        StreamingResponseBody body = out -> {
+            try (in) {
+                in.transferTo(out);
+            }
+        };
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE,
+                        MediaType.APPLICATION_OCTET_STREAM_VALUE)
+                .body(body);
+    }
+
+    /** Presigned-URL equivalent for uploads (design §8.2 step 1). */
+    @PutMapping("/blobs/uploads/{uploadId}")
+    public ResponseEntity<Void> upload(@PathVariable UUID uploadId,
+            @RequestParam(required = false) String purpose,
+            @RequestParam(required = false) Long exp,
+            @RequestParam(required = false) String sig,
+            @RequestBody byte[] body) throws java.io.IOException {
+        if (!"upload".equals(purpose) || exp == null
+                || !tickets.verify("upload", uploadId.toString(),
+                        Instant.ofEpochSecond(exp), sig)) {
+            throw new DomainException(StoreErrorCode.TICKET_INVALID,
+                    "Upload ticket is invalid or expired");
+        }
+        publisher.completeUpload(uploadId, new java.io.ByteArrayInputStream(body));
+        return ResponseEntity.noContent().build();
+    }
+}
