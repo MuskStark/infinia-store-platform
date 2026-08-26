@@ -1,0 +1,42 @@
+/*
+ * @infinia/magic-ui-vue — shared styling primitives.
+ * Components read these custom properties; apps map their own tokens onto them.
+ */
+:root {
+  --magic-foreground: 15 23 42;
+  --magic-muted: 100 116 139;
+  --magic-accent: 99 102 241;
+  --magic-accent-2: 217 70 239;
+  --magic-surface: 255 255 255;
+  --magic-border: 226 232 240;
+  --magic-radius: 1rem;
+  --magic-duration: 2.5s;
+}
+
+.magic-beam,
+.magic-grid-drift,
+.magic-shimmer,
+.magic-marquee-track,
+.magic-progress-indeterminate,
+.magic-list-item,
+.magic-blur-fade {
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .magic-beam,
+  .magic-grid-drift,
+  .magic-shimmer,
+  .magic-marquee-track,
+  .magic-progress-indeterminate {
+    animation: none;
+  }
+  .magic-list-item,
+  .magic-blur-fade {
+    animation: none;
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}

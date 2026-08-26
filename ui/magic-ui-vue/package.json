@@ -1,0 +1,31 @@
+{
+  "name": "@infinia/magic-ui-vue",
+  "version": "0.1.0",
+  "description": "Controlled Vue 3 port of selected Magic UI components (upstream is MIT-licensed React + Tailwind + Motion). CSS-first animations, prefers-reduced-motion aware.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "PORT_NOTES.md"
+  ],
+  "peerDependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^26.1.0",
+    "vitest": "^4.1.9",
+    "vue": "3.5.41"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "infinia-store-platform",
+  "private": true,
+  "workspaces": [
+    "store-web",
+    "ui/*"
+  ],
+  "packageManager": "yarn@4.18.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "web": "yarn workspace @infinia/store-web dev",
+    "web:build": "yarn workspace @infinia/store-web build",
+    "web:test": "yarn workspace @infinia/store-web test",
+    "ui:test": "yarn workspace @infinia/magic-ui-vue test"
+  }
+}
