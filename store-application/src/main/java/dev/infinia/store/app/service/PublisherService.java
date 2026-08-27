@@ -88,14 +88,21 @@ public class PublisherService {
 
     @Transactional
     public Listing createListing(UUID publisherUserId, PublisherDtos.CreateListingRequest request) {
+        return createListing(publisherUserId, false, request);
+    }
+
+    @Transactional
+    public Listing createListing(UUID publisherUserId, boolean platformAdmin,
+            PublisherDtos.CreateListingRequest request) {
         Namespace namespace = namespaces.findByName(request.namespace()).orElseThrow(
                 () -> new DomainException(StoreErrorCode.NAMESPACE_NOT_OWNED,
                         "Unknown namespace: " + request.namespace()
                                 + " — create it first via POST /api/v1/organizations"));
         // Namespaces are owned directly by a user or by an organization the user
-        // belongs to (design §7.1).
-        boolean owned = IdentityRepositories.ownsNamespace(namespaces, organizations, namespace,
-                publisherUserId);
+        // belongs to (design §7.1). Platform admins may publish into any existing
+        // namespace — they curate the whole catalog (design §7.4).
+        boolean owned = platformAdmin || IdentityRepositories.ownsNamespace(namespaces,
+                organizations, namespace, publisherUserId);
         if (!owned) {
             throw new DomainException(StoreErrorCode.NAMESPACE_NOT_OWNED,
                     "You do not own namespace " + request.namespace());

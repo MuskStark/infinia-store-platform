@@ -13,6 +13,7 @@ import { Badge, MagicCard, ProgressBar, ShimmerButton } from '@infinia/magic-ui-
 import StateChip from '../components/StateChip.vue';
 import EmptyState from '../components/EmptyState.vue';
 import { usePublisherStore } from '../stores/publisher';
+import { useAuthStore } from '../stores/auth';
 
 /**
  * Publisher center (design §8): create org/namespace → listing → release →
@@ -20,7 +21,13 @@ import { usePublisherStore } from '../stores/publisher';
  */
 const { t } = useI18n();
 const store = usePublisherStore();
+const auth = useAuthStore();
 const message = ref('');
+
+/** 命名空间下拉:我所在组织保留的命名空间(= 组织标识)。 */
+const orgNamespaces = ref<string[]>([]);
+const CUSTOM_NAMESPACE = '__custom__';
+const useCustomNamespace = ref(false);
 
 const orgForm = ref({ slug: '', name: '' });
 const listingForm = ref({
@@ -34,15 +41,18 @@ const listingForm = ref({
 const releaseForm = ref({ version: '', channel: 'stable', requiresHost: '' });
 const fileInput = ref<HTMLInputElement | null>(null);
 const selectedListing = ref<CatalogItem | null>(null);
+const selectedListingId = ref<string | null>(null);
 const currentRelease = ref<PublisherRelease | null>(null);
 const busy = ref(false);
 
 async function createOrg() {
   busy.value = true;
   try {
-    await api.post('/api/v1/organizations', orgForm.value);
+    const created = await api.post<{ slug: string }>('/api/v1/organizations', orgForm.value);
     message.value = t('publisher.orgCreated');
-    listingForm.value.namespace = orgForm.value.slug;
+    await loadOrgNamespaces();
+    listingForm.value.namespace = created?.slug ?? orgForm.value.slug;
+    useCustomNamespace.value = false;
     orgForm.value = { slug: '', name: '' };
   } finally {
     busy.value = false;
@@ -82,7 +92,9 @@ async function createRelease() {
       `/api/v1/publisher/listings/${detail.listingId}/releases`,
       releaseForm.value,
     );
+    selectedListingId.value = detail.listingId;
     currentRelease.value = release;
+    await store.loadReleases(detail.listingId);
     message.value = t('publisher.releaseCreated');
   } finally {
     busy.value = false;
@@ -125,17 +137,79 @@ async function pollStatus() {
   currentRelease.value = store.releases[releaseId] ?? currentRelease.value;
 }
 
-function selectListing(listing: CatalogItem) {
+async function selectListing(listing: CatalogItem) {
   selectedListing.value = listing;
+  selectedListingId.value = null;
+  currentRelease.value = null;
+  message.value = '';
+  // Resolve the listing UUID, then load its releases (incl. DRAFTs) so an
+  // interrupted draft can be resumed — the upload area keys off currentRelease.
+  try {
+    const [, , namespace, slug] = listing.coordinate.split('/');
+    const detail = await api.get<ListingDetail>(
+      `/api/v1/listings/${namespace}/${slug}`,
+    );
+    selectedListingId.value = detail.listingId;
+    await store.loadReleases(detail.listingId);
+    const draft = store.releasesByListing[detail.listingId]?.find(
+      (r) => r.status === 'DRAFT',
+    );
+    if (draft) {
+      currentRelease.value = draft;
+      message.value = t('publisher.draftResumed');
+    }
+  } catch {
+    /* detail load failure leaves the wizard usable for new releases */
+  }
+}
+
+async function pickRelease(release: PublisherRelease) {
+  currentRelease.value = release;
   message.value = '';
 }
 
-onMounted(() => store.load());
+async function refreshSelectedListingReleases() {
+  const listingId = selectedListingId.value;
+  if (!listingId) return;
+  await store.loadReleases(listingId);
+  const fresh = store.releasesByListing[listingId]?.find(
+    (r) => r.releaseId === currentRelease.value?.releaseId,
+  );
+  if (fresh) currentRelease.value = fresh;
+}
+
+async function loadOrgNamespaces() {
+  try {
+    const orgs = await api.get<{ slug: string }[]>('/api/v1/organizations');
+    orgNamespaces.value = orgs.map((o) => o.slug);
+    if (!listingForm.value.namespace && orgNamespaces.value.length) {
+      listingForm.value.namespace = orgNamespaces.value[0];
+    }
+  } catch {
+    /* 下拉加载失败时回退手动输入 */
+  }
+}
+
+function onNamespaceChange(value: string) {
+  if (value === CUSTOM_NAMESPACE) {
+    useCustomNamespace.value = true;
+    listingForm.value.namespace = '';
+  } else {
+    useCustomNamespace.value = false;
+    listingForm.value.namespace = value;
+  }
+}
+
+onMounted(() => {
+  store.load();
+  loadOrgNamespaces();
+});
 </script>
 
 <template>
   <div class="space-y-8">
     <h1 class="text-2xl font-bold">{{ t('publisher.title') }}</h1>
+    <p class="text-sm text-muted dark:text-slate-400">{{ t('publisher.steps') }}</p>
     <p v-if="message" class="rounded-xl bg-accent/10 p-3 text-sm text-accent" role="status">
       {{ message }}
     </p>
@@ -164,14 +238,42 @@ onMounted(() => store.load());
       <form class="grid gap-3 sm:grid-cols-3" @submit.prevent="createOrg">
         <input v-model="orgForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" :placeholder="t('publisher.orgSlug')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
         <input v-model="orgForm.name" :placeholder="t('publisher.orgName')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <ShimmerButton type="submit" :disabled="busy">{{ t('common.confirm') }}</ShimmerButton>
+        <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
       </form>
     </MagicCard>
 
     <MagicCard class="p-6">
       <h2 class="mb-4 font-semibold">{{ t('publisher.newListings') }}</h2>
       <form class="grid gap-3 sm:grid-cols-3" @submit.prevent="createListing">
-        <input v-model="listingForm.namespace" required :placeholder="t('publisher.namespace')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
+        <select
+          v-if="!useCustomNamespace"
+          :value="listingForm.namespace"
+          required
+          class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+          :aria-label="t('publisher.namespace')"
+          @change="onNamespaceChange(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-if="!orgNamespaces.length" value="" disabled>
+            {{ t('publisher.namespaceNone') }}
+          </option>
+          <option v-for="ns in orgNamespaces" :key="ns" :value="ns">{{ ns }}</option>
+          <option :value="CUSTOM_NAMESPACE">{{ t('publisher.namespaceCustom') }}</option>
+        </select>
+        <input
+          v-else
+          v-model="listingForm.namespace"
+          required
+          :placeholder="t('publisher.namespace')"
+          class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+        />
+        <button
+          v-if="useCustomNamespace"
+          type="button"
+          class="shrink-0 whitespace-nowrap rounded-xl border border-line px-3 py-2 text-sm text-muted dark:border-slate-800 dark:text-slate-400"
+          @click="useCustomNamespace = false"
+        >
+          {{ t('publisher.namespaceBackToList') }}
+        </button>
         <input v-model="listingForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" :placeholder="t('publisher.slug')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
         <select v-model="listingForm.type" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
           <option v-for="type in ['APP', 'PLUGIN', 'SKILL', 'MCP', 'FLOW']" :key="type" :value="type">
@@ -180,8 +282,31 @@ onMounted(() => store.load());
         </select>
         <input v-model="listingForm.name" required :placeholder="t('publisher.name')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
         <input v-model="listingForm.summary" :placeholder="t('publisher.summary')" class="sm:col-span-2 rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <ShimmerButton type="submit" :disabled="busy">{{ t('common.confirm') }}</ShimmerButton>
+        <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
       </form>
+    </MagicCard>
+
+    <MagicCard v-if="selectedListing && selectedListingId" class="p-6">
+      <h2 class="mb-4 font-semibold">{{ t('publisher.releases') }}</h2>
+      <p v-if="!store.releasesByListing[selectedListingId]?.length" class="text-sm text-muted">
+        {{ t('publisher.noReleases') }}
+      </p>
+      <ul v-else class="divide-y divide-line dark:divide-slate-800">
+        <li
+          v-for="release in store.releasesByListing[selectedListingId]"
+          :key="release.releaseId"
+          class="flex cursor-pointer flex-wrap items-center gap-3 py-3 text-sm"
+          :class="currentRelease?.releaseId === release.releaseId ? 'text-accent' : ''"
+          @click="release.status === 'DRAFT' && pickRelease(release)"
+        >
+          <code class="font-semibold">v{{ release.version }}</code>
+          <Badge tone="muted">{{ release.channel }}</Badge>
+          <StateChip :status="release.status" />
+          <span class="ml-auto text-xs text-muted dark:text-slate-400">
+            {{ release.status === 'DRAFT' ? t('publisher.clickToResume') : release.createdAt?.slice(0, 10) }}
+          </span>
+        </li>
+      </ul>
     </MagicCard>
 
     <MagicCard v-if="selectedListing" class="p-6">
@@ -193,7 +318,7 @@ onMounted(() => store.load());
           <option value="beta">beta</option>
         </select>
         <input v-model="releaseForm.requiresHost" placeholder=">=4.0.0 <5.0.0" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <ShimmerButton type="submit" :disabled="busy">{{ t('common.confirm') }}</ShimmerButton>
+        <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
       </form>
 
       <div v-if="currentRelease" class="mt-6 space-y-4">

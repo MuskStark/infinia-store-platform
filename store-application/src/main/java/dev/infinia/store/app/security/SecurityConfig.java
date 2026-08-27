@@ -70,7 +70,7 @@ public class SecurityConfig {
                 new OAuth2AuthorizationServerConfigurer();
         http.securityMatcher(authorizationServer.getEndpointsMatcher())
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
-                .csrf(csrf -> csrf.ignoringRequestMatchers("/oauth2/token"))
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/oauth2/token", "/oauth2/revoke"))
                 .exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
                         new LoginUrlAuthenticationEntryPoint("/login"),
                         new MediaTypeRequestMatcher(MediaType.TEXT_HTML)))
@@ -130,6 +130,9 @@ public class SecurityConfig {
                 .redirectUri(properties.baseUrl() + "/web/callback")
                 .scope("openid")
                 .scope("profile")
+                // SAS 7.x issues refresh tokens for the authorization-code grant only
+                // when offline_access is requested (OIDC offline-access semantics).
+                .scope("offline_access")
                 .clientSettings(ClientSettings.builder().requireAuthorizationConsent(false)
                         .requireProofKey(true).build())
                 .tokenSettings(TokenSettings.builder()
@@ -153,7 +156,33 @@ public class SecurityConfig {
                         .accessTokenTimeToLive(Duration.ofMinutes(30)).build())
                 .build();
 
-        return new InMemoryRegisteredClientRepository(web, cli);
+        // FengYu desktop host: authorization code + PKCE via system browser with a
+        // loopback redirect (RFC 8252). Confidential (client_secret_post) because
+        // Spring Authorization Server 7 does not authenticate public clients on the
+        // refresh-token grant — long-lived desktop sessions need refresh tokens
+        // (design §7.2). PKCE stays required on top of the shared secret.
+        RegisteredClient.Builder desktop = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId("fengyu-desktop")
+                .clientSecret("{bcrypt}" + new BCryptPasswordEncoder()
+                        .encode(properties.desktopClientSecret()))
+                .clientAuthenticationMethod(
+                        org.springframework.security.oauth2.core.ClientAuthenticationMethod.CLIENT_SECRET_POST)
+                .authorizationGrantType(
+                        org.springframework.security.oauth2.core.AuthorizationGrantType.AUTHORIZATION_CODE)
+                .authorizationGrantType(
+                        org.springframework.security.oauth2.core.AuthorizationGrantType.REFRESH_TOKEN)
+                .scope("openid")
+                .scope("profile")
+                .clientSettings(ClientSettings.builder().requireAuthorizationConsent(false)
+                        .requireProofKey(true).build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(30))
+                        .refreshTokenTimeToLive(Duration.ofDays(30)).build());
+        for (String uri : properties.desktopRedirectUris()) {
+            desktop.redirectUri(uri);
+        }
+
+        return new InMemoryRegisteredClientRepository(web, cli, desktop.build());
     }
 
     /**

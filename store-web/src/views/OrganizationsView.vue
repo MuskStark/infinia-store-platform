@@ -141,7 +141,7 @@ async function createWebhook() {
           />
           <button
             :disabled="busy"
-            class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
+            class="shrink-0 whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
           >
             {{ t('common.confirm') }}
           </button>
@@ -215,7 +215,7 @@ async function createWebhook() {
               <option value="PUBLISHER">PUBLISHER</option>
               <option value="ORG_ADMIN">ORG_ADMIN</option>
             </select>
-            <button :disabled="busy" class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
+            <button :disabled="busy" class="shrink-0 whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
               {{ t('org.addMember') }}
             </button>
           </form>
@@ -244,7 +244,7 @@ async function createWebhook() {
               placeholder="https://ci.example.com/hooks/infinia"
               class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
             />
-            <button :disabled="busy" class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
+            <button :disabled="busy" class="shrink-0 whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
               {{ t('org.addWebhook') }}
             </button>
           </form>

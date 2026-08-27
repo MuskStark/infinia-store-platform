@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type CatalogItem } from '../api/client';
+import { api, type CatalogItem, type CatalogPage } from '../api/client';
 import {
   AnimatedGridPattern,
   BlurFade,
@@ -22,7 +22,8 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
-    items.value = await api.get<CatalogItem[]>('/api/v1/catalog?limit=24&sort=downloads');
+    const page = await api.get<CatalogPage>('/api/v1/catalog?limit=24&sort=downloads');
+    items.value = page.items ?? [];
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'error';
   } finally {

@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 
+/* Tailwind v4's default dark: variant follows prefers-color-scheme; the store SPA
+ * toggles a .dark class instead, so re-point the variant at that class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
  * Design tokens (design §12.2). Tailwind v4 theme extension + CSS variables that
  * the @infinia/magic-ui-vue port consumes.
@@ -26,6 +30,11 @@
 }
 
 .dark {
+  --color-surface: #0f172a;
+  --color-surface-muted: #020617;
+  --color-ink: #e2e8f0;
+  --color-muted: #94a3b8;
+  --color-line: #1e293b;
   --magic-foreground: 226 232 240;
   --magic-muted: 148 163 184;
   --magic-surface: 15 23 42;

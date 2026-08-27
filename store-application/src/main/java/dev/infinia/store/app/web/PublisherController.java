@@ -13,8 +13,11 @@ import dev.infinia.store.contract.type.Platform;
 import dev.infinia.store.domain.model.Listing;
 import dev.infinia.store.domain.model.Release;
 import dev.infinia.store.domain.model.UploadSessionInfo;
+import dev.infinia.store.domain.DomainException;
 import dev.infinia.store.domain.port.ListingRepository;
 import dev.infinia.store.domain.port.PublishingRepositories;
+import dev.infinia.store.domain.port.ReleaseRepository;
+import dev.infinia.store.contract.error.StoreErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -31,6 +34,7 @@ public class PublisherController {
     private final PublisherService publisher;
     private final CatalogService catalog;
     private final ListingRepository listings;
+    private final ReleaseRepository releases;
     private final PublishingRepositories.UploadSessionRepository uploads;
     private final PublishingRepositories.ReviewRepository reviews;
     private final ReviewService reviewService;
@@ -39,13 +43,14 @@ public class PublisherController {
     private final CurrentPrincipal principal;
 
     public PublisherController(PublisherService publisher, CatalogService catalog,
-            ListingRepository listings,
+            ListingRepository listings, ReleaseRepository releases,
             PublishingRepositories.UploadSessionRepository uploads,
             PublishingRepositories.ReviewRepository reviews, ReviewService reviewService,
             TicketService tickets, StoreProperties properties, CurrentPrincipal principal) {
         this.publisher = publisher;
         this.catalog = catalog;
         this.listings = listings;
+        this.releases = releases;
         this.uploads = uploads;
         this.reviews = reviews;
         this.reviewService = reviewService;
@@ -68,7 +73,9 @@ public class PublisherController {
     @PostMapping("/listings")
     public ResponseEntity<dev.infinia.store.contract.api.ListingDtos.ListingDetailDto> createListing(
             @RequestBody PublisherDtos.CreateListingRequest request) {
-        Listing listing = publisher.createListing(principal.requireUserId(), request);
+        var currentPrincipal = principal.require();
+        Listing listing = publisher.createListing(currentPrincipal.userId(),
+                currentPrincipal.hasRole("PLATFORM_ADMIN"), request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(DtoMapper.listingDetail(listing, List.of(), 0));
     }
@@ -81,6 +88,25 @@ public class PublisherController {
                 request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(DtoMapper.publisherRelease(release, listing, List.of()));
+    }
+
+    /**
+     * All releases of a listing including DRAFTs, newest first — lets the publisher
+     * center resume an interrupted draft (upload + submit) after a page reload
+     * (design §8 steps 2-4). Owner or platform admin only.
+     */
+    @GetMapping("/listings/{listingId}/releases")
+    public List<PublisherDtos.PublisherReleaseDto> releases(@PathVariable UUID listingId) {
+        Listing listing = listings.findById(listingId).orElseThrow(
+                () -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND, "Listing not found"));
+        var current = principal.require();
+        if (!current.hasRole("PLATFORM_ADMIN")) {
+            publisher.requireListingOwnerByListingId(current.userId(), listingId);
+        }
+        return releases.findByListingId(listingId).stream()
+                .sorted(java.util.Comparator.comparing((Release r) -> r.createdAt).reversed())
+                .map(r -> DtoMapper.publisherRelease(r, listing, List.of()))
+                .toList();
     }
 
     @PostMapping("/releases/{releaseId}/uploads")

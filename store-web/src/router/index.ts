@@ -2,6 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 
 /** Routes with code splitting and role-aware guards (design §12.2). */
+declare module 'vue-router' {
+  interface RouteMeta {
+    requiresAuth?: boolean;
+    requiresRole?: string[];
+  }
+}
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -43,19 +50,19 @@ const router = createRouter({
       path: '/admin',
       name: 'admin',
       component: () => import('../views/AdminView.vue'),
-      meta: { requiresAuth: true, requiresRole: 'PLATFORM_ADMIN' },
+      meta: { requiresAuth: true, requiresRole: ['PLATFORM_ADMIN'] },
     },
     {
       path: '/publisher',
       name: 'publisher',
       component: () => import('../views/PublisherView.vue'),
-      meta: { requiresAuth: true, requiresRole: 'PUBLISHER' },
+      meta: { requiresAuth: true, requiresRole: ['PUBLISHER', 'ORG_ADMIN', 'REVIEWER', 'PLATFORM_ADMIN'] },
     },
     {
       path: '/review',
       name: 'review',
       component: () => import('../views/ReviewView.vue'),
-      meta: { requiresAuth: true, requiresRole: 'REVIEWER' },
+      meta: { requiresAuth: true, requiresRole: ['REVIEWER', 'PLATFORM_ADMIN'] },
     },
     {
       path: '/signin',
@@ -79,7 +86,8 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { name: 'signin', query: { redirect: to.fullPath } };
   }
-  if (to.meta.requiresRole && !auth.roles.includes(String(to.meta.requiresRole))) {
+  const required = Array.isArray(to.meta.requiresRole) ? to.meta.requiresRole : [];
+  if (required.length > 0 && !required.some((role) => auth.roles.includes(role))) {
     return { name: 'discover' };
   }
   return true;

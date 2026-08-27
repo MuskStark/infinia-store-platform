@@ -5,7 +5,10 @@ import { api, type CatalogItem, type PublisherRelease } from '../api/client';
 export const usePublisherStore = defineStore('publisher', {
   state: () => ({
     listings: [] as CatalogItem[],
+    /** Polling cache keyed by releaseId (status refresh). */
     releases: {} as Record<string, PublisherRelease>,
+    /** All releases of a listing (incl. DRAFTs) keyed by listingId — the resume path. */
+    releasesByListing: {} as Record<string, PublisherRelease[]>,
     error: null as string | null,
   }),
   actions: {
@@ -21,6 +24,14 @@ export const usePublisherStore = defineStore('publisher', {
       this.releases[releaseId] = await api.get<PublisherRelease>(
         `/api/v1/publisher/releases/${releaseId}`,
       );
+    },
+    async loadReleases(listingId: string) {
+      this.releasesByListing[listingId] = await api.get<PublisherRelease[]>(
+        `/api/v1/publisher/listings/${listingId}/releases`,
+      );
+      for (const release of this.releasesByListing[listingId]) {
+        this.releases[release.releaseId] = release;
+      }
     },
   },
 });

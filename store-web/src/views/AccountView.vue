@@ -100,7 +100,9 @@ async function changePassword() {
             class="mt-1 w-full rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
           />
         </label>
-        <button class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
+        <button
+          class="shrink-0 self-end whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
+        >
           {{ t('account.changePassword') }}
         </button>
       </form>

@@ -43,6 +43,8 @@ store:
   upload-ticket-ttl-seconds: 900
   allowed-origins: http://localhost:8089,http://localhost:4173
   web-redirect-uri: http://localhost:8089/callback
+  desktop-redirect-uris: http://127.0.0.1:24057/callback,http://localhost:24057/callback
+  desktop-client-secret: ${STORE_DESKTOP_CLIENT_SECRET:dev-only-desktop-secret}
   cli-client-id: ${STORE_CLI_CLIENT_ID:store-cli}
   cli-client-secret: ${STORE_CLI_CLIENT_SECRET:dev-only-cli-secret}
 

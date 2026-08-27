@@ -47,6 +47,65 @@ class PublishingPipelineTest {
         return headers;
     }
 
+    /** Platform admins curate the whole catalog: they may list into namespaces they
+     *  do not personally own (bug fix: admins previously hit namespace_not_owned). */
+    @Test
+    void platformAdminCanCreateListingsInForeignNamespaces() {
+        String adminToken = AuthTestSupport.login(http(), null, "admin@infinia.local",
+                "Password123!");
+        ResponseEntity<Map> listing = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/publisher/listings", jsonAuth(adminToken), Map.of(
+                        "namespace", "official", "slug",
+                        "admin-" + UUID.randomUUID().toString().substring(0, 8),
+                        "type", "SKILL",
+                        "category", "Productivity", "tags", List.of("admin"),
+                        "name", "Admin Skill", "summary", "Created directly by the platform admin"),
+                Map.class);
+        assertEquals(201, listing.getStatusCode().value());
+    }
+
+    /** GET /publisher/listings/{id}/releases must include DRAFTs so the publisher
+     *  center can resume an interrupted upload, and must stay owner-only. */
+    @Test
+    void listingReleasesIncludeDraftsAndStayOwnerOnly() {
+        String adminToken = AuthTestSupport.login(http(), null, "admin@infinia.local",
+                "Password123!");
+        String userToken = AuthTestSupport.login(http(), null, "user@infinia.local",
+                "Password123!");
+        String slug = "resume-" + UUID.randomUUID().toString().substring(0, 8);
+
+        assertEquals(201, http().exchangeJson(HttpMethod.POST, "/api/v1/organizations",
+                jsonAuth(adminToken), Map.of("slug", slug, "name", "Resume Org"), Map.class)
+                .getStatusCode().value());
+        assertEquals(201, http().exchangeJson(HttpMethod.POST, "/api/v1/publisher/listings",
+                jsonAuth(adminToken), Map.of("namespace", slug, "slug", "tool", "type",
+                        "PLUGIN", "category", "Productivity",
+                        "name", "Resume Tool", "summary", "draft resume test"), Map.class)
+                .getStatusCode().value());
+        String listingId = listings.findByCoordinate(
+                        InfiniaCoordinate.parse("infinia://plugin/" + slug + "/tool"))
+                .orElseThrow().id.toString();
+
+        // Owner creates a draft release, then reloads the listing releases.
+        assertEquals(201, http().exchangeJson(HttpMethod.POST,
+                "/api/v1/publisher/listings/" + listingId + "/releases", jsonAuth(adminToken),
+                Map.of("version", "0.1.0", "channel", "stable"), Map.class)
+                .getStatusCode().value());
+
+        ResponseEntity<List> own = http().exchangeJson(HttpMethod.GET,
+                "/api/v1/publisher/listings/" + listingId + "/releases", jsonAuth(adminToken),
+                null, List.class);
+        assertEquals(200, own.getStatusCode().value());
+        assertEquals(1, own.getBody().size());
+        assertEquals("DRAFT", ((Map<?, ?>) own.getBody().get(0)).get("status"));
+        assertEquals("0.1.0", ((Map<?, ?>) own.getBody().get(0)).get("version"));
+
+        // A different plain user must not read another publisher's releases.
+        assertEquals(403, http().exchangeJson(HttpMethod.GET,
+                "/api/v1/publisher/listings/" + listingId + "/releases", jsonAuth(userToken),
+                null, List.class).getStatusCode().value());
+    }
+
     @Test
     void publishToCatalogEndToEnd() throws Exception {
         String publisherToken = AuthTestSupport.clientCredentialsToken(http(), "store-cli",

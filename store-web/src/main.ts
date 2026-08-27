@@ -3,8 +3,11 @@ import { createPinia } from 'pinia';
 import App from './App.vue';
 import router from './router';
 import { i18n, setLocale } from './i18n';
-import './styles/main.css';
+// Library defaults first so the app stylesheet (loaded after) can override the
+// :root tokens — including the .dark overrides. The reverse order lets the
+// library's :root beat the app's .dark rules (equal specificity), breaking dark mode.
 import '@infinia/magic-ui-vue/styles.css';
+import './styles/main.css';
 
 const app = createApp(App);
 app.use(createPinia());

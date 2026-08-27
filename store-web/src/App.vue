@@ -10,13 +10,17 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 
-const isDark = computed(() => document.documentElement.classList.contains('dark'));
+// Plain ref, not a computed over document.documentElement: the DOM is not
+// reactive, so a computed would cache its first value forever and the toggle
+// would stop working after route changes (it flips only when the stale cache
+// happens to differ from reality).
+const isDark = ref(document.documentElement.classList.contains('dark'));
 const searchQuery = ref('');
 
 function toggleTheme() {
-  const dark = !isDark.value;
-  document.documentElement.classList.toggle('dark', dark);
-  localStorage.setItem('infinia.store.theme', dark ? 'dark' : 'light');
+  isDark.value = !isDark.value;
+  document.documentElement.classList.toggle('dark', isDark.value);
+  localStorage.setItem('infinia.store.theme', isDark.value ? 'dark' : 'light');
 }
 
 function switchLocale() {
@@ -69,14 +73,14 @@ function signOut() {
             {{ t('nav.account') }}
           </RouterLink>
           <RouterLink
-            v-if="auth.roles.includes('PUBLISHER')"
+            v-if="auth.roles.some((r) => ['PUBLISHER', 'ORG_ADMIN', 'REVIEWER', 'PLATFORM_ADMIN'].includes(r))"
             class="rounded-lg px-3 py-2 hover:bg-surface-muted"
             :to="{ name: 'publisher' }"
           >
             {{ t('nav.publisher') }}
           </RouterLink>
           <RouterLink
-            v-if="auth.roles.includes('REVIEWER')"
+            v-if="auth.roles.some((r) => ['REVIEWER', 'PLATFORM_ADMIN'].includes(r))"
             class="rounded-lg px-3 py-2 hover:bg-surface-muted"
             :to="{ name: 'review' }"
           >

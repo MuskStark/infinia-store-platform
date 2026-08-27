@@ -552,6 +552,23 @@ paths:
         '409': { $ref: '#/components/responses/ProblemConflict' }
 
   /publisher/listings/{listingId}/releases:
+    get:
+      operationId: listPublisherReleases
+      tags: [Publisher]
+      summary: All releases of a listing including DRAFTs, newest first
+      description: >-
+        Lets publisher tooling resume an interrupted draft (upload + submit)
+        after a reload. Owner or platform admin only.
+      parameters:
+        - { name: listingId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Releases
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PublisherRelease' }
     post:
       operationId: createRelease
       tags: [Publisher]

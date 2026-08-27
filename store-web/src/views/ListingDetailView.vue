@@ -411,7 +411,7 @@ const installLabel = computed(() => {
           class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
         />
         <div class="flex items-center gap-2">
-          <button :disabled="!myStars" class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
+          <button :disabled="!myStars" class="shrink-0 whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
             {{ t('listing.submitReview') }}
           </button>
           <span v-if="ratingSaved" class="text-sm text-green-600 dark:text-green-400">{{ t('listing.reviewSaved') }}</span>

@@ -456,7 +456,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * All releases of a listing including DRAFTs, newest first
+         * @description Lets publisher tooling resume an interrupted draft (upload + submit) after a reload. Owner or platform admin only.
+         */
+        get: operations["listPublisherReleases"];
         put?: never;
         /** Create a draft release */
         post: operations["createRelease"];
@@ -2061,6 +2065,28 @@ export interface operations {
             };
             403: components["responses"]["ProblemForbidden"];
             409: components["responses"]["ProblemConflict"];
+        };
+    };
+    listPublisherReleases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Releases */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublisherRelease"][];
+                };
+            };
         };
     };
     createRelease: {
