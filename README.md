@@ -36,15 +36,15 @@ lives in [docs/design/STORE_PLATFORM_DESIGN.md](docs/design/STORE_PLATFORM_DESIG
 ## Quickstart (no Docker)
 
 ```bash
-# Backend on :8080 — H2 database, seeded demo data (local profile)
+# Backend on :8080 — H2 database, seeded local accounts (local profile)
 ./mvnw spring-boot:run -pl store-application -Dspring-boot.run.profiles=local
 
-# Frontend on :5173 — proxies /api and /oauth2 to :8080
+# Frontend on :8089 — proxies /api and /oauth2 to :8080
 yarn install
 yarn web
 ```
 
-Open http://localhost:5173. Seeded demo accounts (password `Password123!`):
+Open http://localhost:8089. Seeded demo accounts (password `Password123!`):
 
 | Account | Roles |
 |---|---|
@@ -53,8 +53,19 @@ Open http://localhost:5173. Seeded demo accounts (password `Password123!`):
 | `publisher@infinia.local` | PUBLISHER |
 | `user@infinia.local` | USER |
 
-The catalog is seeded with all five artifact classes, signed with a platform Ed25519 key —
-including the `official/fengyu-host` APP listing used by the update-feed endpoints.
+The local profile seeds accounts only; its catalog starts empty. Integration tests explicitly
+enable their own demo fixtures.
+
+### FengYu host sources
+
+Register native `.fyp` listings as a `FENGYU` source using
+`http://localhost:8080/api/v1/compat/fengyu/catalog`. Register Skill and MCP listings as a
+separate `CLAUDE` source using
+`http://localhost:8080/api/v1/compat/fengyu/claude-marketplace.json`.
+
+The two routes are intentionally distinct: a native FengYu plugin cannot be installed by the
+Claude agent-content installer, while Skill/MCP packages are exported as cloneable
+`.claude-plugin/plugin.json` repositories.
 
 ### Production-like stack (Docker)
 

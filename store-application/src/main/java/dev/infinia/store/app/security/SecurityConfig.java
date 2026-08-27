@@ -57,7 +57,8 @@ public class SecurityConfig {
     // Public API paths that never require authentication (design §3.1 anonymous browsing).
     private static final String[] PUBLIC_API = {
             "/api/v1/catalog", "/api/v1/listings/**", "/api/v1/resolutions",
-            "/api/v1/updates/**", "/api/v1/auth/register", "/api/v1/blobs/**",
+            "/api/v1/updates/**", "/api/v1/auth/register", "/api/v1/auth/login",
+            "/api/v1/blobs/**", "/api/v1/compat/**",
             "/api/v1/releases/*/download-ticket"
     };
 
@@ -260,7 +261,7 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource(StoreProperties properties) {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(properties.allowedOrigins().isEmpty()
-                ? List.of("http://localhost:5173") : properties.allowedOrigins());
+                ? List.of("http://localhost:8089") : properties.allowedOrigins());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Location", "ETag", "Idempotency-Key"));

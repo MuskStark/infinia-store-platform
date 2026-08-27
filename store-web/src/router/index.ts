@@ -34,6 +34,18 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/organizations',
+      name: 'organizations',
+      component: () => import('../views/OrganizationsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/admin',
+      name: 'admin',
+      component: () => import('../views/AdminView.vue'),
+      meta: { requiresAuth: true, requiresRole: 'PLATFORM_ADMIN' },
+    },
+    {
       path: '/publisher',
       name: 'publisher',
       component: () => import('../views/PublisherView.vue'),

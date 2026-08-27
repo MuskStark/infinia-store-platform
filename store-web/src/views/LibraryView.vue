@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { api, type InstalledItem } from '../api/client';
 import { useLibraryStore } from '../stores/library';
 import { Badge, BlurFade } from '@infinia/magic-ui-vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -8,13 +9,23 @@ import LoadingGrid from '../components/LoadingGrid.vue';
 
 const { t } = useI18n();
 const library = useLibraryStore();
-onMounted(() => library.load());
+const installed = ref<InstalledItem[]>([]);
+onMounted(async () => {
+  await library.load();
+  installed.value = await api.get<InstalledItem[]>('/api/v1/me/installed');
+});
+
+const updates = computed(() => installed.value.filter((item) => item.updateAvailable));
 
 /** infinia://plugin/official/markdown → /listing/official/markdown */
 function favoriteRoute(favorite: { listingCoordinate?: string; name?: string }) {
   const coordinate = favorite.listingCoordinate ?? '';
   const parts = coordinate.replace('infinia://', '').split('/'); // type namespace slug
   return parts.length >= 3 ? `/listing/${parts[1]}/${parts[2]}` : '/browse';
+}
+
+function itemRoute(item: InstalledItem) {
+  return favoriteRoute({ listingCoordinate: item.coordinate });
 }
 </script>
 
@@ -24,6 +35,51 @@ function favoriteRoute(favorite: { listingCoordinate?: string; name?: string }) 
 
     <LoadingGrid v-if="library.loading" />
     <template v-else>
+      <section aria-labelledby="updates-heading">
+        <h2 id="updates-heading" class="mb-3 text-lg font-semibold">{{ t('library.updates') }}</h2>
+        <EmptyState v-if="!updates.length" :title="t('library.noUpdates')" />
+        <BlurFade v-else>
+          <ul class="space-y-2 text-sm">
+            <li
+              v-for="item in updates"
+              :key="item.coordinate"
+              class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40"
+            >
+              <RouterLink :to="itemRoute(item)" class="font-medium hover:text-accent">
+                <code class="text-xs">{{ item.coordinate }}</code>
+              </RouterLink>
+              <div class="flex items-center gap-2 text-xs">
+                <Badge tone="muted">{{ item.version }} → {{ item.latestVersion }}</Badge>
+                <RouterLink :to="itemRoute(item)" class="rounded-lg bg-accent px-3 py-1.5 font-semibold text-white">
+                  {{ t('library.updateAction') }}
+                </RouterLink>
+              </div>
+            </li>
+          </ul>
+        </BlurFade>
+      </section>
+
+      <section aria-labelledby="installed-heading">
+        <h2 id="installed-heading" class="mb-3 text-lg font-semibold">{{ t('library.installed') }}</h2>
+        <EmptyState v-if="!installed.length" :title="t('library.noInstalled')" />
+        <ul v-else class="space-y-2 text-sm">
+          <li
+            v-for="item in installed"
+            :key="item.coordinate"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line p-3 dark:border-slate-800"
+          >
+            <RouterLink :to="itemRoute(item)" class="font-medium hover:text-accent">
+              <code class="text-xs">{{ item.coordinate }}</code>
+            </RouterLink>
+            <div class="flex items-center gap-2">
+              <Badge tone="muted">v{{ item.version }}</Badge>
+              <Badge v-if="item.type" tone="accent">{{ t(`type.${item.type}`) }}</Badge>
+              <Badge v-if="item.updateAvailable" tone="danger">{{ t('library.updates') }}</Badge>
+            </div>
+          </li>
+        </ul>
+      </section>
+
       <section aria-labelledby="favorites-heading">
         <h2 id="favorites-heading" class="mb-3 text-lg font-semibold">{{ t('library.favorites') }}</h2>
         <EmptyState v-if="!library.library?.favorites?.length" :title="t('library.noFavorites')" />

@@ -58,6 +58,12 @@ public final class Http {
                 new HttpEntity<>(headers == null ? new HttpHeaders() : headers), type);
     }
 
+    /** Binary GET — for package downloads that must not be decoded as text. */
+    public ResponseEntity<byte[]> getBytes(String path) {
+        return raw.exchange(url(path), HttpMethod.GET,
+                new HttpEntity<>(new HttpHeaders()), byte[].class);
+    }
+
     public ResponseEntity<String> postForm(String path, Map<String, String> form,
             HttpHeaders headers) {
         StringBuilder body = new StringBuilder();

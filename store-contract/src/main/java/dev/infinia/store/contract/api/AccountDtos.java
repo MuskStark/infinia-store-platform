@@ -9,6 +9,10 @@ public final class AccountDtos {
 
     public record RegisterRequest(String email, String password, String displayName) {}
 
+    public record LoginRequest(String email, String password) {}
+
+    public record LoginResponse(String accessToken, PublicUserDto user) {}
+
     public record PublicUserDto(
             String userId,
             String email,
@@ -18,6 +22,20 @@ public final class AccountDtos {
     }
 
     public record UpdateProfileRequest(String displayName) {}
+
+    public record ChangePasswordRequest(String currentPassword, String newPassword) {}
+
+    public record ChangePasswordResult(boolean succeeded, String message) {}
+
+    /** A listing the user has installed (latest successful install telemetry per coordinate). */
+    public record InstalledItemDto(
+            String coordinate,
+            String version,
+            String type,
+            String latestVersion,
+            String latestChannel,
+            boolean updateAvailable) {
+    }
 
     public record SessionDto(
             String sessionId,

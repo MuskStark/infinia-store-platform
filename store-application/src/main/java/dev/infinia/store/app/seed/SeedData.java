@@ -67,13 +67,16 @@ public class SeedData {
     private final CatalogService catalog;
     private final PlatformSigningService signing;
     private final boolean enabled;
+    /** Demo listings/releases; accounts always seed (tests depend on the catalog). */
+    private final boolean demoContent;
 
     public SeedData(IdentityRepositories.UserRepository users,
             IdentityRepositories.CredentialRepository credentials,
             IdentityRepositories.NamespaceRepository namespaces,
             ListingRepository listings, ReleaseRepository releases, PasswordHasher hasher,
             BlobStorage blobs, CatalogService catalog, PlatformSigningService signing,
-            @Value("${store.seed.enabled:false}") boolean enabled) {
+            @Value("${store.seed.enabled:false}") boolean enabled,
+            @Value("${store.seed.demo-content:false}") boolean demoContent) {
         this.users = users;
         this.credentials = credentials;
         this.namespaces = namespaces;
@@ -84,12 +87,17 @@ public class SeedData {
         this.catalog = catalog;
         this.signing = signing;
         this.enabled = enabled;
+        this.demoContent = demoContent;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     @Transactional
     public void seed() {
-        if (!enabled || users.findByEmailNormalized(ADMIN_EMAIL).isPresent()) {
+        if (!enabled) {
+            return;
+        }
+        if (users.findByEmailNormalized(ADMIN_EMAIL).isPresent()) {
+            repairDemoPasswords();
             return;
         }
         Instant now = Instant.now();
@@ -101,6 +109,13 @@ public class SeedData {
         user(CI_EMAIL, "CI Service Account", Set.of(UserRole.USER, UserRole.PUBLISHER,
                 UserRole.REVIEWER), now);
         user(USER_EMAIL, "Demo User", Set.of(UserRole.USER), now);
+
+        if (!demoContent) {
+            // Accounts only — local/dev runs stay clean for real content
+            // (tests opt into isolated catalog fixtures explicitly).
+            log.info("Seeded store accounts (demo content disabled)");
+            return;
+        }
 
         Namespace official = namespace("official", publisher.id, now);
         namespace("summer", publisher.id, now);
@@ -136,16 +151,23 @@ public class SeedData {
                 "Markdown Tools", "Render and convert Markdown inside FengYu.",
                 "Productivity", List.of("markdown", "docs"), Channel.STABLE, now);
         byte[] fyp = zipOf(new String[][] {
-                {"plugin.json", """
-                        {"id":"official.markdown","name":"Markdown Tools","version":"2.4.0",
-                         "entry":"index.js","permissions":[
-                           {"permissionId":"fs.read","scope":"fs:~/.fengyu/plugins/markdown","required":true}
-                         ]}
+                {"manifest.json", """
+                        {"schemaVersion":2,"id":"official.markdown","name":"Markdown Tools",
+                         "description":"Render and convert Markdown inside FengYu.",
+                         "author":"official","icon":"language-markdown","category":"Productivity",
+                         "version":"2.4.0","ui":{"entry":"index.js"},
+                         "permissions":["files.read"],
+                         "engines":{"fengyu":">=4.0.0 <5.0.0"}}
                         """},
                 {"index.js", "export function render(md){ return md; }"},
                 {"README.md", "# Markdown Tools\nRenders Markdown."}});
-        publish(listing, "2.4.0", Channel.STABLE, ">=4.0.0 <5.0.0", 100, now,
-                packageArtifact(listing, "2.4.0", "markdown-2.4.0.fyp", fyp, now));
+        Release markdown = draft(listing, "2.4.0", Channel.STABLE, ">=4.0.0 <5.0.0", now);
+        markdown.rolloutPercent = 100;
+        markdown.artifacts = new ArrayList<>(List.of(
+                packageArtifact(listing, "2.4.0", "markdown-2.4.0.fyp", fyp, now)));
+        markdown.permissions = List.of(new Release.PermissionDecl("files.read",
+                "fs:~/.fengyu/plugins/markdown", true, "Reads markdown documents"));
+        finish(markdown, listing, now);
     }
 
     private void seedEmailPlugin(StoreUser publisher, Instant now) throws IOException {
@@ -153,22 +175,38 @@ public class SeedData {
                 "Email Connector", "SMTP/IMAP connector used by mail flows.",
                 "Communication", List.of("email"), Channel.STABLE, now);
         byte[] fyp = zipOf(new String[][] {
-                {"plugin.json", """
-                        {"id":"official.email","name":"Email Connector","version":"2.0.1","entry":"index.js",
-                         "permissions":[
-                           {"permissionId":"net.smtp","scope":"network:host:smtp.local","required":true}
-                         ]}
+                {"manifest.json", """
+                        {"schemaVersion":2,"id":"official.email","name":"Email Connector",
+                         "description":"SMTP/IMAP connector used by mail flows.",
+                         "author":"official","icon":"email-outline","category":"Communication",
+                         "version":"2.0.1","ui":{"entry":"index.js"},
+                         "permissions":["network","network.email"],
+                         "engines":{"fengyu":">=4.0.0 <5.0.0"}}
                         """},
                 {"index.js", "export function send(mail){ return true; }"}});
-        publish(listing, "2.0.1", Channel.STABLE, ">=4.0.0 <5.0.0", 100, now,
-                packageArtifact(listing, "2.0.1", "email-2.0.1.fyp", fyp, now));
+        Release email = draft(listing, "2.0.1", Channel.STABLE, ">=4.0.0 <5.0.0", now);
+        email.rolloutPercent = 100;
+        email.artifacts = new ArrayList<>(List.of(
+                packageArtifact(listing, "2.0.1", "email-2.0.1.fyp", fyp, now)));
+        email.permissions = List.of(new Release.PermissionDecl("network",
+                "network:smtp+imap", true, "Sends and reads mail"),
+                new Release.PermissionDecl("network.email",
+                        "network:host:smtp.local", true, "Mail transport"));
+        finish(email, listing, now);
     }
 
     private void seedSkill(StoreUser publisher, Instant now) throws IOException {
         Listing listing = listing(publisher, ListingType.SKILL, "official", "pdf-tools",
                 "PDF Toolkit", "Extract, merge and summarize PDF documents.",
                 "Documents", List.of("pdf", "documents"), Channel.STABLE, now);
-        byte[] fys = zipOf(new String[][] {{"SKILL.md", """
+        byte[] fys = zipOf(new String[][] {
+                {"manifest.json", """
+                        {"schemaVersion":1,"id":"official.pdf-tools","name":"PDF Toolkit",
+                         "description":"Extract, merge and summarize PDF documents",
+                         "version":"1.3.0","author":"official","icon":"file-pdf-box",
+                         "homepage":null,"official":false}
+                        """},
+                {"SKILL.md", """
                 ---
                 name: pdf-tools
                 description: Extract, merge and summarize PDF documents
@@ -234,6 +272,31 @@ public class SeedData {
 
     // ---- helpers ----
 
+    /**
+     * Existing local databases may predate a change to the hashing scheme; re-hash
+     * the five demo credentials when they no longer match DEMO_PASSWORD so direct
+     * login keeps working (idempotent, demo accounts only).
+     */
+    private void repairDemoPasswords() {
+        for (String email : List.of(ADMIN_EMAIL, REVIEWER_EMAIL, PUBLISHER_EMAIL, CI_EMAIL,
+                USER_EMAIL)) {
+            users.findByEmailNormalized(email).ifPresent(user -> {
+                Credential credential = credentials
+                        .findByUserIdAndType(user.id, Credential.CredentialType.PASSWORD)
+                        .orElse(null);
+                if (credential == null || !hasher.matches(DEMO_PASSWORD, credential.secretHash())) {
+                    credentials.save(new Credential(
+                            credential == null ? dev.infinia.store.domain.service.UuidV7.generate()
+                                    : credential.id(),
+                            user.id, Credential.CredentialType.PASSWORD,
+                            hasher.hash(DEMO_PASSWORD),
+                            credential == null ? Instant.now() : credential.createdAt()));
+                    log.info("Re-hashed demo credential for {}", email);
+                }
+            });
+        }
+    }
+
     private StoreUser user(String email, String name, Set<UserRole> roles, Instant now) {
         StoreUser user = new StoreUser(UuidV7.generate(), email, email, name, roles, "ACTIVE",
                 now);
@@ -279,12 +342,13 @@ public class SeedData {
         return listing;
     }
 
-    private void publish(Listing listing, String version, Channel channel, String requiresHost,
+    private Release publish(Listing listing, String version, Channel channel, String requiresHost,
             int rollout, Instant now, Release.ArtifactInfo... artifacts) {
         Release release = draft(listing, version, channel, requiresHost, now);
         release.rolloutPercent = rollout;
         release.artifacts = new ArrayList<>(List.of(artifacts));
         finish(release, listing, now);
+        return release;
     }
 
     private Release draft(Listing listing, String version, Channel channel, String requiresHost,

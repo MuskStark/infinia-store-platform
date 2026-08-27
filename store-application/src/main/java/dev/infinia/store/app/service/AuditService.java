@@ -6,6 +6,7 @@ import dev.infinia.store.domain.service.UuidV7;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.List;
 
 /** Appends non-repudiable audit events (design §14.3). */
 @Service
@@ -21,5 +22,10 @@ public class AuditService {
             String resourceId, String before, String after, String traceId) {
         auditEvents.append(new AuditRecord(UuidV7.generate(), actorType, actorId, action,
                 resourceType, resourceId, before, after, null, traceId, Instant.now()));
+    }
+
+    /** Recent append-only events, newest first, optionally scoped to a resource type. */
+    public List<AuditRecord> recent(int limit, String resourceType) {
+        return auditEvents.findRecent(limit, resourceType);
     }
 }

@@ -12,15 +12,21 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
-/** Registration (design §7.4). */
+/** Registration and direct login (design §7.4). */
 @RestController
 @RequestMapping("/api/v1/auth")
 class AuthController {
 
     private final AccountService accounts;
+    private final dev.infinia.store.app.security.LocalTokenService tokens;
+    private final dev.infinia.store.app.service.AuditService audit;
 
-    AuthController(AccountService accounts) {
+    AuthController(AccountService accounts,
+            dev.infinia.store.app.security.LocalTokenService tokens,
+            dev.infinia.store.app.service.AuditService audit) {
         this.accounts = accounts;
+        this.tokens = tokens;
+        this.audit = audit;
     }
 
     @PostMapping("/register")
@@ -29,6 +35,20 @@ class AuthController {
         StoreUser user = accounts.register(request.email(), request.password(),
                 request.displayName());
         return ResponseEntity.status(HttpStatus.CREATED).body(accounts.toDto(user));
+    }
+
+    /**
+     * Direct email + password login for the store SPA: verifies the credential,
+     * registers a revocable session and returns a signed access token
+     * (same claims and key as the OAuth authorization server issues).
+     */
+    @PostMapping("/login")
+    public AccountDtos.LoginResponse login(@RequestBody AccountDtos.LoginRequest request) {
+        StoreUser user = accounts.authenticate(request.email(), request.password());
+        String accessToken = tokens.mint(user, "store-web");
+        audit.record("USER", user.id.toString(), "auth.login", "USER", user.id.toString(),
+                null, "password", null);
+        return new AccountDtos.LoginResponse(accessToken, accounts.toDto(user));
     }
 }
 
@@ -56,6 +76,15 @@ class MeController {
         UUID userId = principal.requireUserId();
         accounts.updateProfile(userId, body.displayName());
         return accounts.toDto(accounts.userOrThrow(userId));
+    }
+
+    /** Security page: change password after re-authentication (design §7.4 安全). */
+    @PutMapping("/password")
+    public AccountDtos.ChangePasswordResult changePassword(
+            @RequestBody AccountDtos.ChangePasswordRequest body) {
+        accounts.changePassword(principal.requireUserId(), body.currentPassword(),
+                body.newPassword());
+        return new AccountDtos.ChangePasswordResult(true, "Password updated");
     }
 
     @GetMapping("/sessions")
@@ -161,6 +190,20 @@ class LibraryController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeFavorite(@PathVariable UUID listingId) {
         library.removeFavorite(principal.requireUserId(), listingId);
+    }
+
+    /** Installed listings derived from telemetry (design §12.4 我的库: 已安装). */
+    @GetMapping("/installed")
+    public List<AccountDtos.InstalledItemDto> installed() {
+        return library.installed(principal.requireUserId());
+    }
+
+    /** Installed listings with a newer published release (design §12.4 我的库: 可更新). */
+    @GetMapping("/updates")
+    public List<AccountDtos.InstalledItemDto> updates() {
+        return library.installed(principal.requireUserId()).stream()
+                .filter(AccountDtos.InstalledItemDto::updateAvailable)
+                .toList();
     }
 }
 

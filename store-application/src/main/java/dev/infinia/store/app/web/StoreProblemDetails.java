@@ -82,6 +82,21 @@ public class StoreProblemDetails {
         return problem(StoreErrorCode.VALIDATION_FAILED, e.getMessage(), request);
     }
 
+    /**
+     * Binary PUTs mislabelled as form data (curl --data-binary defaults to
+     * application/x-www-form-urlencoded) used to explode in the form filter as a
+     * 500. Surface an actionable 400 instead — package uploads must use
+     * application/octet-stream.
+     */
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<ProblemDetail> unreadable(
+            org.springframework.http.converter.HttpMessageNotReadableException e,
+            HttpServletRequest request) {
+        String hint = "Request body could not be read. For package uploads send "
+                + "Content-Type: application/octet-stream.";
+        return problem(StoreErrorCode.VALIDATION_FAILED, hint, request);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> unexpected(Exception e, HttpServletRequest request) {
         log.error("Unhandled error on {} {}", request.getMethod(), request.getRequestURI(), e);

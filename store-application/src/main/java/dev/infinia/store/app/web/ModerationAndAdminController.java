@@ -1,0 +1,99 @@
+package dev.infinia.store.app.web;
+
+import dev.infinia.store.app.service.AuditService;
+import dev.infinia.store.app.service.CatalogService;
+import dev.infinia.store.app.service.CurrentPrincipal;
+import dev.infinia.store.app.service.ModerationService;
+import dev.infinia.store.contract.api.ReviewDtos;
+import dev.infinia.store.domain.model.Listing;
+import dev.infinia.store.domain.model.ListingReport;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.UUID;
+
+/** Abuse reports filed by signed-in users (design §12.4 举报). */
+@RestController
+@RequestMapping("/api/v1")
+class ReportsController {
+
+    private final ModerationService moderation;
+    private final CatalogService catalog;
+    private final CurrentPrincipal principal;
+
+    ReportsController(ModerationService moderation, CatalogService catalog,
+            CurrentPrincipal principal) {
+        this.moderation = moderation;
+        this.catalog = catalog;
+        this.principal = principal;
+    }
+
+    @PostMapping("/reports")
+    public ResponseEntity<ReviewDtos.ReportDto> report(@RequestBody ReportBody body) {
+        UUID reporterId = principal.requireUserId();
+        Listing listing = catalog.listingOrThrow(
+                dev.infinia.store.contract.coordinate.InfiniaCoordinate.parse(body.coordinate()));
+        ListingReport record = moderation.report(reporterId, listing, body.reason(), body.details());
+        return ResponseEntity.status(HttpStatus.CREATED).body(toDto(record, listing));
+    }
+
+    record ReportBody(String coordinate, String reason, String details) {}
+
+    static ReviewDtos.ReportDto toDto(ListingReport record, Listing listing) {
+        return new ReviewDtos.ReportDto(record.id().toString(),
+                listing == null ? record.listingId().toString() : listing.coordinate().toString(),
+                listing == null ? null : listing.name("en"), record.reason(), record.details(),
+                record.status(), record.resolutionNote(), record.createdAt().toString(),
+                record.resolvedAt() == null ? null : record.resolvedAt().toString());
+    }
+}
+
+/**
+ * Platform-admin console (design §12.4 管理): report queue resolution and the audit
+ * trail reader. Yank/quarantine live in {@link ReviewController}.
+ */
+@RestController
+@RequestMapping("/api/v1/admin")
+class AdminController {
+
+    private final ModerationService moderation;
+    private final AuditService audit;
+    private final CurrentPrincipal principal;
+
+    AdminController(ModerationService moderation, AuditService audit,
+            CurrentPrincipal principal) {
+        this.moderation = moderation;
+        this.audit = audit;
+        this.principal = principal;
+    }
+
+    @GetMapping("/reports")
+    public List<ReviewDtos.ReportDto> reports(@RequestParam(required = false) String status) {
+        return moderation.reportQueue(status).stream()
+                .map(r -> ReportsController.toDto(r, moderation.listingOfReport(r)))
+                .toList();
+    }
+
+    @PostMapping("/reports/{reportId}/resolution")
+    public ReviewDtos.ReportDto resolve(@PathVariable UUID reportId,
+            @RequestBody ReviewDtos.ResolveReportRequest request) {
+        ListingReport resolved = moderation.resolveReport(principal.requireUserId(), reportId,
+                request.resolution(), request.note());
+        return ReportsController.toDto(resolved, moderation.listingOfReport(resolved));
+    }
+
+    @GetMapping("/audit-events")
+    public List<ReviewDtos.AuditEventDto> auditEvents(
+            @RequestParam(required = false) String resourceType,
+            @RequestParam(required = false, defaultValue = "100") Integer limit) {
+        int bounded = limit == null ? 100 : Math.clamp(limit, 1, 200);
+        return audit.recent(bounded, resourceType).stream()
+                .map(e -> new ReviewDtos.AuditEventDto(e.id().toString(), e.actorType(),
+                        e.actorId(), e.action(), e.resourceType(), e.resourceId(),
+                        e.beforeSummary(), e.afterSummary(), e.traceId(),
+                        e.occurredAt().toString()))
+                .toList();
+    }
+}

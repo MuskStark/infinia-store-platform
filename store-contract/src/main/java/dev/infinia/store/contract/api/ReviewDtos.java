@@ -40,4 +40,58 @@ public final class ReviewDtos {
             String createdAt) {}
 
     public record CreateWebhookRequest(String url, List<String> events) {}
+
+    public record OrganizationMemberDto(
+            String userId,
+            String email,
+            String displayName,
+            String role,
+            String joinedAt,
+            boolean owner) {}
+
+    public record AddMemberRequest(String email, String role) {}
+
+    public record ChangeMemberRoleRequest(String role) {}
+
+    public record AuditEventDto(
+            String eventId,
+            String actorType,
+            String actorId,
+            String action,
+            String resourceType,
+            String resourceId,
+            String beforeSummary,
+            String afterSummary,
+            String traceId,
+            String occurredAt) {}
+
+    public record ReportDto(
+            String reportId,
+            String listingCoordinate,
+            String listingName,
+            String reason,
+            String details,
+            String status,
+            String resolutionNote,
+            String createdAt,
+            String resolvedAt) {}
+
+    public record ResolveReportRequest(String resolution, String note) {}
+
+    public record UpstreamDto(
+            String upstreamId,
+            String name,
+            String marketplaceUrl,
+            String targetNamespace,
+            boolean enabled,
+            String lastSyncAt,
+            Boolean lastSyncOk,
+            String lastError) {}
+
+    public record UpstreamSyncResultDto(
+            String upstream,
+            int imported,
+            int skipped,
+            int failed,
+            List<String> errors) {}
 }

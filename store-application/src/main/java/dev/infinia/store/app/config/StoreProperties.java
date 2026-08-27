@@ -31,7 +31,7 @@ public record StoreProperties(
         uploadTicketTtlSeconds = uploadTicketTtlSeconds <= 0 ? 900 : uploadTicketTtlSeconds;
         allowedOrigins = allowedOrigins == null ? java.util.List.of() : allowedOrigins;
         webRedirectUri = webRedirectUri == null || webRedirectUri.isBlank()
-                ? "http://localhost:5173/callback" : webRedirectUri;
+                ? "http://localhost:8089/callback" : webRedirectUri;
         cliClientId = cliClientId == null || cliClientId.isBlank() ? "store-cli" : cliClientId;
         cliClientSecret = cliClientSecret == null || cliClientSecret.isBlank()
                 ? "dev-only-cli-secret" : cliClientSecret;

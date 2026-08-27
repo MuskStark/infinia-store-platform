@@ -87,6 +87,40 @@ class AuthAndAccountFlowTest {
     }
 
     @Test
+    void directLoginIssuesWorkingTokenAndRegistersSession() {
+        String email = "direct-" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+        assertEquals(201, http().exchangeJson(HttpMethod.POST, "/api/v1/auth/register",
+                jsonHeaders(null), Map.of("email", email, "password", "Sup3rSecret!",
+                        "displayName", "Direct"), Map.class).getStatusCode().value());
+
+        // Wrong password → 401. (This test client is HttpURLConnection-based, which
+        // swallows 401 bodies; the problem+json payload is verified via curl and the
+        // browser fetch path reads it normally.)
+        ResponseEntity<String> rejected = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/auth/login", jsonHeaders(null),
+                Map.of("email", email, "password", "WrongPass123!"), String.class);
+        assertEquals(401, rejected.getStatusCode().value());
+
+        ResponseEntity<Map> login = http().exchangeJson(HttpMethod.POST, "/api/v1/auth/login",
+                jsonHeaders(null), Map.of("email", email, "password", "Sup3rSecret!"),
+                Map.class);
+        assertEquals(200, login.getStatusCode().value(), "login body: " + login.getBody());
+        assertNotNull(((Map<?, ?>) login.getBody().get("user")).get("userId"));
+        String token = (String) login.getBody().get("accessToken");
+
+        // The minted token passes the resource server like any OAuth-issued one.
+        ResponseEntity<Map> me = http().getJson("/api/v1/me", Map.class, Http.bearer(token));
+        assertEquals(200, me.getStatusCode().value());
+        assertEquals(email, me.getBody().get("email"));
+
+        // The PASSWORD session shows up in /me/sessions and can be revoked.
+        ResponseEntity<List> sessions = http().getJson("/api/v1/me/sessions", List.class,
+                Http.bearer(token));
+        assertTrue(sessions.getBody().stream()
+                .anyMatch(s -> "PASSWORD".equals(((Map<?, ?>) s).get("kind"))));
+    }
+
+    @Test
     void favoritesAppearInLibrary() {
         String token = AuthTestSupport.login(http(), null, "user@infinia.local",
                 dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);

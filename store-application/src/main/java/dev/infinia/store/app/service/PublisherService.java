@@ -162,11 +162,22 @@ public class PublisherService {
                 throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
                         "requiresHost is not a valid SemVer range");
             }
+            // The host's range parser rejects npm shorthands — gate them at publish
+            // time so approved releases always install (FengYuHostRules mirror).
+            if (!dev.infinia.store.scanner.FengYuHostRules
+                    .hostCompatibleRange(request.requiresHost())) {
+                throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                        "requiresHost must use host-compatible range syntax "
+                                + "(>= <= > < = only; no ^ ~ x *)");
+            }
         }
         if (releases.existsByListingIdAndStatus(listing.id, request.version(),
                 List.of(ReleaseStatus.DRAFT, ReleaseStatus.UPLOADING, ReleaseStatus.SCANNING,
                         ReleaseStatus.IN_REVIEW, ReleaseStatus.CHANGES_REQUESTED,
-                        ReleaseStatus.APPROVED, ReleaseStatus.PUBLISHED, ReleaseStatus.QUARANTINED))) {
+                        ReleaseStatus.APPROVED, ReleaseStatus.PUBLISHED, ReleaseStatus.QUARANTINED,
+                        // Rejected versions keep the unique index slot too — the
+                        // publisher must re-submit under a new version, not clash on 500.
+                        ReleaseStatus.REJECTED))) {
             throw new DomainException(StoreErrorCode.DUPLICATE_VERSION,
                     "Version " + request.version() + " already exists for this listing");
         }

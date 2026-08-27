@@ -81,6 +81,26 @@ public class OrganizationAdapter implements IdentityRepositories.OrganizationRep
     }
 
     @Override
+    public void removeMember(UUID organizationId, UUID userId) {
+        members.findByOrganizationIdAndUserId(organizationId, userId)
+                .ifPresent(members::delete);
+    }
+
+    @Override
+    public Optional<UserRole> findMemberRole(UUID organizationId, UUID userId) {
+        return members.findByOrganizationIdAndUserId(organizationId, userId)
+                .map(m -> UserRole.valueOf(m.role));
+    }
+
+    @Override
+    public void updateMemberRole(UUID organizationId, UUID userId, UserRole role) {
+        members.findByOrganizationIdAndUserId(organizationId, userId).ifPresent(e -> {
+            e.role = role.name();
+            members.save(e);
+        });
+    }
+
+    @Override
     public List<Organization.Member> findMembers(UUID organizationId) {
         return members.findByOrganizationId(organizationId).stream()
                 .map(m -> new Organization.Member(m.organizationId, m.userId,

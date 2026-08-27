@@ -41,11 +41,19 @@ store:
   max-upload-bytes: 104857600
   download-ticket-ttl-seconds: 300
   upload-ticket-ttl-seconds: 900
-  allowed-origins: http://localhost:5173,http://localhost:4173
-  web-redirect-uri: http://localhost:5173/callback
+  allowed-origins: http://localhost:8089,http://localhost:4173
+  web-redirect-uri: http://localhost:8089/callback
   cli-client-id: ${STORE_CLI_CLIENT_ID:store-cli}
   cli-client-secret: ${STORE_CLI_CLIENT_SECRET:dev-only-cli-secret}
 
+---
+spring:
+  config:
+    activate:
+      on-profile: local,dev
+store:
+  seed:
+    demo-content: false
 ---
 # H2 profile for local runs without Docker: `--spring.profiles.active=local`
 spring:
@@ -63,7 +71,7 @@ spring:
       enabled: true
 
 ---
-# Seeds demo data for local development.
+# Seeds local/test accounts; demo catalog fixtures remain opt-in.
 spring:
   config:
     activate:

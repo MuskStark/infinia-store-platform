@@ -32,7 +32,7 @@ public class PackageScanner {
         result.mimeType = sniffMime(content);
         try {
             switch (listingType.toUpperCase(Locale.ROOT)) {
-                case "PLUGIN" -> scanZipPackage(content, expectedVersion, result, "plugin.json",
+                case "PLUGIN" -> scanZipPackage(content, expectedVersion, result, "manifest.json",
                         "PLUGIN");
                 case "SKILL" -> scanSkill(content, expectedVersion, result);
                 case "FLOW" -> scanFlow(content, expectedVersion, result);
@@ -71,8 +71,31 @@ public class PackageScanner {
         }
         result.manifestName = text(json, "name");
         result.manifestVersion = text(json, "version");
-        if (result.manifestName == null) {
-            result.error("plugin.manifest-field", "Manifest field 'name' is required");
+
+        // ---- rules mirrored from the FengYu host's PluginManifest validator ----
+        if (json.path("schemaVersion").asInt(-1) != FengYuHostRules.PLUGIN_SCHEMA_VERSION) {
+            result.error("plugin.schema-version", "plugin.json schemaVersion must be "
+                    + FengYuHostRules.PLUGIN_SCHEMA_VERSION);
+        }
+        String id = text(json, "id");
+        if (id == null || !FengYuHostRules.ID_PATTERN.matcher(id).matches()) {
+            result.error("plugin.manifest-field",
+                    "plugin.json 'id' must be a lowercase reverse-domain identifier");
+        } else if (id.startsWith(FengYuHostRules.OFFICIAL_NAMESPACE)) {
+            result.error("plugin.namespace-reserved",
+                    "id must not use the reserved " + FengYuHostRules.OFFICIAL_NAMESPACE
+                            + "* namespace");
+        }
+        if (Boolean.TRUE.equals(json.path("official").asBoolean(false))) {
+            result.error("plugin.official-reserved",
+                    "Only FengYu-trusted publishers may declare official:true");
+        }
+        for (String required : new String[] {"name", "description", "author", "icon",
+                "category", "version"}) {
+            if (isBlank(text(json, required))) {
+                result.error("plugin.manifest-field",
+                        "Manifest field '" + required + "' is required by the host");
+            }
         }
         if (result.manifestVersion == null) {
             result.error("plugin.manifest-field", "Manifest field 'version' is required");
@@ -81,58 +104,101 @@ public class PackageScanner {
                     "Manifest version " + result.manifestVersion + " does not match release version "
                             + expectedVersion);
         }
-        if (json.has("entry")) {
-            String entry = text(json, "entry");
-            if (entry != null && (files.get(entry) == null)) {
-                result.error("plugin.entry-missing", "Declared entry '" + entry + "' is missing");
-            }
+        // The host resolves the UI through ui.entry (not the legacy entry field).
+        JsonNode uiEntry = json.path("ui").path("entry");
+        if (!uiEntry.isTextual() || isBlank(uiEntry.asText())
+                || files.get(uiEntry.asText()) == null) {
+            result.error("plugin.ui-entry-missing",
+                    "ui.entry must be declared and present inside the package");
         }
         JsonNode permissions = json.get("permissions");
         if (permissions != null && permissions.isArray()) {
+            // Host format: array of permission tokens from a fixed allowlist.
             for (JsonNode p : permissions) {
-                if (p.isObject()) {
-                    result.extractedPermissions.add(mapper.convertValue(p, Map.class));
+                if (!p.isTextual()) {
+                    result.error("plugin.permissions-format",
+                            "permissions must be an array of strings (host contract)");
+                    break;
+                }
+                String token = p.asText();
+                if (!FengYuHostRules.isPluginPermissionAllowed(token)) {
+                    result.error("plugin.permission-not-allowed",
+                            "Permission '" + token + "' is not in the host allowlist "
+                                    + FengYuHostRules.PLUGIN_PERMISSIONS);
+                } else {
+                    result.extractedPermissions.add(Map.of("permissionId", token));
                 }
             }
+        }
+        String engines = text(json.path("engines"), "fengyu");
+        if (engines != null && !FengYuHostRules.hostCompatibleRange(engines)) {
+            result.error("plugin.engines-syntax",
+                    "engines.fengyu must use host-compatible range syntax "
+                            + "(>= <= > < = only; no ^ ~ x *)");
+        }
+        String backend = text(json.path("backend"), "runtime");
+        if (backend != null && !FengYuHostRules.pluginBackendRuntimes().contains(backend)) {
+            result.error("plugin.backend-runtime",
+                    "backend.runtime must be one of " + FengYuHostRules.pluginBackendRuntimes());
         }
         scanContents(files, result);
         result.sbom = SbomGenerator.generate(typeLabel, expectedVersion,
                 Ed25519Signer.sha256Hex(content), files);
     }
 
-    // ---- SKILL (.fys zip with SKILL.md) ----
+    // ---- SKILL (.fys zip with manifest.json + SKILL.md) ----
 
     private void scanSkill(byte[] content, String expectedVersion, ScanResult result)
             throws IOException {
         Map<String, SafeZip.ExtractedFile> files = SafeZip.extract(new ByteArrayInputStream(content),
                 limits);
         result.files.addAll(files.keySet());
-        SafeZip.ExtractedFile skill = files.get("SKILL.md");
-        if (skill == null) {
-            // tolerate a nested single directory: <dir>/SKILL.md
-            skill = files.entrySet().stream()
-                    .filter(e -> e.getKey().endsWith("/SKILL.md") && e.getKey().indexOf('/') ==
-                            e.getKey().lastIndexOf('/'))
-                    .map(Map.Entry::getValue)
-                    .findFirst()
-                    .orElse(null);
-        }
-        if (skill == null) {
-            result.error("skill.manifest-missing", "Missing SKILL.md");
+
+        // ---- rules mirrored from the FengYu host's SkillManifest validator ----
+        SafeZip.ExtractedFile manifest = files.get("manifest.json");
+        if (manifest == null) {
+            result.error("skill.manifest-missing",
+                    "Missing manifest.json (host skill package contract)");
             return;
         }
-        String md = skill.text();
-        if (!md.startsWith("---")) {
-            result.error("skill.frontmatter-missing", "SKILL.md must start with YAML frontmatter");
+        JsonNode json;
+        try {
+            json = mapper.readTree(manifest.content());
+        } catch (IOException e) {
+            result.error("skill.manifest-invalid", "manifest.json is not valid JSON");
             return;
         }
-        String frontmatter = md.substring(3, md.indexOf("---", 3));
-        if (!frontmatter.contains("name:")) {
-            result.error("skill.frontmatter-field", "SKILL.md frontmatter must define 'name'");
+        result.manifestName = text(json, "name");
+        result.manifestVersion = text(json, "version");
+        if (json.path("schemaVersion").asInt(-1) != FengYuHostRules.SKILL_SCHEMA_VERSION) {
+            result.error("skill.schema-version", "manifest.json schemaVersion must be "
+                    + FengYuHostRules.SKILL_SCHEMA_VERSION);
         }
-        if (!frontmatter.contains("description:")) {
-            result.error("skill.frontmatter-field",
-                    "SKILL.md frontmatter must define 'description'");
+        String id = text(json, "id");
+        if (id == null || !FengYuHostRules.ID_PATTERN.matcher(id).matches()) {
+            result.error("skill.manifest-field",
+                    "manifest.json 'id' must be a lowercase reverse-domain identifier");
+        } else if (id.startsWith(FengYuHostRules.OFFICIAL_NAMESPACE)
+                || Boolean.TRUE.equals(json.path("official").asBoolean(false))) {
+            result.error("skill.official-reserved",
+                    "Only FengYu-trusted publishers may use the official namespace");
+        }
+        if (isBlank(result.manifestName)) {
+            result.error("skill.manifest-field", "Manifest field 'name' is required");
+        }
+        if (result.manifestVersion == null
+                || !FengYuHostRules.SKILL_VERSION_PATTERN.matcher(result.manifestVersion)
+                        .matches()) {
+            result.error("skill.manifest-field",
+                    "Manifest field 'version' must be MAJOR.MINOR.PATCH");
+        } else if (!result.manifestVersion.equals(expectedVersion)) {
+            result.error("plugin.version-mismatch",
+                    "Manifest version " + result.manifestVersion + " does not match release version "
+                            + expectedVersion);
+        }
+        // The host only requires SKILL.md at the package root — no frontmatter parsing.
+        if (files.get("SKILL.md") == null) {
+            result.error("skill.skill-md-missing", "SKILL.md must exist at the package root");
         }
         scanContents(files, result);
         result.sbom = SbomGenerator.generate("SKILL", expectedVersion,
@@ -250,6 +316,10 @@ public class PackageScanner {
     private static String text(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value == null || value.isNull() ? null : value.asText();
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private static String sniffMime(byte[] content) {

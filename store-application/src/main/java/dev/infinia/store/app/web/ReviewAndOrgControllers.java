@@ -89,18 +89,24 @@ class OrganizationController {
 
     private final IdentityRepositories.OrganizationRepository organizations;
     private final IdentityRepositories.NamespaceRepository namespaces;
+    private final IdentityRepositories.UserRepository users;
     private final PublishingRepositories.WebhookRepository webhooks;
+    private final PublishingRepositories.AuditEventRepository auditEvents;
     private final CurrentPrincipal principal;
     private final AuditService audit;
     private static final SecureRandom RANDOM = new SecureRandom();
 
     OrganizationController(IdentityRepositories.OrganizationRepository organizations,
             IdentityRepositories.NamespaceRepository namespaces,
-            PublishingRepositories.WebhookRepository webhooks, CurrentPrincipal principal,
+            IdentityRepositories.UserRepository users,
+            PublishingRepositories.WebhookRepository webhooks,
+            PublishingRepositories.AuditEventRepository auditEvents, CurrentPrincipal principal,
             AuditService audit) {
         this.organizations = organizations;
         this.namespaces = namespaces;
+        this.users = users;
         this.webhooks = webhooks;
+        this.auditEvents = auditEvents;
         this.principal = principal;
         this.audit = audit;
     }
@@ -150,6 +156,105 @@ class OrganizationController {
         return webhooks.findByOrganizationId(organizationId).stream().map(this::toDto).toList();
     }
 
+    // ---- member administration (design §7.3: ORG_ADMIN manages members and roles) ----
+
+    @GetMapping("/{organizationId}/members")
+    public List<ReviewDtos.OrganizationMemberDto> members(@PathVariable UUID organizationId) {
+        var org = requireMembership(organizationId);
+        return organizations.findMembers(organizationId).stream()
+                .map(m -> {
+                    var user = users.findById(m.userId()).orElse(null);
+                    return new ReviewDtos.OrganizationMemberDto(m.userId().toString(),
+                            user == null ? null : user.email,
+                            user == null ? null : user.displayName,
+                            m.role().name(), m.joinedAt().toString(),
+                            m.userId().equals(org.ownerUserId()));
+                })
+                .toList();
+    }
+
+    @PostMapping("/{organizationId}/members")
+    public ResponseEntity<ReviewDtos.OrganizationMemberDto> addMember(
+            @PathVariable UUID organizationId,
+            @RequestBody ReviewDtos.AddMemberRequest request) {
+        UUID actor = principal.requireUserId();
+        requireOrgAdmin(organizationId, actor);
+        var user = users.findByEmailNormalized(
+                dev.infinia.store.app.service.AccountService.normalizeEmail(request.email()))
+                .orElseThrow(() -> new DomainException(StoreErrorCode.NOT_FOUND,
+                        "No store account uses this email"));
+        var role = parseRole(request.role(), dev.infinia.store.contract.type.UserRole.PUBLISHER);
+        if (organizations.findMemberRole(organizationId, user.id).isPresent()) {
+            throw new DomainException(StoreErrorCode.IDEMPOTENCY_CONFLICT,
+                    "User is already a member of this organization");
+        }
+        organizations.addMember(new dev.infinia.store.domain.model.Organization.Member(
+                organizationId, user.id, role, Instant.now()));
+        audit.record("USER", actor.toString(), "organization.member.add", "ORGANIZATION",
+                organizationId.toString(), null, user.id.toString(), null);
+        return ResponseEntity.status(HttpStatus.CREATED).body(new ReviewDtos.OrganizationMemberDto(
+                user.id.toString(), user.email, user.displayName, role.name(),
+                Instant.now().toString(), false));
+    }
+
+    @PutMapping("/{organizationId}/members/{memberId}/role")
+    public ReviewDtos.OrganizationMemberDto changeRole(@PathVariable UUID organizationId,
+            @PathVariable UUID memberId,
+            @RequestBody ReviewDtos.ChangeMemberRoleRequest request) {
+        UUID actor = principal.requireUserId();
+        var org = requireOrgAdmin(organizationId, actor);
+        if (memberId.equals(org.ownerUserId())) {
+            throw new DomainException(StoreErrorCode.FORBIDDEN,
+                    "The organization owner's role cannot be changed");
+        }
+        var role = parseRole(request.role(), null);
+        if (organizations.findMemberRole(organizationId, memberId).isEmpty()) {
+            throw new DomainException(StoreErrorCode.NOT_FOUND,
+                    "User is not a member of this organization");
+        }
+        organizations.updateMemberRole(organizationId, memberId, role);
+        audit.record("USER", actor.toString(), "organization.member.role", "ORGANIZATION",
+                organizationId.toString(), null, memberId + ":" + role.name(), null);
+        var user = users.findById(memberId).orElse(null);
+        return new ReviewDtos.OrganizationMemberDto(memberId.toString(),
+                user == null ? null : user.email, user == null ? null : user.displayName,
+                role.name(), null, false);
+    }
+
+    @DeleteMapping("/{organizationId}/members/{memberId}")
+    public ResponseEntity<Void> removeMember(@PathVariable UUID organizationId,
+            @PathVariable UUID memberId) {
+        UUID actor = principal.requireUserId();
+        var org = requireOrgAdmin(organizationId, actor);
+        if (memberId.equals(org.ownerUserId())) {
+            throw new DomainException(StoreErrorCode.FORBIDDEN,
+                    "The organization owner cannot be removed");
+        }
+        if (organizations.findMemberRole(organizationId, memberId).isEmpty()) {
+            throw new DomainException(StoreErrorCode.NOT_FOUND,
+                    "User is not a member of this organization");
+        }
+        organizations.removeMember(organizationId, memberId);
+        audit.record("USER", actor.toString(), "organization.member.remove", "ORGANIZATION",
+                organizationId.toString(), memberId.toString(), null, null);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{organizationId}/audit-events")
+    public List<ReviewDtos.AuditEventDto> orgAuditEvents(@PathVariable UUID organizationId) {
+        requireMembership(organizationId);
+        // Org members read their own organization's trail from the append-only log
+        // (design §14.3: events are keyed by the resource they touched).
+        return auditEvents.findRecent(200, null).stream()
+                .filter(e -> organizationId.toString().equals(e.resourceId()))
+                .limit(100)
+                .map(e -> new ReviewDtos.AuditEventDto(e.id().toString(), e.actorType(),
+                        e.actorId(), e.action(), e.resourceType(), e.resourceId(),
+                        e.beforeSummary(), e.afterSummary(), e.traceId(),
+                        e.occurredAt().toString()))
+                .toList();
+    }
+
     @PostMapping("/{organizationId}/webhooks")
     public ResponseEntity<ReviewDtos.WebhookDto> createWebhook(
             @PathVariable UUID organizationId,
@@ -168,13 +273,43 @@ class OrganizationController {
         return ResponseEntity.status(HttpStatus.CREATED).body(toDto(webhook));
     }
 
-    private void requireMembership(UUID organizationId) {
+    private dev.infinia.store.domain.model.Organization requireMembership(UUID organizationId) {
         UUID userId = principal.requireUserId();
         var org = organizations.findById(organizationId)
                 .orElseThrow(() -> new DomainException(StoreErrorCode.NOT_FOUND,
                         "Organization not found"));
         if (!org.ownerUserId().equals(userId) && !organizations.isMember(organizationId, userId)) {
             throw DomainException.forbidden("Not a member of this organization");
+        }
+        return org;
+    }
+
+    private dev.infinia.store.domain.model.Organization requireOrgAdmin(UUID organizationId,
+            UUID userId) {
+        var org = organizations.findById(organizationId)
+                .orElseThrow(() -> new DomainException(StoreErrorCode.NOT_FOUND,
+                        "Organization not found"));
+        if (!org.ownerUserId().equals(userId)
+                && !organizations.hasRole(organizationId, userId,
+                        dev.infinia.store.contract.type.UserRole.ORG_ADMIN)) {
+            throw DomainException.forbidden("Organization admin role required");
+        }
+        return org;
+    }
+
+    private static dev.infinia.store.contract.type.UserRole parseRole(String role,
+            dev.infinia.store.contract.type.UserRole fallback) {
+        if (role == null || role.isBlank()) {
+            if (fallback == null) {
+                throw new DomainException(StoreErrorCode.VALIDATION_FAILED, "role is required");
+            }
+            return fallback;
+        }
+        try {
+            return dev.infinia.store.contract.type.UserRole.valueOf(role.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "role must be one of PUBLISHER, ORG_ADMIN, REVIEWER, PLATFORM_ADMIN, USER");
         }
     }
 

@@ -74,4 +74,20 @@ public final class ListingDtos {
             boolean required,
             String reason) {
     }
+
+    public record RatingDto(
+            String ratingId,
+            String userId,
+            int stars,
+            String comment,
+            String updatedAt) {
+    }
+
+    public record RatingSummaryDto(long count, double average) {}
+
+    public record RatingsPageDto(RatingSummaryDto summary, List<RatingDto> ratings) {}
+
+    public record UpsertRatingRequest(Integer stars, String comment) {}
+
+    public record ReportRequest(String reason, String details) {}
 }

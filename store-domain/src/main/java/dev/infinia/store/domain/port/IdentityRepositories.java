@@ -57,6 +57,13 @@ public final class IdentityRepositories {
 
         void addMember(Organization.Member member);
 
+        void removeMember(UUID organizationId, UUID userId);
+
+        /** Returns the member's role in the organization, if a member. */
+        Optional<UserRole> findMemberRole(UUID organizationId, UUID userId);
+
+        void updateMemberRole(UUID organizationId, UUID userId, UserRole role);
+
         List<Organization.Member> findMembers(UUID organizationId);
 
         boolean isMember(UUID organizationId, UUID userId);

@@ -38,6 +38,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/listings/{namespace}/{slug}/ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ratings and average score of a listing (anonymous access allowed) */
+        get: operations["listRatings"];
+        /** Create or update the caller's rating (one per user per listing) */
+        put: operations["upsertRating"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report a listing for abuse / policy violation */
+        post: operations["reportListing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/resolutions": {
         parameters: {
             query?: never;
@@ -49,6 +84,90 @@ export interface paths {
         put?: never;
         /** Resolve versions and dependency closure for a client environment */
         post: operations["resolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/compat/fengyu/claude-marketplace.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * CLAUDE-ecosystem marketplace exporting skills and MCP templates as git sources
+         * @description Each published SKILL/MCP listing is materialized as a small local git
+         *     repository carrying a .claude-plugin/plugin.json (skills paths and an
+         *     mcpServers block). Registering this URL as a CLAUDE-type source in the
+         *     FengYu host installs skills and disabled MCP server definitions through
+         *     the host's existing ecosystem installer; re-cloning picks up updates.
+         */
+        get: operations["claudeEcosystemMarketplace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/compat/fengyu/skills-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** SkillCatalogEntry-compatible skill catalog (fengyu.skills.catalog-url) */
+        get: operations["fengyuSkillsCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/compat/fengyu/fengyu-releases/api/releases/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GitHub-releases-compatible mirror for the Electron portable updater
+         * @description Consumed via the host's updateApiBase setting ({base}/fengyu-releases/api/releases/latest).
+         */
+        get: operations["fengyuPortableReleaseMirror"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/compat/fengyu/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * MarketplaceCatalogEntry-compatible plugin catalog for the FengYu host store
+         * @description Serves the JSON array contract the FengYu host's built-in FENGYU marketplace
+         *     source type fetches, so the host lists, updates and downloads plugins with
+         *     zero code changes. Each entry carries the latest published version and a
+         *     direct HMAC-ticketed downloadUrl for the package artifact.
+         */
+        get: operations["fengyuCompatCatalog"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -106,6 +225,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Direct email + password login; returns an access token and registers a revocable session */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me": {
         parameters: {
             query?: never;
@@ -117,6 +253,23 @@ export interface paths {
         get: operations["getCurrentUser"];
         /** Update profile */
         put: operations["updateCurrentUser"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change password after re-authenticating with the current one */
+        put: operations["changePassword"];
         post?: never;
         delete?: never;
         options?: never;
@@ -201,6 +354,40 @@ export interface paths {
         };
         /** Favorites, entitlements and install history */
         get: operations["getLibrary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/installed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Installed listings derived from install telemetry (hint, not truth — ADR-009) */
+        get: operations["listInstalled"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Installed listings with a newer published release */
+        get: operations["listUpdates"];
         put?: never;
         post?: never;
         delete?: never;
@@ -330,6 +517,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/publisher/releases/{releaseId}/yank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Self-withdraw one of the caller's published releases */
+        post: operations["yankOwnRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reviews": {
         parameters: {
             query?: never;
@@ -398,6 +602,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Abuse report queue — PLATFORM_ADMIN */
+        get: operations["listReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/reports/{reportId}/resolution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve an abuse report — PLATFORM_ADMIN */
+        post: operations["resolveReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Append-only audit trail reader — PLATFORM_ADMIN */
+        get: operations["listAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/upstreams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Aggregated upstream marketplaces — PLATFORM_ADMIN */
+        get: operations["listUpstreams"];
+        put?: never;
+        /** Register an upstream marketplace (e.g. the official Claude skills) for aggregation */
+        post: operations["createUpstream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/upstreams/{upstreamId}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Aggregate the upstream now; imported skills run through the full publish pipeline */
+        post: operations["syncUpstream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/organizations": {
         parameters: {
             query?: never;
@@ -427,6 +717,75 @@ export interface paths {
         put?: never;
         /** Register a webhook for publishing / review / security events */
         post: operations["createWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{organizationId}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List organization members and their roles (membership required) */
+        get: operations["listOrgMembers"];
+        put?: never;
+        /** Add a member by account email — ORG_ADMIN */
+        post: operations["addOrgMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{organizationId}/members/{memberId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a member (the owner cannot be removed) — ORG_ADMIN */
+        delete: operations["removeOrgMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{organizationId}/members/{memberId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change a member's role (the owner's role is fixed) — ORG_ADMIN */
+        put: operations["changeOrgMemberRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{organizationId}/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Audit events touching this organization (membership required) */
+        get: operations["listOrgAuditEvents"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -649,6 +1008,15 @@ export interface components {
             password: string;
             displayName?: string;
         };
+        LoginRequest: {
+            /** Format: email */
+            email: string;
+            password: string;
+        };
+        LoginResponse: {
+            accessToken: string;
+            user?: components["schemas"]["PublicUser"];
+        };
         PublicUser: {
             userId: string;
             email: string;
@@ -814,6 +1182,144 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
+        Rating: {
+            ratingId?: string;
+            userId?: string;
+            stars?: number;
+            comment?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        RatingSummary: {
+            /** Format: int64 */
+            count?: number;
+            average?: number;
+        };
+        RatingsPage: {
+            summary?: components["schemas"]["RatingSummary"];
+            ratings?: components["schemas"]["Rating"][];
+        };
+        UpsertRatingRequest: {
+            stars: number;
+            comment?: string;
+        };
+        ReportRequest: {
+            /** @example infinia://plugin/official/markdown */
+            coordinate: string;
+            /** @enum {string} */
+            reason: "malware" | "policy_violation" | "spam" | "misleading" | "license" | "other";
+            details?: string;
+        };
+        Report: {
+            reportId?: string;
+            listingCoordinate?: string;
+            listingName?: string;
+            reason?: string;
+            details?: string;
+            /** @enum {string} */
+            status?: "OPEN" | "ACTIONED" | "DISMISSED";
+            resolutionNote?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            resolvedAt?: string | null;
+        };
+        ResolveReportRequest: {
+            /** @enum {string} */
+            resolution: "ACTIONED" | "DISMISSED";
+            note?: string;
+        };
+        AuditEvent: {
+            eventId?: string;
+            actorType?: string;
+            actorId?: string;
+            action?: string;
+            resourceType?: string;
+            resourceId?: string;
+            beforeSummary?: string;
+            afterSummary?: string;
+            traceId?: string;
+            /** Format: date-time */
+            occurredAt?: string;
+        };
+        OrganizationMember: {
+            userId?: string;
+            email?: string;
+            displayName?: string;
+            role?: string;
+            /** Format: date-time */
+            joinedAt?: string;
+            owner?: boolean;
+        };
+        AddMemberRequest: {
+            /** Format: email */
+            email: string;
+            /**
+             * @default PUBLISHER
+             * @enum {string}
+             */
+            role: "USER" | "PUBLISHER" | "ORG_ADMIN";
+        };
+        ChangePasswordRequest: {
+            currentPassword: string;
+            newPassword: string;
+        };
+        ChangePasswordResult: {
+            succeeded?: boolean;
+            message?: string;
+        };
+        InstalledItem: {
+            coordinate?: string;
+            version?: string;
+            type?: string;
+            latestVersion?: string | null;
+            latestChannel?: string | null;
+            updateAvailable?: boolean;
+        };
+        Upstream: {
+            upstreamId?: string;
+            name?: string;
+            /** Format: uri */
+            marketplaceUrl?: string;
+            targetNamespace?: string;
+            enabled?: boolean;
+            /** Format: date-time */
+            lastSyncAt?: string | null;
+            lastSyncOk?: boolean | null;
+            lastError?: string | null;
+        };
+        CreateUpstreamRequest: {
+            name: string;
+            /** Format: uri */
+            marketplaceUrl: string;
+            targetNamespace: string;
+        };
+        UpstreamSyncResult: {
+            upstream?: string;
+            imported?: number;
+            skipped?: number;
+            failed?: number;
+            errors?: string[];
+        };
+        /** @description Field names mirror the FengYu host's MarketplaceCatalogEntry contract. */
+        FengYuCatalogEntry: {
+            id?: string;
+            name?: string;
+            description?: string;
+            version?: string;
+            author?: string;
+            /** Format: uri */
+            icon?: string | null;
+            category?: string;
+            permissions?: string[];
+            homepage?: string | null;
+            /** @description Direct HMAC-ticketed package URL */
+            downloadUrl?: string;
+            official?: boolean;
+            sha256?: string;
+            signature?: string | null;
+            keyId?: string | null;
+        };
     };
     responses: {
         /** @description Unauthorized */
@@ -928,6 +1434,81 @@ export interface operations {
             };
         };
     };
+    listRatings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ratings page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingsPage"];
+                };
+            };
+        };
+    };
+    upsertRating: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertRatingRequest"];
+            };
+        };
+        responses: {
+            /** @description Stored rating */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Rating"];
+                };
+            };
+        };
+    };
+    reportListing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportRequest"];
+            };
+        };
+        responses: {
+            /** @description Report filed */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Report"];
+                };
+            };
+            409: components["responses"]["ProblemConflict"];
+        };
+    };
     resolve: {
         parameters: {
             query?: never;
@@ -948,6 +1529,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolveResponse"];
+                };
+            };
+        };
+    };
+    claudeEcosystemMarketplace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Claude marketplace document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        plugins?: {
+                            name?: string;
+                            description?: string;
+                            category?: string;
+                            keywords?: string[];
+                            author?: {
+                                name?: string;
+                            };
+                            source?: {
+                                /** @enum {string} */
+                                source?: "url";
+                                /** @description file:// clone URL */
+                                url?: string;
+                            };
+                        }[];
+                    };
+                };
+            };
+        };
+    };
+    fengyuSkillsCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Legacy skill catalog entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id?: string;
+                        name?: string;
+                        description?: string;
+                        version?: string;
+                        author?: string;
+                        downloadUrl?: string;
+                        official?: boolean;
+                    }[];
+                };
+            };
+        };
+    };
+    fengyuPortableReleaseMirror: {
+        parameters: {
+            query?: {
+                channel?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description GitHub-compatible release object, or [] when no stable APP release exists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    fengyuCompatCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Legacy catalog entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FengYuCatalogEntry"][];
                 };
             };
         };
@@ -1031,6 +1718,31 @@ export interface operations {
             409: components["responses"]["ProblemConflict"];
         };
     };
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Access token with current user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            401: components["responses"]["ProblemUnauthorized"];
+        };
+    };
     getCurrentUser: {
         parameters: {
             query?: never;
@@ -1076,6 +1788,31 @@ export interface operations {
                     "application/json": components["schemas"]["PublicUser"];
                 };
             };
+        };
+    };
+    changePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Password updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangePasswordResult"];
+                };
+            };
+            401: components["responses"]["ProblemUnauthorized"];
         };
     };
     listSessions: {
@@ -1174,6 +1911,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Library"];
+                };
+            };
+        };
+    };
+    listInstalled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installed items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstalledItem"][];
+                };
+            };
+        };
+    };
+    listUpdates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updatable items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstalledItem"][];
                 };
             };
         };
@@ -1389,6 +2166,27 @@ export interface operations {
             };
         };
     };
+    yankOwnRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Yanked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProblemForbidden"];
+        };
+    };
     listReviews: {
         parameters: {
             query?: {
@@ -1481,6 +2279,143 @@ export interface operations {
             };
         };
     };
+    listReports: {
+        parameters: {
+            query?: {
+                status?: "OPEN" | "ACTIONED" | "DISMISSED";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reports */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Report"][];
+                };
+            };
+        };
+    };
+    resolveReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveReportRequest"];
+            };
+        };
+        responses: {
+            /** @description Resolved report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Report"];
+                };
+            };
+        };
+    };
+    listAuditEvents: {
+        parameters: {
+            query?: {
+                resourceType?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audit events (newest first) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEvent"][];
+                };
+            };
+        };
+    };
+    listUpstreams: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Upstream sources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Upstream"][];
+                };
+            };
+        };
+    };
+    createUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateUpstreamRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Upstream"];
+                };
+            };
+        };
+    };
+    syncUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upstreamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sync summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamSyncResult"];
+                };
+            };
+        };
+    };
     createOrganization: {
         parameters: {
             query?: never;
@@ -1562,6 +2497,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Webhook"];
+                };
+            };
+        };
+    };
+    listOrgMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Members */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMember"][];
+                };
+            };
+        };
+    };
+    addOrgMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Member added */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMember"];
+                };
+            };
+        };
+    };
+    removeOrgMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    changeOrgMemberRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    role: "USER" | "PUBLISHER" | "ORG_ADMIN" | "REVIEWER" | "PLATFORM_ADMIN";
+                };
+            };
+        };
+        responses: {
+            /** @description Updated member */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMember"];
+                };
+            };
+        };
+    };
+    listOrgAuditEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audit events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEvent"][];
                 };
             };
         };

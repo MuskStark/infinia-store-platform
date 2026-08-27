@@ -129,6 +129,15 @@ public class PublisherController {
         return DtoMapper.publisherRelease(release, listing, findings);
     }
 
+    /** Publisher self-withdraw of a published release (design §8.1: PUBLISHED → YANKED). */
+    @PostMapping("/releases/{releaseId}/yank")
+    public ResponseEntity<Void> yank(@PathVariable UUID releaseId) {
+        Release release = catalog.releaseOrThrow(releaseId);
+        publisher.requireListingOwner(principal.requireUserId(), release);
+        reviewService.yank(principal.requireUserId(), releaseId, "publisher");
+        return ResponseEntity.ok().build();
+    }
+
     public record UploadRequest(String filename, String kind, String platform, String arch,
             Long size) {}
 }

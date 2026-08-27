@@ -5,7 +5,10 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
   server: {
-    port: 5173,
+    // 8089 keeps the store SPA clear of the FengYu frontend's default 5173,
+    // so both apps can run side by side during integration work.
+    port: 8089,
+    strictPort: true,
     proxy: {
       // Same-origin API + authorization server during development.
       '/api': 'http://localhost:8080',

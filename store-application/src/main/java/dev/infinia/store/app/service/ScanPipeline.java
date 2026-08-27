@@ -97,6 +97,16 @@ public class ScanPipeline {
         } else {
             ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.IN_REVIEW);
             release.status = ReleaseStatus.IN_REVIEW;
+            // The package is the source of truth for permissions (design §8.2 step 6):
+            // what the reviewer approves, the resolver surfaces and the host confirms
+            // must match the shipped manifest, not the publisher's initial claim.
+            if (!result.extractedPermissions.isEmpty()) {
+                release.permissions = result.extractedPermissions.stream()
+                        .map(p -> new Release.PermissionDecl(
+                                String.valueOf(p.get("permissionId")),
+                                "plugin", true, null))
+                        .toList();
+            }
         }
         releases.save(release);
         reviews.save(review);

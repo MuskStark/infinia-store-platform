@@ -2,6 +2,7 @@ package dev.infinia.store.domain.port;
 
 import dev.infinia.store.domain.model.Entitlement;
 import dev.infinia.store.domain.model.InstallEventRecord;
+import dev.infinia.store.domain.model.ListingRating;
 
 import java.time.Instant;
 import java.util.List;
@@ -41,5 +42,18 @@ public final class LibraryRepositories {
         void save(InstallEventRecord event);
 
         List<InstallEventRecord> findRecentByUserId(UUID userId, int limit);
+    }
+
+    /** Aggregate rating counters for one listing (design §12.4). */
+    public record RatingSummary(long count, double average) {}
+
+    public interface RatingRepository {
+        void upsert(ListingRating rating);
+
+        List<ListingRating> findByListing(UUID listingId, int limit);
+
+        Optional<ListingRating> findByUserAndListing(UUID userId, UUID listingId);
+
+        RatingSummary summarize(UUID listingId);
     }
 }

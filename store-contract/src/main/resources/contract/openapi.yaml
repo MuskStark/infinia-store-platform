@@ -32,6 +32,9 @@ tags:
   - name: Publisher
   - name: Review
   - name: Organizations
+  - name: Moderation
+  - name: Admin
+  - name: Compatibility
   - name: Blobs
 
 paths:
@@ -87,6 +90,64 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /listings/{namespace}/{slug}/ratings:
+    get:
+      operationId: listRatings
+      tags: [Listings]
+      summary: Ratings and average score of a listing (anonymous access allowed)
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - { name: namespace, in: path, required: true, schema: { type: string } }
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Ratings page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RatingsPage' }
+    put:
+      operationId: upsertRating
+      tags: [Moderation]
+      summary: Create or update the caller's rating (one per user per listing)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: namespace, in: path, required: true, schema: { type: string } }
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertRatingRequest' }
+      responses:
+        '200':
+          description: Stored rating
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rating' }
+
+  /reports:
+    post:
+      operationId: reportListing
+      tags: [Moderation]
+      summary: Report a listing for abuse / policy violation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportRequest' }
+      responses:
+        '201':
+          description: Report filed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '409': { $ref: '#/components/responses/ProblemConflict' }
+
   /resolutions:
     post:
       operationId: resolve
@@ -106,6 +167,109 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ResolveResponse' }
+
+  /compat/fengyu/claude-marketplace.json:
+    get:
+      operationId: claudeEcosystemMarketplace
+      tags: [Compatibility]
+      summary: CLAUDE-ecosystem marketplace exporting skills and MCP templates as git sources
+      description: |
+        Each published SKILL/MCP listing is materialized as a small local git
+        repository carrying a .claude-plugin/plugin.json (skills paths and an
+        mcpServers block). Registering this URL as a CLAUDE-type source in the
+        FengYu host installs skills and disabled MCP server definitions through
+        the host's existing ecosystem installer; re-cloning picks up updates.
+      security:
+        - {}
+      responses:
+        '200':
+          description: Claude marketplace document
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plugins:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        description: { type: string }
+                        category: { type: string }
+                        keywords: { type: array, items: { type: string } }
+                        author:
+                          type: object
+                          properties:
+                            name: { type: string }
+                        source:
+                          type: object
+                          properties:
+                            source: { type: string, enum: [url] }
+                            url: { type: string, description: file:// clone URL }
+
+  /compat/fengyu/skills-catalog:
+    get:
+      operationId: fengyuSkillsCatalog
+      tags: [Compatibility]
+      summary: SkillCatalogEntry-compatible skill catalog (fengyu.skills.catalog-url)
+      security:
+        - {}
+      responses:
+        '200':
+          description: Legacy skill catalog entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    name: { type: string }
+                    description: { type: string }
+                    version: { type: string }
+                    author: { type: string }
+                    downloadUrl: { type: string }
+                    official: { type: boolean }
+
+  /compat/fengyu/fengyu-releases/api/releases/latest:
+    get:
+      operationId: fengyuPortableReleaseMirror
+      tags: [Compatibility]
+      summary: GitHub-releases-compatible mirror for the Electron portable updater
+      description: Consumed via the host's updateApiBase setting ({base}/fengyu-releases/api/releases/latest).
+      security:
+        - {}
+      parameters:
+        - { name: channel, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: GitHub-compatible release object, or [] when no stable APP release exists
+          content:
+            application/json:
+              schema: {}
+
+  /compat/fengyu/catalog:
+    get:
+      operationId: fengyuCompatCatalog
+      tags: [Compatibility]
+      summary: MarketplaceCatalogEntry-compatible plugin catalog for the FengYu host store
+      description: |
+        Serves the JSON array contract the FengYu host's built-in FENGYU marketplace
+        source type fetches, so the host lists, updates and downloads plugins with
+        zero code changes. Each entry carries the latest published version and a
+        direct HMAC-ticketed downloadUrl for the package artifact.
+      security:
+        - {}
+      responses:
+        '200':
+          description: Legacy catalog entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FengYuCatalogEntry' }
 
   /releases/{releaseId}/download-ticket:
     post:
@@ -166,6 +330,26 @@ paths:
               schema: { $ref: '#/components/schemas/PublicUser' }
         '409': { $ref: '#/components/responses/ProblemConflict' }
 
+  /auth/login:
+    post:
+      operationId: login
+      tags: [Account]
+      summary: Direct email + password login; returns an access token and registers a revocable session
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Access token with current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/ProblemUnauthorized' }
+
   /me:
     get:
       operationId: getCurrentUser
@@ -196,6 +380,24 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PublicUser' }
+
+  /me/password:
+    put:
+      operationId: changePassword
+      tags: [Account]
+      summary: Change password after re-authenticating with the current one
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '200':
+          description: Password updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangePasswordResult' }
+        '401': { $ref: '#/components/responses/ProblemUnauthorized' }
 
   /me/sessions:
     get:
@@ -256,6 +458,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Library' }
+
+  /me/installed:
+    get:
+      operationId: listInstalled
+      tags: [Library]
+      summary: Installed listings derived from install telemetry (hint, not truth — ADR-009)
+      responses:
+        '200':
+          description: Installed items
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InstalledItem' }
+
+  /me/updates:
+    get:
+      operationId: listUpdates
+      tags: [Library]
+      summary: Installed listings with a newer published release
+      responses:
+        '200':
+          description: Updatable items
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InstalledItem' }
 
   /me/favorites/{listingId}:
     put:
@@ -395,6 +625,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PublisherRelease' }
 
+  /publisher/releases/{releaseId}/yank:
+    post:
+      operationId: yankOwnRelease
+      tags: [Publisher]
+      summary: Self-withdraw one of the caller's published releases
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Yanked }
+        '403': { $ref: '#/components/responses/ProblemForbidden' }
+
   /reviews:
     get:
       operationId: listReviews
@@ -454,6 +695,113 @@ paths:
         - { name: releaseId, in: path, required: true, schema: { type: string } }
       responses:
         '200': { description: Quarantined }
+
+  /admin/reports:
+    get:
+      operationId: listReports
+      tags: [Admin]
+      summary: Abuse report queue — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, ACTIONED, DISMISSED] } }
+      responses:
+        '200':
+          description: Reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Report' }
+
+  /admin/reports/{reportId}/resolution:
+    post:
+      operationId: resolveReport
+      tags: [Admin]
+      summary: Resolve an abuse report — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: reportId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveReportRequest' }
+      responses:
+        '200':
+          description: Resolved report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+
+  /admin/audit-events:
+    get:
+      operationId: listAuditEvents
+      tags: [Admin]
+      summary: Append-only audit trail reader — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: resourceType, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        '200':
+          description: Audit events (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEvent' }
+
+  /admin/upstreams:
+    get:
+      operationId: listUpstreams
+      tags: [Admin]
+      summary: Aggregated upstream marketplaces — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Upstream sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Upstream' }
+    post:
+      operationId: createUpstream
+      tags: [Admin]
+      summary: Register an upstream marketplace (e.g. the official Claude skills) for aggregation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUpstreamRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Upstream' }
+
+  /admin/upstreams/{upstreamId}/sync:
+    post:
+      operationId: syncUpstream
+      tags: [Admin]
+      summary: Aggregate the upstream now; imported skills run through the full publish pipeline
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: upstreamId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Sync summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UpstreamSyncResult' }
 
   /organizations:
     post:
@@ -517,6 +865,100 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Webhook' }
+
+  /organizations/{organizationId}/members:
+    get:
+      operationId: listOrgMembers
+      tags: [Organizations]
+      summary: List organization members and their roles (membership required)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OrganizationMember' }
+    post:
+      operationId: addOrgMember
+      tags: [Organizations]
+      summary: Add a member by account email — ORG_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddMemberRequest' }
+      responses:
+        '201':
+          description: Member added
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationMember' }
+
+  /organizations/{organizationId}/members/{memberId}:
+    delete:
+      operationId: removeOrgMember
+      tags: [Organizations]
+      summary: Remove a member (the owner cannot be removed) — ORG_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string } }
+        - { name: memberId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Removed }
+
+  /organizations/{organizationId}/members/{memberId}/role:
+    put:
+      operationId: changeOrgMemberRole
+      tags: [Organizations]
+      summary: Change a member's role (the owner's role is fixed) — ORG_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string } }
+        - { name: memberId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string, enum: [USER, PUBLISHER, ORG_ADMIN, REVIEWER, PLATFORM_ADMIN] }
+      responses:
+        '200':
+          description: Updated member
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationMember' }
+
+  /organizations/{organizationId}/audit-events:
+    get:
+      operationId: listOrgAuditEvents
+      tags: [Organizations]
+      summary: Audit events touching this organization (membership required)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEvent' }
 
 components:
   securitySchemes:
@@ -787,6 +1229,20 @@ components:
         password: { type: string, minLength: 8, maxLength: 128 }
         displayName: { type: string, minLength: 1, maxLength: 64 }
 
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, maxLength: 128 }
+
+    LoginResponse:
+      type: object
+      required: [accessToken]
+      properties:
+        accessToken: { type: string }
+        user: { $ref: '#/components/schemas/PublicUser' }
+
     PublicUser:
       type: object
       required: [userId, email, displayName, roles]
@@ -961,3 +1417,161 @@ components:
         events: { type: array, items: { type: string } }
         active: { type: boolean }
         createdAt: { type: string, format: date-time }
+
+    Rating:
+      type: object
+      properties:
+        ratingId: { type: string }
+        userId: { type: string }
+        stars: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    RatingSummary:
+      type: object
+      properties:
+        count: { type: integer, format: int64 }
+        average: { type: number }
+
+    RatingsPage:
+      type: object
+      properties:
+        summary: { $ref: '#/components/schemas/RatingSummary' }
+        ratings: { type: array, items: { $ref: '#/components/schemas/Rating' } }
+
+    UpsertRatingRequest:
+      type: object
+      required: [stars]
+      properties:
+        stars: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string, maxLength: 2000 }
+
+    ReportRequest:
+      type: object
+      required: [coordinate, reason]
+      properties:
+        coordinate: { type: string, example: 'infinia://plugin/official/markdown' }
+        reason: { type: string, enum: [malware, policy_violation, spam, misleading, license, other] }
+        details: { type: string, maxLength: 2000 }
+
+    Report:
+      type: object
+      properties:
+        reportId: { type: string }
+        listingCoordinate: { type: string }
+        listingName: { type: string }
+        reason: { type: string }
+        details: { type: string }
+        status: { type: string, enum: [OPEN, ACTIONED, DISMISSED] }
+        resolutionNote: { type: string }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time, nullable: true }
+
+    ResolveReportRequest:
+      type: object
+      required: [resolution]
+      properties:
+        resolution: { type: string, enum: [ACTIONED, DISMISSED] }
+        note: { type: string, maxLength: 1000 }
+
+    AuditEvent:
+      type: object
+      properties:
+        eventId: { type: string }
+        actorType: { type: string }
+        actorId: { type: string }
+        action: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: string }
+        beforeSummary: { type: string }
+        afterSummary: { type: string }
+        traceId: { type: string }
+        occurredAt: { type: string, format: date-time }
+
+    OrganizationMember:
+      type: object
+      properties:
+        userId: { type: string }
+        email: { type: string }
+        displayName: { type: string }
+        role: { type: string }
+        joinedAt: { type: string, format: date-time }
+        owner: { type: boolean }
+
+    AddMemberRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+        role: { type: string, enum: [USER, PUBLISHER, ORG_ADMIN] , default: PUBLISHER }
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string, maxLength: 128 }
+        newPassword: { type: string, minLength: 8, maxLength: 128 }
+
+    ChangePasswordResult:
+      type: object
+      properties:
+        succeeded: { type: boolean }
+        message: { type: string }
+
+    InstalledItem:
+      type: object
+      properties:
+        coordinate: { type: string }
+        version: { type: string }
+        type: { type: string }
+        latestVersion: { type: string, nullable: true }
+        latestChannel: { type: string, nullable: true }
+        updateAvailable: { type: boolean }
+
+    Upstream:
+      type: object
+      properties:
+        upstreamId: { type: string }
+        name: { type: string }
+        marketplaceUrl: { type: string, format: uri }
+        targetNamespace: { type: string }
+        enabled: { type: boolean }
+        lastSyncAt: { type: string, format: date-time, nullable: true }
+        lastSyncOk: { type: boolean, nullable: true }
+        lastError: { type: string, nullable: true }
+
+    CreateUpstreamRequest:
+      type: object
+      required: [name, marketplaceUrl, targetNamespace]
+      properties:
+        name: { type: string, maxLength: 100 }
+        marketplaceUrl: { type: string, format: uri }
+        targetNamespace: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }
+
+    UpstreamSyncResult:
+      type: object
+      properties:
+        upstream: { type: string }
+        imported: { type: integer }
+        skipped: { type: integer }
+        failed: { type: integer }
+        errors: { type: array, items: { type: string } }
+
+    FengYuCatalogEntry:
+      type: object
+      description: Field names mirror the FengYu host's MarketplaceCatalogEntry contract.
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        version: { type: string }
+        author: { type: string }
+        icon: { type: string, format: uri, nullable: true }
+        category: { type: string }
+        permissions: { type: array, items: { type: string } }
+        homepage: { type: string, nullable: true }
+        downloadUrl: { type: string, description: Direct HMAC-ticketed package URL }
+        official: { type: boolean }
+        sha256: { type: string }
+        signature: { type: string, nullable: true }
+        keyId: { type: string, nullable: true }

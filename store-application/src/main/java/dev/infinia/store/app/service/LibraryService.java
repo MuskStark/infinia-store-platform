@@ -1,11 +1,16 @@
 package dev.infinia.store.app.service;
 
 import dev.infinia.store.contract.error.StoreErrorCode;
+import dev.infinia.store.contract.coordinate.InfiniaCoordinate;
+import dev.infinia.store.contract.semver.SemVer;
 import dev.infinia.store.domain.DomainException;
 import dev.infinia.store.domain.model.Entitlement;
 import dev.infinia.store.domain.model.InstallEventRecord;
+import dev.infinia.store.domain.model.Listing;
+import dev.infinia.store.domain.model.Release;
 import dev.infinia.store.domain.port.LibraryRepositories;
 import dev.infinia.store.domain.port.ListingRepository;
+import dev.infinia.store.domain.port.ReleaseRepository;
 import dev.infinia.store.domain.service.UuidV7;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,15 +28,17 @@ public class LibraryService {
     private final LibraryRepositories.EntitlementRepository entitlements;
     private final LibraryRepositories.InstallEventRepository installEvents;
     private final ListingRepository listings;
+    private final ReleaseRepository releases;
 
     public LibraryService(LibraryRepositories.FavoriteRepository favorites,
             LibraryRepositories.EntitlementRepository entitlements,
             LibraryRepositories.InstallEventRepository installEvents,
-            ListingRepository listings) {
+            ListingRepository listings, ReleaseRepository releases) {
         this.favorites = favorites;
         this.entitlements = entitlements;
         this.installEvents = installEvents;
         this.listings = listings;
+        this.releases = releases;
     }
 
     @Transactional
@@ -100,5 +107,53 @@ public class LibraryService {
 
     public List<InstallEventRecord> installHistory(UUID userId) {
         return installEvents.findRecentByUserId(userId, 100);
+    }
+
+    /**
+     * Installed listings derived from install telemetry (ADR-009: telemetry is a hint,
+     * not the source of truth — the local host remains authoritative). Latest successful
+     * event per coordinate wins.
+     */
+    public List<dev.infinia.store.contract.api.AccountDtos.InstalledItemDto> installed(UUID userId) {
+        java.util.Map<String, InstallEventRecord> latestByCoordinate = new java.util.LinkedHashMap<>();
+        // findRecentByUserId returns newest first — replay oldest → newest so the
+        // latest event per coordinate wins.
+        List<InstallEventRecord> history = new java.util.ArrayList<>(
+                installEvents.findRecentByUserId(userId, 100));
+        java.util.Collections.reverse(history);
+        for (InstallEventRecord event : history) {
+            if (!"success".equals(event.outcome())) {
+                continue;
+            }
+            if ("uninstall".equals(event.action())) {
+                latestByCoordinate.remove(event.coordinate());
+                continue;
+            }
+            latestByCoordinate.put(event.coordinate(), event);
+        }
+        List<dev.infinia.store.contract.api.AccountDtos.InstalledItemDto> result =
+                new java.util.ArrayList<>();
+        for (InstallEventRecord event : latestByCoordinate.values()) {
+            Listing listing = lookupListing(event.coordinate());
+            Release latest = listing == null ? null
+                    : releases.findLatestVisible(listing.id, listing.defaultChannel).orElse(null);
+            boolean updateAvailable = latest != null
+                    && latest.version.compareTo(SemVer.parse(event.version())) > 0;
+            result.add(new dev.infinia.store.contract.api.AccountDtos.InstalledItemDto(
+                    event.coordinate(), event.version(),
+                    listing == null ? event.type() : listing.type.name(),
+                    latest == null ? null : latest.version.toString(),
+                    latest == null ? null : latest.channel.name().toLowerCase(),
+                    updateAvailable));
+        }
+        return result;
+    }
+
+    private Listing lookupListing(String coordinate) {
+        try {
+            return listings.findByCoordinate(InfiniaCoordinate.parse(coordinate)).orElse(null);
+        } catch (RuntimeException invalidCoordinate) {
+            return null; // telemetry coordinates are client-controlled, not trusted
+        }
     }
 }

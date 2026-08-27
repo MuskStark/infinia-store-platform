@@ -29,6 +29,8 @@ public enum StoreErrorCode {
     TICKET_INVALID("ticket_invalid"),
     RATE_LIMITED("rate_limited"),
     IDEMPOTENCY_CONFLICT("idempotency_conflict"),
+    WRONG_PASSWORD("wrong_password"),
+    REPORT_NOT_FOUND("report_not_found"),
     INTERNAL_ERROR("internal_error");
 
     public final String code;

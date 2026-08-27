@@ -30,8 +30,10 @@ public final class ContentScanners {
                     "Hard-coded credential assignment"));
 
     private static final List<Rule> CONTENT_RULES = List.of(
+            // Command must open the substitution ($(rm …), $(curl …)) — without the
+            // boundary, words like "openxmlformats" inside minified JS bundles match "rm".
             new Rule("content.shell-injection", "ERROR",
-                    Pattern.compile("\\$\\([^)]*(?:rm|curl|wget|chmod|nc )[^)]*\\)"), "Shell command substitution with dangerous commands"),
+                    Pattern.compile("\\$\\(\\s*(?:rm|curl|wget|chmod|nc)\\b[^)]*\\)"), "Shell command substitution with dangerous commands"),
             new Rule("content.rmrw-fs", "ERROR",
                     Pattern.compile("(?i)(rm\\s+-rf\\s+[/~]|fs\\.rmSync\\s*\\(\\s*['\\\"]/)"), "Recursive filesystem deletion from root"),
             new Rule("content.eval-remote", "ERROR",

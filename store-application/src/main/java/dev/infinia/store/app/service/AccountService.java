@@ -72,6 +72,27 @@ public class AccountService {
                 () -> new DomainException(StoreErrorCode.NOT_FOUND, "User not found"));
     }
 
+    /** Verifies email + password for the direct login endpoint (design §7.4). */
+    public StoreUser authenticate(String email, String password) {
+        String normalized = normalizeEmail(email);
+        StoreUser user = users.findByEmailNormalized(normalized)
+                .orElseThrow(() -> new DomainException(StoreErrorCode.INVALID_CREDENTIALS,
+                        "Email or password is incorrect"));
+        Credential credential = credentials
+                .findByUserIdAndType(user.id, Credential.CredentialType.PASSWORD)
+                .orElseThrow(() -> new DomainException(StoreErrorCode.INVALID_CREDENTIALS,
+                        "Email or password is incorrect"));
+        if (password == null || !hasher.matches(password, credential.secretHash())) {
+            throw new DomainException(StoreErrorCode.INVALID_CREDENTIALS,
+                    "Email or password is incorrect");
+        }
+        if (!"ACTIVE".equals(user.status)) {
+            throw new DomainException(StoreErrorCode.FORBIDDEN,
+                    "This account is not active");
+        }
+        return user;
+    }
+
     public void updateProfile(UUID userId, String displayName) {
         if (displayName == null || displayName.isBlank() || displayName.length() > 64) {
             throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
@@ -80,6 +101,32 @@ public class AccountService {
         StoreUser user = userOrThrow(userId);
         user.displayName = displayName.trim();
         users.save(user);
+    }
+
+    /**
+     * Changes the password credential after re-authenticating with the current one
+     * (design §7.4 安全). New passwords follow the same policy as registration.
+     */
+    @Transactional
+    public void changePassword(UUID userId, String currentPassword, String newPassword) {
+        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 128) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "New password must be 8-128 characters");
+        }
+        Credential existing = credentials
+                .findByUserIdAndType(userId, Credential.CredentialType.PASSWORD)
+                .orElseThrow(() -> new DomainException(StoreErrorCode.INVALID_CREDENTIALS,
+                        "No password credential on this account"));
+        if (currentPassword == null || !hasher.matches(currentPassword, existing.secretHash())) {
+            throw new DomainException(StoreErrorCode.WRONG_PASSWORD,
+                    "Current password is incorrect");
+        }
+        if (currentPassword.equals(newPassword)) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "New password must differ from the current one");
+        }
+        credentials.save(new Credential(existing.id(), userId, Credential.CredentialType.PASSWORD,
+                hasher.hash(newPassword), existing.createdAt()));
     }
 
     public List<IdentityRepositories.UserSessionRecord> sessions(UUID userId) {

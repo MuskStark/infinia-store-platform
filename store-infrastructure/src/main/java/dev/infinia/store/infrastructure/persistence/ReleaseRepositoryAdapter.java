@@ -9,6 +9,7 @@ import dev.infinia.store.contract.type.ReleaseStatus;
 import dev.infinia.store.domain.model.Release;
 import dev.infinia.store.domain.port.ReleaseRepository;
 import dev.infinia.store.infrastructure.persistence.entity.ReleaseEntity;
+import dev.infinia.store.infrastructure.persistence.repository.ListingJpaRepository;
 import dev.infinia.store.infrastructure.persistence.repository.ReleaseJpaRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,9 +27,11 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
             List.of(ReleaseStatus.PUBLISHED.name(), ReleaseStatus.DEPRECATED.name());
 
     private final ReleaseJpaRepository jpa;
+    private final ListingJpaRepository listingJpa;
 
-    public ReleaseRepositoryAdapter(ReleaseJpaRepository jpa) {
+    public ReleaseRepositoryAdapter(ReleaseJpaRepository jpa, ListingJpaRepository listingJpa) {
         this.jpa = jpa;
+        this.listingJpa = listingJpa;
     }
 
     @Override
@@ -84,8 +87,17 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
 
     @Override
     public List<Release> findVisibleByType(dev.infinia.store.contract.type.ListingType type) {
+        // Type lives on the listing, not the release — resolve through the parent rows.
+        java.util.Set<UUID> listingIdsOfType = listingJpa.findAll().stream()
+                .filter(l -> type.name().equals(l.type))
+                .map(l -> l.id)
+                .collect(java.util.stream.Collectors.toSet());
+        if (listingIdsOfType.isEmpty()) {
+            return List.of();
+        }
         return jpa.findByStatusIn(List.of(ReleaseStatus.PUBLISHED.name())).stream()
                 .filter(e -> VISIBLE_STATUSES.contains(e.status))
+                .filter(e -> listingIdsOfType.contains(e.listingId))
                 .map(ReleaseRepositoryAdapter::toDomain)
                 .toList();
     }

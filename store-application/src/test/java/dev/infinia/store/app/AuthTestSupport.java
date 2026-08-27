@@ -35,7 +35,7 @@ public final class AuthTestSupport {
 
         ResponseEntity<String> authorize = rest.exchange(HttpMethod.GET,
                 "/oauth2/authorize?response_type=code&client_id=store-web"
-                        + "&redirect_uri=http://localhost:5173/callback&scope=openid"
+                        + "&redirect_uri=http://localhost:8089/callback&scope=openid"
                         + "&state=" + state
                         + "&code_challenge=" + challenge + "&code_challenge_method=S256",
                 Http.acceptHtml(), null);
@@ -99,7 +99,7 @@ public final class AuthTestSupport {
         java.util.Map<String, String> tokenForm = new java.util.LinkedHashMap<>();
         tokenForm.put("grant_type", "authorization_code");
         tokenForm.put("code", code);
-        tokenForm.put("redirect_uri", "http://localhost:5173/callback");
+        tokenForm.put("redirect_uri", "http://localhost:8089/callback");
         tokenForm.put("client_id", "store-web");
         tokenForm.put("code_verifier", verifier);
         ResponseEntity<String> token = rest.postForm("/oauth2/token", tokenForm, null);

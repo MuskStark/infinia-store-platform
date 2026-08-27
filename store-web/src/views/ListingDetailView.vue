@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type DownloadTicket, type ListingDetail, type ResolveResponse } from '../api/client';
+import { api, type DownloadTicket, type ListingDetail, type RatingsPage, type ResolveResponse } from '../api/client';
 import { Badge, MagicCard, ShimmerButton, ProgressBar, BorderBeam } from '@infinia/magic-ui-vue';
 import StateChip from '../components/StateChip.vue';
 import ErrorState from '../components/ErrorState.vue';
@@ -21,7 +21,7 @@ const auth = useAuthStore();
 const detail = ref<ListingDetail | null>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
-const tab = ref<'overview' | 'versions' | 'permissions' | 'dependencies' | 'security'>('overview');
+const tab = ref<'overview' | 'versions' | 'permissions' | 'dependencies' | 'compatibility' | 'security' | 'reviews'>('overview');
 
 const installStage = ref<
   'idle' | 'resolving' | 'confirm' | 'downloading' | 'verifying' | 'done' | 'failed'
@@ -29,6 +29,16 @@ const installStage = ref<
 const resolution = ref<ResolveResponse | null>(null);
 const ticket = ref<DownloadTicket | null>(null);
 const favorited = ref(false);
+
+const ratings = ref<RatingsPage | null>(null);
+const myStars = ref(0);
+const myComment = ref('');
+const ratingSaved = ref(false);
+const reporting = ref(false);
+const reportReason = ref('malware');
+const reportDetails = ref('');
+const reportDone = ref(false);
+const reportError = ref<string | null>(null);
 
 const latestRelease = computed(() => detail.value?.releases?.[0] ?? null);
 const displayName = computed(
@@ -45,6 +55,9 @@ async function load() {
     detail.value = await api.get<ListingDetail>(
       `/api/v1/listings/${props.namespace}/${props.slug}`,
     );
+    ratings.value = await api.get<RatingsPage>(
+      `/api/v1/listings/${props.namespace}/${props.slug}/ratings`,
+    );
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'error';
   } finally {
@@ -52,6 +65,33 @@ async function load() {
   }
 }
 onMounted(load);
+
+async function submitRating() {
+  if (!myStars.value) return;
+  await api.put(`/api/v1/listings/${props.namespace}/${props.slug}/ratings`, {
+    stars: myStars.value,
+    comment: myComment.value || undefined,
+  });
+  ratingSaved.value = true;
+  ratings.value = await api.get<RatingsPage>(
+    `/api/v1/listings/${props.namespace}/${props.slug}/ratings`,
+  );
+}
+
+async function submitReport() {
+  reportError.value = null;
+  try {
+    await api.post('/api/v1/reports', {
+      coordinate: detail.value?.coordinate,
+      reason: reportReason.value,
+      details: reportDetails.value || undefined,
+    });
+    reportDone.value = true;
+    reporting.value = false;
+  } catch (e) {
+    reportError.value = e instanceof Error ? e.message : 'error';
+  }
+}
 
 /** Resolve → confirm (permission aware) → ticket → verify hash (design §9.2, §12.6). */
 async function startInstall() {
@@ -159,6 +199,13 @@ const installLabel = computed(() => {
           >
             {{ favorited ? t('listing.favoriteRemove') : t('listing.favoriteAdd') }}
           </button>
+          <button
+            v-if="auth.isAuthenticated && !reportDone"
+            class="rounded-xl border border-line px-4 py-2 text-sm text-muted dark:border-slate-800"
+            @click="reporting = true"
+          >
+            {{ t('listing.report') }}
+          </button>
           <a
             v-if="ticket"
             :href="ticket.url"
@@ -202,7 +249,7 @@ const installLabel = computed(() => {
 
     <nav class="flex flex-wrap gap-1 border-b border-line dark:border-slate-800" role="tablist">
       <button
-        v-for="key in ['overview', 'versions', 'permissions', 'dependencies', 'security'] as const"
+        v-for="key in ['overview', 'versions', 'permissions', 'dependencies', 'compatibility', 'security', 'reviews'] as const"
         :key="key"
         role="tab"
         :aria-selected="tab === key"
@@ -276,6 +323,32 @@ const installLabel = computed(() => {
       <p v-else class="text-sm text-muted dark:text-slate-400">{{ t('common.empty') }}</p>
     </section>
 
+    <section v-if="tab === 'compatibility'" class="space-y-3">
+      <p class="text-sm text-muted dark:text-slate-400">{{ t('listing.compatHint') }}</p>
+      <table class="w-full text-left text-sm">
+        <thead>
+          <tr class="text-muted">
+            <th class="p-2">{{ t('listing.version') }}</th>
+            <th class="p-2">{{ t('listing.requiresHost') }}</th>
+            <th class="p-2">{{ t('listing.channel') }}</th>
+            <th class="p-2">{{ t('listing.status') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="release in detail.releases"
+            :key="release.releaseId"
+            class="border-t border-line dark:border-slate-800"
+          >
+            <td class="p-2 font-mono text-xs">v{{ release.version }}</td>
+            <td class="p-2"><code v-if="release.requiresHost">{{ release.requiresHost }}</code><span v-else class="text-muted">—</span></td>
+            <td class="p-2">{{ t(`channel.${release.channel}`) }}</td>
+            <td class="p-2"><StateChip :status="release.status" /></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <section v-if="tab === 'security'" class="space-y-2 text-sm">
       <template v-if="latestRelease">
         <p>
@@ -291,5 +364,105 @@ const installLabel = computed(() => {
         </p>
       </template>
     </section>
+
+    <section v-if="tab === 'reviews'" class="space-y-6">
+      <div v-if="ratings" class="flex flex-wrap items-center gap-4">
+        <div class="text-4xl font-bold">{{ ratings.summary?.average?.toFixed(1) ?? '—' }}</div>
+        <div class="text-sm text-muted">
+          {{ t('listing.ratingCount', { count: ratings.summary?.count ?? 0 }) }}
+        </div>
+      </div>
+
+      <ul class="space-y-2">
+        <li
+          v-for="rating in ratings?.ratings ?? []"
+          :key="rating.ratingId"
+          class="rounded-xl border border-line p-3 text-sm dark:border-slate-800"
+        >
+          <div class="flex items-center gap-1" :aria-label="String(rating.stars)">
+            <span v-for="n in 5" :key="n" :class="n <= (rating.stars ?? 0) ? 'text-amber-500' : 'text-muted'">★</span>
+          </div>
+          <p v-if="rating.comment" class="mt-1">{{ rating.comment }}</p>
+        </li>
+        <li v-if="!ratings?.ratings?.length" class="text-sm text-muted">{{ t('listing.noReviews') }}</li>
+      </ul>
+
+      <form v-if="auth.isAuthenticated" class="space-y-3 rounded-2xl border border-line p-4 dark:border-slate-800" @submit.prevent="submitRating">
+        <h3 class="font-semibold">{{ t('listing.writeReview') }}</h3>
+        <div class="flex gap-1" role="radiogroup" :aria-label="t('listing.stars')">
+          <button
+            v-for="n in 5"
+            :key="n"
+            type="button"
+            role="radio"
+            :aria-checked="myStars === n"
+            class="text-2xl leading-none"
+            :class="n <= myStars ? 'text-amber-500' : 'text-muted'"
+            @click="myStars = n"
+          >
+            ★
+          </button>
+        </div>
+        <textarea
+          v-model="myComment"
+          rows="3"
+          maxlength="2000"
+          :placeholder="t('listing.reviewPlaceholder')"
+          class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+        />
+        <div class="flex items-center gap-2">
+          <button :disabled="!myStars" class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
+            {{ t('listing.submitReview') }}
+          </button>
+          <span v-if="ratingSaved" class="text-sm text-green-600 dark:text-green-400">{{ t('listing.reviewSaved') }}</span>
+        </div>
+      </form>
+      <p v-else class="text-sm text-muted">{{ t('listing.signInToReview') }}</p>
+    </section>
+  </div>
+
+  <!-- Abuse report dialog (design §12.4 举报) -->
+  <div
+    v-if="reporting"
+    class="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
+    role="dialog"
+    :aria-label="t('listing.report')"
+    @click.self="reporting = false"
+  >
+    <div class="w-full max-w-md rounded-2xl border border-line bg-surface p-6 dark:border-slate-800 dark:bg-slate-900">
+      <h2 class="text-lg font-bold">{{ t('listing.report') }}</h2>
+      <p v-if="reportDone" class="mt-4 text-sm text-green-600 dark:text-green-400">
+        {{ t('listing.reportDone') }}
+      </p>
+      <form v-else class="mt-4 space-y-3" @submit.prevent="submitReport">
+        <label class="block text-sm">
+          {{ t('listing.reportReason') }}
+          <select
+            v-model="reportReason"
+            class="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+          >
+            <option v-for="reason in ['malware', 'policy_violation', 'spam', 'misleading', 'license', 'other']" :key="reason" :value="reason">
+              {{ t(`admin.reason.${reason}`) }}
+            </option>
+          </select>
+        </label>
+        <textarea
+          v-model="reportDetails"
+          rows="3"
+          maxlength="2000"
+          :placeholder="t('listing.reportDetails')"
+          class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+        />
+        <p v-if="reportError" class="text-sm text-red-600 dark:text-red-400">{{ reportError }}</p>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="rounded-xl border border-line px-4 py-2 text-sm dark:border-slate-800" @click="reporting = false">
+            {{ t('common.cancel') }}
+          </button>
+          <button class="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white">
+            {{ t('listing.reportSubmit') }}
+          </button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>

@@ -55,6 +55,20 @@ function signOut() {
             {{ t('nav.library') }}
           </RouterLink>
           <RouterLink
+            v-if="auth.isAuthenticated"
+            class="rounded-lg px-3 py-2 hover:bg-surface-muted"
+            :to="{ name: 'organizations' }"
+          >
+            {{ t('nav.organizations') }}
+          </RouterLink>
+          <RouterLink
+            v-if="auth.isAuthenticated"
+            class="rounded-lg px-3 py-2 hover:bg-surface-muted"
+            :to="{ name: 'account' }"
+          >
+            {{ t('nav.account') }}
+          </RouterLink>
+          <RouterLink
             v-if="auth.roles.includes('PUBLISHER')"
             class="rounded-lg px-3 py-2 hover:bg-surface-muted"
             :to="{ name: 'publisher' }"
@@ -67,6 +81,13 @@ function signOut() {
             :to="{ name: 'review' }"
           >
             {{ t('nav.review') }}
+          </RouterLink>
+          <RouterLink
+            v-if="auth.roles.includes('PLATFORM_ADMIN')"
+            class="rounded-lg px-3 py-2 hover:bg-surface-muted"
+            :to="{ name: 'admin' }"
+          >
+            {{ t('nav.admin') }}
           </RouterLink>
         </nav>
 

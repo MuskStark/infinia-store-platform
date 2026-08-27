@@ -123,6 +123,43 @@ class PublishingPipelineTest {
         Map<String, Object> artifact = artifactsOf(published).get(0);
         assertNotNull(artifact.get("keyId"), "platform signature attached after review");
         assertEquals(64, ((String) artifact.get("sha256")).length());
+
+        // 8. Permissions come from the scanned package manifest (design §8.2 step 6),
+        // not the publisher's claim — resolvers and host confirms read these.
+        List<Map<String, Object>> permissions =
+                (List<Map<String, Object>>) published.get("permissions");
+        assertTrue(permissions.stream().anyMatch(p ->
+                        "files.read".equals(p.get("permissionId"))),
+                "package-declared permission surfaced: " + permissions);
+    }
+
+    @Test
+    void binaryUploadWithFormContentTypeIsAccepted() throws Exception {
+        String publisherToken = AuthTestSupport.clientCredentialsToken(http(), "store-cli",
+                "dev-only-cli-secret");
+        String slug = "formct-" + UUID.randomUUID().toString().substring(0, 8);
+        http().exchangeJson(HttpMethod.POST, "/api/v1/organizations", jsonAuth(publisherToken),
+                Map.of("slug", slug, "name", "FormCT"), Map.class);
+        http().exchangeJson(HttpMethod.POST, "/api/v1/publisher/listings", jsonAuth(publisherToken),
+                Map.of("namespace", slug, "slug", "tool", "type", "PLUGIN", "name", "Tool",
+                        "summary", "s"), Map.class);
+        String listingId = listings.findByCoordinate(
+                        InfiniaCoordinate.parse("infinia://plugin/" + slug + "/tool"))
+                .orElseThrow().id.toString();
+        ResponseEntity<Map> release = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/publisher/listings/" + listingId + "/releases", jsonAuth(publisherToken),
+                Map.of("version", "1.0.0", "channel", "stable"), Map.class);
+        String releaseId = (String) release.getBody().get("releaseId");
+        String uploadUrl = uploadAndGetUrl(publisherToken, releaseId, "tool-1.0.0.fyp");
+
+        // curl --data-binary defaults to application/x-www-form-urlencoded; the bytes
+        // are still the client's intended payload — form parsing must not explode.
+        HttpHeaders formHeaders = new HttpHeaders();
+        formHeaders.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        ResponseEntity<String> put = http().exchange(HttpMethod.PUT, uploadUrl, formHeaders,
+                validPluginZip("formct." + slug + ".tool", "1.0.0"));
+        assertEquals(204, put.getStatusCode().value(),
+                "binary body with form content-type is accepted");
     }
 
     @Test
@@ -146,7 +183,11 @@ class PublishingPipelineTest {
         HttpHeaders putHeaders = new HttpHeaders();
         putHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
         http().exchange(HttpMethod.PUT, uploadUrl, putHeaders, zipOf(new String[][] {
-                {"plugin.json", "{\"id\":\"evil\",\"name\":\"Evil\",\"version\":\"0.1.0\"}"},
+                {"manifest.json", "{\"schemaVersion\":2,\"id\":\"evil.tool\",\"name\":\"Evil\","
+                        + "\"description\":\"d\",\"author\":\"e2e\",\"icon\":\"puzzle\","
+                        + "\"category\":\"Productivity\",\"version\":\"0.1.0\","
+                        + "\"ui\":{\"entry\":\"index.js\"},\"permissions\":[]}"},
+                {"index.js", "export function run() { return 1; }"},
                 {"config.json", "{\"key\": \"AKIAIOSFODNN7EXAMPLE\"}"}}));
 
         ResponseEntity<Map> submit = http().exchangeJson(HttpMethod.POST,
@@ -180,8 +221,8 @@ class PublishingPipelineTest {
         String uploadUrl = uploadAndGetUrl(publisherToken, releaseId, "tool.fys");
         HttpHeaders putHeaders = new HttpHeaders();
         putHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-        http().exchange(HttpMethod.PUT, uploadUrl, putHeaders, zipOf(new String[][] {{"SKILL.md",
-                "---\nname: tool\ndescription: d\n---\n# Tool"}}));
+        http().exchange(HttpMethod.PUT, uploadUrl, putHeaders, validSkillZip(
+                slug + ".tool", "1.0.0"));
         http().exchangeJson(HttpMethod.POST,
                 "/api/v1/publisher/releases/" + releaseId + "/submit",
                 Http.bearer(publisherToken), null, Map.class);
@@ -241,11 +282,26 @@ class PublishingPipelineTest {
         throw new AssertionError("Release never reached " + expected);
     }
 
+    /** Host-contract .fyp: schemaVersion 2, full required fields, ui.entry,
+     * string permissions from the allowlist, host-compatible engine range. */
     static byte[] validPluginZip(String id, String version) throws Exception {
         return zipOf(new String[][] {
-                {"plugin.json", "{\"id\":\"" + id + "\",\"name\":\"" + id
-                        + "\",\"version\":\"" + version + "\",\"entry\":\"index.js\"}"},
+                {"manifest.json", "{\"schemaVersion\":2,\"id\":\"" + id + "\",\"name\":\"" + id
+                        + "\",\"description\":\"demo\",\"author\":\"e2e\","
+                        + "\"icon\":\"puzzle\",\"category\":\"Productivity\","
+                        + "\"version\":\"" + version + "\",\"ui\":{\"entry\":\"index.js\"},"
+                        + "\"permissions\":[\"files.read\"],"
+                        + "\"engines\":{\"fengyu\":\">=4.0.0 <5.0.0\"}}"},
                 {"index.js", "export function run() { return 1; }"}});
+    }
+
+    /** Host-contract .fys: manifest.json (SkillManifest) plus SKILL.md at the root. */
+    static byte[] validSkillZip(String id, String version) throws Exception {
+        return zipOf(new String[][] {
+                {"manifest.json", "{\"schemaVersion\":1,\"id\":\"" + id + "\",\"name\":\"" + id
+                        + "\",\"description\":\"demo skill\",\"version\":\"" + version
+                        + "\",\"author\":\"e2e\",\"official\":false}"},
+                {"SKILL.md", "---\nname: " + id + "\ndescription: demo\n---\n# " + id}});
     }
 
     static byte[] zipOf(String[][] entries) throws Exception {
