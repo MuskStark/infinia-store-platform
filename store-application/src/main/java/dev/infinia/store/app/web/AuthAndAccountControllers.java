@@ -130,6 +130,7 @@ class LibraryController {
     private final AccountService accounts;
     private final CurrentPrincipal principal;
     private final dev.infinia.store.domain.port.ListingRepository listings;
+    private final dev.infinia.store.domain.port.ReleaseRepository releases;
     private final dev.infinia.store.domain.port.LibraryRepositories.FavoriteRepository favorites;
     private final dev.infinia.store.domain.port.LibraryRepositories.EntitlementRepository
             entitlements;
@@ -137,12 +138,14 @@ class LibraryController {
     LibraryController(LibraryService library, AccountService accounts,
             CurrentPrincipal principal,
             dev.infinia.store.domain.port.ListingRepository listings,
+            dev.infinia.store.domain.port.ReleaseRepository releases,
             dev.infinia.store.domain.port.LibraryRepositories.FavoriteRepository favorites,
             dev.infinia.store.domain.port.LibraryRepositories.EntitlementRepository entitlements) {
         this.library = library;
         this.accounts = accounts;
         this.principal = principal;
         this.listings = listings;
+        this.releases = releases;
         this.favorites = favorites;
         this.entitlements = entitlements;
     }
@@ -159,12 +162,15 @@ class LibraryController {
         List<AccountDtos.FavoriteDto> favoriteDtos = marks.stream()
                 .map(m -> {
                     var listing = listingById.get(m.listingId());
+                    var latest = listing == null ? null
+                            : releases.findLatestVisible(listing.id, listing.defaultChannel)
+                                    .orElse(null);
                     return new AccountDtos.FavoriteDto(
                             listing == null ? m.listingId().toString()
                                     : listing.coordinate().toString(),
                             listing == null ? null : listing.name("en"),
                             listing == null ? null : listing.type.name(),
-                            null,
+                            latest == null ? null : latest.version.toString(),
                             m.addedAt().toString());
                 })
                 .toList();
