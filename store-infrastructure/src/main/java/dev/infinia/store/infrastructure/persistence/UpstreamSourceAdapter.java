@@ -31,6 +31,7 @@ public class UpstreamSourceAdapter
         e.lastSyncAt = source.lastSyncAt();
         e.lastSyncOk = source.lastSyncOk();
         e.lastError = source.lastError();
+        e.adapterType = source.adapterType();
         jpa.save(e);
     }
 
@@ -52,6 +53,6 @@ public class UpstreamSourceAdapter
 
     private static UpstreamSource toDomain(UpstreamSourceEntity e) {
         return new UpstreamSource(e.id, e.name, e.marketplaceUrl, e.targetNamespace, e.enabled,
-                e.lastSyncAt, e.lastSyncOk, e.lastError);
+                e.lastSyncAt, e.lastSyncOk, e.lastError, e.adapterType);
     }
 }

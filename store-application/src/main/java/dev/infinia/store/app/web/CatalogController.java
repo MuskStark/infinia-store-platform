@@ -32,6 +32,7 @@ public class CatalogController {
             @RequestParam(required = false) String os,
             @RequestParam(required = false) String arch,
             @RequestParam(required = false) String sort,
+            @RequestParam(required = false, name = "featured") Boolean featured,
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "24") int limit) {
         CatalogDtos.CatalogPageDto page = catalog.browse(new CatalogService.BrowseQuery(
@@ -44,6 +45,7 @@ public class CatalogController {
                 os,
                 arch,
                 sort == null ? null : ListingQuery.ListingSort.valueOf(sort.trim().toUpperCase()),
+                featured,
                 cursor,
                 Math.min(Math.max(limit, 1), 100)));
         String etag = "\"catalog-" + Integer.toHexString(page.hashCode()) + "\"";

@@ -49,14 +49,18 @@ public class EcosystemExportService {
     private final ReleaseRepository releases;
     private final ListingRepository listings;
     private final BlobStorage blobs;
+    private final dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts;
     private final LocalGitExporter exporter;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public EcosystemExportService(ReleaseRepository releases, ListingRepository listings,
-            BlobStorage blobs, LocalGitExporter exporter) {
+            BlobStorage blobs,
+            dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts,
+            LocalGitExporter exporter) {
         this.releases = releases;
         this.listings = listings;
         this.blobs = blobs;
+        this.upstreamArtifacts = upstreamArtifacts;
         this.exporter = exporter;
     }
 
@@ -137,10 +141,7 @@ public class EcosystemExportService {
         if (artifact == null) {
             return null;
         }
-        JsonNode template;
-        try (InputStream in = blobs.open(artifact.blobKey())) {
-            template = mapper.readTree(in.readAllBytes());
-        }
+        JsonNode template = mapper.readTree(artifactBytes(artifact, null));
         ObjectNode server = mapper.createObjectNode();
         String urlTemplate = template.path("urlTemplate").asString(null);
         String transport = template.path("transport").asString("STREAMABLE_HTTP");
@@ -182,10 +183,7 @@ public class EcosystemExportService {
         if (artifact == null) {
             return null;
         }
-        byte[] fys;
-        try (InputStream in = blobs.open(artifact.blobKey())) {
-            fys = in.readAllBytes();
-        }
+        byte[] fys = artifactBytes(artifact, release.version.toString());
         Map<String, SafeZip.ExtractedFile> extracted =
                 SafeZip.extract(new ByteArrayInputStream(fys), SafeZip.Limits.defaults());
         SafeZip.ExtractedFile skillMd = extracted.get("SKILL.md");
@@ -205,6 +203,28 @@ public class EcosystemExportService {
                 mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(manifest));
         files.put(skillDir + "/SKILL.md", skillMd.content());
         return files;
+    }
+
+    /** Local blob or pass-through upstream rebuild (aggregation plan §5.2). */
+    private byte[] artifactBytes(ArtifactInfo artifact, String releaseVersion) {
+        String key = artifact.blobKey();
+        if (key != null && key.startsWith("upstream/")) {
+            try {
+                return upstreamArtifacts.rebuild(
+                        java.util.UUID.fromString(key.substring("upstream/".length())),
+                        releaseVersion);
+            } catch (dev.infinia.store.app.upstream.UpstreamArtifactService
+                    .UpstreamDriftedException e) {
+                throw new IllegalStateException(e.getMessage(), e);
+            } catch (IOException | InterruptedException e) {
+                throw new IllegalStateException("Upstream fetch failed: " + e.getMessage(), e);
+            }
+        }
+        try (InputStream in = blobs.open(key)) {
+            return in.readAllBytes();
+        } catch (IOException e) {
+            throw new IllegalStateException("Blob missing: " + key, e);
+        }
     }
 
     private ArtifactInfo packageArtifact(Release release) {

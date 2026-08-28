@@ -24,7 +24,12 @@ public class LocalFsBlobStorage implements BlobStorage {
 
     private final Path root;
 
-    public LocalFsBlobStorage(@Value("${store.blob.local-dir:data/blobs}") String dir) {
+    public LocalFsBlobStorage(@Value("${store.blob-dir:data/blobs}") String dir) {
+        // Same key StoreProperties validates — a mismatch here once silently split
+        // blob storage across working directories (db anchored, blobs relative).
+        if (!Path.of(dir).isAbsolute()) {
+            throw new IllegalStateException("store.blob-dir must be absolute, got: " + dir);
+        }
         this.root = Path.of(dir);
     }
 

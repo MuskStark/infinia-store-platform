@@ -29,5 +29,8 @@ public interface ReleaseRepository {
     /** All published releases of a given type — used by the app update feed. */
     List<Release> findVisibleByType(ListingType type);
 
+    /** Release owning an artifact by blob key — pass-through downloads need its version. */
+    Optional<Release> findByArtifactBlobKey(String blobKey);
+
     void save(Release release);
 }

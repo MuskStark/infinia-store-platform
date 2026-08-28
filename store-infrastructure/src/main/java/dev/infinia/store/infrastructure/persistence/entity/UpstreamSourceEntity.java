@@ -27,4 +27,6 @@ public class UpstreamSourceEntity {
     public Boolean lastSyncOk;
     @Column(name = "last_error", length = 1000)
     public String lastError;
+    @Column(name = "adapter_type", length = 40)
+    public String adapterType;
 }

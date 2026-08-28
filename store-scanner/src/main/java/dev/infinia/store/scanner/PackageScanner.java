@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Package scanning facade (design §8.2 steps 3-6). Validates native manifests of all
@@ -263,10 +264,44 @@ public class PackageScanner {
                     result.error("mcp.command-injection",
                             "commandTemplate must not contain shell composition");
                 }
-            } else {
-                if (url == null || !url.startsWith("https://")) {
-                    result.error("mcp.url-not-https", "Remote MCP templates must use HTTPS URLs");
+            } else if (!url.startsWith("https://") && url != null) {
+                result.error("mcp.url-not-https", "Remote MCP templates must use HTTPS URLs");
+            }
+            if (url == null && json.get("stdioDeployment") == null) {
+                result.error("mcp.url-not-https",
+                        "Templates need either an HTTPS urlTemplate or a stdioDeployment");
+            }
+        }
+        // stdioDeployment block (aggregation plan §6.2): a pinned package with
+        // registry, version and digest; commands must be structured, never shell.
+        JsonNode stdio = json.get("stdioDeployment");
+        if (stdio != null && stdio.isObject()) {
+            String runtime = text(stdio, "runtime");
+            if (runtime == null || !Set.of("npm", "pypi", "nuget", "docker", "mcpb")
+                    .contains(runtime)) {
+                result.error("mcp.stdio-runtime", "stdioDeployment runtime must be one of "
+                        + "npm, pypi, nuget, docker, mcpb");
+            }
+            for (String required : new String[] {"package", "version", "digest"}) {
+                if (isBlank(text(stdio, required))) {
+                    result.error("mcp.stdio-pinned-package",
+                            "stdioDeployment requires registry " + required
+                                    + " — unpinned package installs are blocked");
                 }
+            }
+            String command = text(stdio, "command");
+            if (isBlank(command)) {
+                result.error("mcp.stdio-command-missing",
+                        "stdioDeployment must declare the launch command");
+            } else if (command.contains("$(") || command.contains("`")
+                    || command.contains(";") || command.contains("|")) {
+                result.error("mcp.command-injection",
+                        "stdioDeployment command must be a single executable, no shell composition");
+            }
+            JsonNode args = stdio.get("args");
+            if (args != null && !args.isArray()) {
+                result.error("mcp.stdio-args-structured",
+                        "stdioDeployment args must be a structured array");
             }
         }
         JsonNode defaultEnabled = json.get("defaultEnabled");

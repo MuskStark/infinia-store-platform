@@ -34,6 +34,8 @@ public class Listing {
     public UUID organizationId;
     public long downloads;
     public long favoriteCount;
+    /** Editorial featuring toggled by platform admins (design §12.4). */
+    public boolean featured;
     public Instant createdAt;
     public Instant updatedAt;
     public List<Localization> localizations = new ArrayList<>();

@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.UUID;
 
 /**
@@ -87,9 +88,17 @@ public class ScanPipeline {
                 result.error("scanner.io", "Package could not be read: " + e.getMessage());
             }
         }
-        review.findings = result.findings.stream()
-                .map(f -> new Review.Finding(f.severity(), f.rule(), f.message()))
-                .toList();
+        // Findings key on (rule, message); append the file so hits in different
+        // files stay distinct and identical duplicates collapse — a duplicate row
+        // would violate pk_review_finding and roll back the whole scan.
+        java.util.LinkedHashMap<String, Review.Finding> distinct = new java.util.LinkedHashMap<>();
+        for (var f : result.findings) {
+            String message = f.file() == null ? f.message()
+                    : f.message() + " (" + f.file() + ")";
+            distinct.putIfAbsent(f.rule() + "|" + message,
+                    new Review.Finding(f.severity(), f.rule(), message));
+        }
+        review.findings = new ArrayList<>(distinct.values());
         if (result.hasBlockingFindings()) {
             ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.REJECTED);
             release.status = ReleaseStatus.REJECTED;

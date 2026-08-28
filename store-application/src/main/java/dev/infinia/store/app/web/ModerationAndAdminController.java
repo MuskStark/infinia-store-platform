@@ -61,13 +61,111 @@ class AdminController {
     private final ModerationService moderation;
     private final AuditService audit;
     private final CurrentPrincipal principal;
+    private final dev.infinia.store.domain.port.ListingRepository listings;
+    private final dev.infinia.store.domain.port.ReleaseRepository releases;
+    private final dev.infinia.store.app.service.ReviewService reviews;
 
     AdminController(ModerationService moderation, AuditService audit,
-            CurrentPrincipal principal) {
+            CurrentPrincipal principal,
+            dev.infinia.store.domain.port.ListingRepository listings,
+            dev.infinia.store.domain.port.ReleaseRepository releases,
+            dev.infinia.store.app.service.ReviewService reviews) {
         this.moderation = moderation;
         this.audit = audit;
         this.principal = principal;
+        this.listings = listings;
+        this.releases = releases;
+        this.reviews = reviews;
     }
+
+    // ---- listing curation (design §12.4 管理: 上下架/推荐) ----
+
+    /** Every listing in every visibility/status — the admin console view. */
+    @GetMapping("/listings")
+    public List<ReviewDtos.AdminListingDto> allListings() {
+        principal.requireUserId();
+        return listings.findAllForAdmin().stream().map(l -> {
+            String latest = releases.findVisibleByListingId(l.id).stream()
+                    .findFirst().map(r -> r.version.toString()).orElse(null);
+            return new ReviewDtos.AdminListingDto(l.id.toString(), l.coordinate().toString(),
+                    l.name("en"), l.type.name(), l.status, l.visibility.name(), latest,
+                    l.featured, l.downloads);
+        }).toList();
+    }
+
+    /** List (PUBLIC) or delist (UNLISTED) a listing — hides it from every catalog. */
+    @PostMapping("/listings/{listingId}/visibility")
+    public ReviewDtos.AdminListingDto visibility(@PathVariable java.util.UUID listingId,
+            @RequestBody VisibilityBody body) {
+        java.util.UUID admin = principal.requireUserId();
+        String visibility = body.visibility() == null ? "" : body.visibility().trim()
+                .toUpperCase();
+        if (!"PUBLIC".equals(visibility) && !"UNLISTED".equals(visibility)) {
+            throw new dev.infinia.store.domain.DomainException(
+                    dev.infinia.store.contract.error.StoreErrorCode.VALIDATION_FAILED,
+                    "visibility must be PUBLIC or UNLISTED");
+        }
+        dev.infinia.store.domain.model.Listing listing = listings.findById(listingId)
+                .orElseThrow(() -> new dev.infinia.store.domain.DomainException(
+                        dev.infinia.store.contract.error.StoreErrorCode.LISTING_NOT_FOUND,
+                        "Listing not found"));
+        String before = listing.visibility.name();
+        listing.visibility = dev.infinia.store.contract.type.ListingVisibility
+                .valueOf(visibility);
+        listing.updatedAt = java.time.Instant.now();
+        listings.save(listing);
+        audit.record("USER", admin.toString(), "listing.visibility", "LISTING",
+                listing.id.toString(), before, visibility, null);
+        return toAdminDto(listing);
+    }
+
+    /** Editorial featuring — drives the store's featured shelf. */
+    @PostMapping("/listings/{listingId}/featured")
+    public ReviewDtos.AdminListingDto featured(@PathVariable java.util.UUID listingId,
+            @RequestBody FeaturedBody body) {
+        java.util.UUID admin = principal.requireUserId();
+        dev.infinia.store.domain.model.Listing listing = listings.findById(listingId)
+                .orElseThrow(() -> new dev.infinia.store.domain.DomainException(
+                        dev.infinia.store.contract.error.StoreErrorCode.LISTING_NOT_FOUND,
+                        "Listing not found"));
+        listing.featured = Boolean.TRUE.equals(body.featured());
+        listing.updatedAt = java.time.Instant.now();
+        listings.save(listing);
+        audit.record("USER", admin.toString(), "listing.featured", "LISTING",
+                listing.id.toString(), String.valueOf(!listing.featured),
+                String.valueOf(listing.featured), null);
+        return toAdminDto(listing);
+    }
+
+    private ReviewDtos.AdminListingDto toAdminDto(dev.infinia.store.domain.model.Listing l) {
+        String latest = releases.findVisibleByListingId(l.id).stream()
+                .findFirst().map(r -> r.version.toString()).orElse(null);
+        return new ReviewDtos.AdminListingDto(l.id.toString(), l.coordinate().toString(),
+                l.name("en"), l.type.name(), l.status, l.visibility.name(), latest,
+                l.featured, l.downloads);
+    }
+
+    /**
+     * Publish a scan-rejected release after manual review — the documented escape
+     * hatch for scanner false positives (design §15.3), fully audited.
+     */
+    @PostMapping("/releases/{releaseId}/force-publish")
+    public ResponseEntity<java.util.Map<String, String>> forcePublish(
+            @PathVariable java.util.UUID releaseId,
+            @RequestBody ReasonBody body) {
+        principal.requireUserId();
+        var published = reviews.forcePublish(principal.requireUserId(), releaseId,
+                body == null || body.reason() == null ? "" : body.reason());
+        return ResponseEntity.ok().body(java.util.Map.of(
+                "releaseId", published.id.toString(),
+                "status", published.status.name()));
+    }
+
+    record ReasonBody(String reason) {}
+
+    record VisibilityBody(String visibility) {}
+
+    record FeaturedBody(Boolean featured) {}
 
     @GetMapping("/reports")
     public List<ReviewDtos.ReportDto> reports(@RequestParam(required = false) String status) {

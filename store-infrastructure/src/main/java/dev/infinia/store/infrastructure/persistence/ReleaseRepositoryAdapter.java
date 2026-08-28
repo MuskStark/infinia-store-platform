@@ -86,6 +86,11 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
     }
 
     @Override
+    public Optional<Release> findByArtifactBlobKey(String blobKey) {
+        return jpa.findByArtifactBlobKey(blobKey).map(ReleaseRepositoryAdapter::toDomain);
+    }
+
+    @Override
     public List<Release> findVisibleByType(dev.infinia.store.contract.type.ListingType type) {
         // Type lives on the listing, not the release — resolve through the parent rows.
         java.util.Set<UUID> listingIdsOfType = listingJpa.findAll().stream()

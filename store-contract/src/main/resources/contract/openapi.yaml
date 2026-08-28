@@ -55,6 +55,7 @@ paths:
         - { name: os, in: query, schema: { $ref: '#/components/schemas/Platform' } }
         - { name: arch, in: query, schema: { $ref: '#/components/schemas/Arch' } }
         - { name: sort, in: query, schema: { type: string, enum: [relevance, recent, downloads, favorites], default: relevance } }
+        - { name: featured, in: query, schema: { type: boolean }, description: Editorial featured shelf only }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 24 } }
       responses:
@@ -167,6 +168,115 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ResolveResponse' }
+
+  /releases/{releaseId}/install-manifest:
+    get:
+      operationId: getInstallManifest
+      tags: [Delivery]
+      summary: FengYu Native install manifest (aggregation plan §7.1) — signed artifact + install mode
+      description: |
+        Schema-versioned install contract for the host's SkillInstaller /
+        McpInstaller. MCP installs always default to disabled with secrets
+        kept local; compatibility surfaces are never a separate trust root.
+      security:
+        - {}
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+        - { name: client, in: query, schema: { type: string, default: fengyu } }
+      responses:
+        '200':
+          description: Install manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schemaVersion: { type: integer }
+                  coordinate: { type: string }
+                  type: { type: string }
+                  sourceReleaseId: { type: string }
+                  artifact:
+                    type: object
+                    properties:
+                      url: { type: string, format: uri }
+                      sha256: { type: string }
+                      signature: { type: string }
+                      keyId: { type: string }
+                      size: { type: integer, format: int64 }
+                  dependencies:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        coordinate: { type: string }
+                        range: { type: string }
+                        optional: { type: boolean }
+                  permissions:
+                    type: array
+                    items: { $ref: '#/components/schemas/Permission' }
+                  install:
+                    type: object
+                    properties:
+                      mode: { type: string, enum: [SKILL_DIRECTORY, MCP_TEMPLATE, PLUGIN_PACKAGE] }
+                      defaultEnabled: { type: boolean }
+                      secretsPolicy: { type: string }
+                  resolvedAt: { type: string, format: date-time }
+        '409': { description: Release not installable }
+
+  /compat/fengyu/mcp-catalog:
+    get:
+      operationId: fengyuMcpCatalog
+      tags: [Compatibility]
+      summary: Legacy-shape MCP catalog with direct template downloads
+      security:
+        - {}
+      responses:
+        '200':
+          description: MCP catalog entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    name: { type: string }
+                    description: { type: string }
+                    version: { type: string }
+                    author: { type: string }
+                    downloadUrl: { type: string, description: Direct HMAC-ticketed template URL }
+                    sha256: { type: string }
+                    transport: { type: string }
+                    official: { type: boolean }
+
+  /compat/fengyu/codex/catalog:
+    get:
+      operationId: fengyuCodexCatalog
+      tags: [Compatibility]
+      summary: Codex-consumable skill catalog pointing at native manifests
+      security:
+        - {}
+      responses:
+        '200':
+          description: Codex catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schemaVersion: { type: integer }
+                  generator: { type: string }
+                  skills:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        skillId: { type: string }
+                        version: { type: string }
+                        listing: { type: string }
+                        installManifest: { type: string }
 
   /compat/fengyu/claude-marketplace.json:
     get:
@@ -713,6 +823,72 @@ paths:
       responses:
         '200': { description: Quarantined }
 
+  /admin/listings:
+    get:
+      operationId: listAllListings
+      tags: [Admin]
+      summary: Every listing with curation state — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: All listings regardless of visibility
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminListing' }
+
+  /admin/listings/{listingId}/visibility:
+    post:
+      operationId: setListingVisibility
+      tags: [Admin]
+      summary: Delist (UNLISTED) or relist (PUBLIC) a listing — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: listingId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility: { type: string, enum: [PUBLIC, UNLISTED] }
+      responses:
+        '200':
+          description: Updated listing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminListing' }
+
+  /admin/listings/{listingId}/featured:
+    post:
+      operationId: setListingFeatured
+      tags: [Admin]
+      summary: Toggle editorial featuring — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: listingId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [featured]
+              properties:
+                featured: { type: boolean }
+      responses:
+        '200':
+          description: Updated listing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminListing' }
+
   /admin/reports:
     get:
       operationId: listReports
@@ -1054,6 +1230,7 @@ components:
         downloads: { type: integer, format: int64 }
         publisherName: { type: string }
         updatedAt: { type: string, format: date-time }
+        featured: { type: boolean, description: Editorial featuring (admin) }
 
     CatalogPage:
       type: object
@@ -1545,6 +1722,19 @@ components:
         latestChannel: { type: string, nullable: true }
         updateAvailable: { type: boolean }
 
+    AdminListing:
+      type: object
+      properties:
+        listingId: { type: string }
+        coordinate: { type: string }
+        name: { type: string }
+        type: { type: string }
+        status: { type: string }
+        visibility: { type: string, enum: [PUBLIC, UNLISTED, PRIVATE] }
+        latestVersion: { type: string, nullable: true }
+        featured: { type: boolean }
+        downloads: { type: integer, format: int64 }
+
     Upstream:
       type: object
       properties:
@@ -1552,6 +1742,7 @@ components:
         name: { type: string }
         marketplaceUrl: { type: string, format: uri }
         targetNamespace: { type: string }
+        adapterType: { type: string, enum: [AUTO, CLAUDE_MARKETPLACE, SKILL_REPOSITORY, MCP_REGISTRY] }
         enabled: { type: boolean }
         lastSyncAt: { type: string, format: date-time, nullable: true }
         lastSyncOk: { type: boolean, nullable: true }
@@ -1564,6 +1755,7 @@ components:
         name: { type: string, maxLength: 100 }
         marketplaceUrl: { type: string, format: uri }
         targetNamespace: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }
+        adapterType: { type: string, enum: [AUTO, CLAUDE_MARKETPLACE, SKILL_REPOSITORY, MCP_REGISTRY] }
 
     UpstreamSyncResult:
       type: object

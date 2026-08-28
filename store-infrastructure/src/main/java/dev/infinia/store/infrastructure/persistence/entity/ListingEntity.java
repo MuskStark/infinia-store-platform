@@ -57,6 +57,8 @@ public class ListingEntity {
     public long downloads;
     @Column(name = "favorite_count", nullable = false)
     public long favoriteCount;
+    @Column(nullable = false)
+    public Boolean featured;
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;
     @Column(name = "updated_at", nullable = false)

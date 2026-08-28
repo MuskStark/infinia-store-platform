@@ -23,6 +23,9 @@ public interface ListingRepository {
 
     List<Listing> findByPublisher(UUID publisherUserId);
 
+    /** Every listing regardless of visibility/status — admin console only. */
+    List<Listing> findAllForAdmin();
+
     void save(Listing listing);
 
     void incrementDownloads(UUID listingId);

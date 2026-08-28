@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "official.calendar",
+  "name": "Calendar MCP",
+  "transport": "STREAMABLE_HTTP",
+  "urlTemplate": "https://mcp.infinia.dev/mcp",
+  "requiredSecrets": [{"name": "authorization", "target": "header", "sensitive": true}],
+  "defaultEnabled": false,
+  "toolPolicy": {"enabledByDefault": false},
+  "networkHosts": ["mcp.infinia.dev"]
+}

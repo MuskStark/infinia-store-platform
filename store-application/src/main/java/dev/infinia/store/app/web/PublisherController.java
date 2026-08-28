@@ -66,7 +66,7 @@ public class PublisherController {
                         l.coordinate().toString(), l.type.name(), l.namespace, l.slug,
                         l.name("en"), l.summary("en"), l.category, l.tags, l.iconUrl, null,
                         l.defaultChannel.name().toLowerCase(), l.downloads, l.namespace,
-                        l.updatedAt.toString()))
+                        l.updatedAt.toString(), l.featured))
                 .toList();
     }
 

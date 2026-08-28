@@ -219,7 +219,21 @@ public class PublisherService {
         return release;
     }
 
+    /**
+     * Attaches a pass-through artifact for upstream-aggregated releases: provenance
+     * lives in upstream_item, bytes are rebuilt from the upstream at download time
+     * — nothing is persisted to blob storage (aggregation plan §5.2).
+     */
     @Transactional
+    public Release attachVirtualArtifact(UUID publisherUserId, Release release,
+            Release.ArtifactInfo artifact) {
+        requireListingOwner(publisherUserId, release);
+        release.artifacts = new ArrayList<>(release.artifacts);
+        release.artifacts.add(artifact);
+        releases.save(release);
+        return release;
+    }
+
     public UploadSessionInfo createUploadSession(UUID publisherUserId, Release release,
             String filename, ArtifactKind kind, Platform platform, Arch arch, long declaredSize) {
         requireListingOwner(publisherUserId, release);

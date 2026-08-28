@@ -52,19 +52,29 @@ public class CatalogService {
 
     public record BrowseQuery(ListingType type, String text, String category, Channel channel,
             String hostVersion, String os, String arch, ListingQuery.ListingSort sort,
-            String afterId, int limit) {}
+            Boolean featured, String afterId, int limit) {
+
+        public BrowseQuery(ListingType type, String text, String category, Channel channel,
+                String hostVersion, String os, String arch, ListingQuery.ListingSort sort,
+                String afterId, int limit) {
+            this(type, text, category, channel, hostVersion, os, arch, sort, null, afterId,
+                    limit);
+        }
+    }
 
     public CatalogPageDto browse(BrowseQuery query) {
         ListingQuery.ListingPage page = listings.search(new ListingQuery(
                 query.type(), query.text(), query.category(), query.channel(), null,
                 query.sort() == null ? ListingQuery.ListingSort.RELEVANCE : query.sort(),
-                null, query.afterId(), query.limit()));
+                null, query.afterId(), query.featured(), query.limit()));
 
         List<CatalogItemDto> items = new ArrayList<>();
         for (Listing listing : page.items()) {
             Release latest = latestCompatible(listing, query);
-            if (query.hostVersion() != null && latest == null) {
-                continue; // compatibility filter requested but nothing matches
+            if (latest == null) {
+                // Catalog rows must be installable: listings without a published
+                // release (e.g. rejected upstream imports) stay invisible.
+                continue;
             }
             items.add(toCatalogItem(listing, latest));
         }
@@ -88,6 +98,16 @@ public class CatalogService {
         return listings.findByCoordinate(coordinate).orElseThrow(
                 () -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND,
                         "Listing not found: " + coordinate.listingPart()));
+    }
+
+    /** Latest published release per listing of one type (compat surfaces). */
+    public List<Release> latestVisibleByType(dev.infinia.store.contract.type.ListingType type) {
+        java.util.Map<java.util.UUID, Release> latest = new java.util.HashMap<>();
+        for (Release release : releases.findVisibleByType(type)) {
+            latest.merge(release.listingId, release,
+                    (a, b) -> a.version.compareTo(b.version) >= 0 ? a : b);
+        }
+        return List.copyOf(latest.values());
     }
 
     public List<Release> visibleReleases(Listing listing, Channel channel) {
@@ -283,7 +303,8 @@ public class CatalogService {
                 listing.downloads,
                 listing.namespace,
                 latest == null || latest.publishedAt == null ? null
-                        : latest.publishedAt.toString());
+                        : latest.publishedAt.toString(),
+                listing.featured);
     }
 
 }

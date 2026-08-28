@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "mcp.deepwiki",
+  "name": "DeepWiki MCP",
+  "description": "Ask questions about any public GitHub repository via DeepWiki's hosted remote MCP server. Public endpoint, no credentials required.",
+  "transport": "STREAMABLE_HTTP",
+  "urlTemplate": "https://mcp.deepwiki.com/mcp",
+  "requiredSecrets": [],
+  "defaultEnabled": false,
+  "toolPolicy": { "enabledByDefault": false },
+  "networkHosts": ["mcp.deepwiki.com"]
+}

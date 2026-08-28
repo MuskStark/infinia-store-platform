@@ -21,7 +21,8 @@ public final class CatalogDtos {
             String channel,
             long downloads,
             String publisherName,
-            String updatedAt) {
+            String updatedAt,
+            boolean featured) {
     }
 
     public record CatalogPageDto(

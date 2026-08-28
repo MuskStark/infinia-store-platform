@@ -82,6 +82,10 @@ public class ListingRepositoryAdapter implements ListingRepository {
             if (text != null && !text.isEmpty() && !matchesText(e, text)) {
                 continue;
             }
+            if (query.featured() != null
+                    && query.featured() != (e.featured != null && e.featured)) {
+                continue;
+            }
             matched.add(toDomain(e));
         }
 
@@ -154,6 +158,11 @@ public class ListingRepositoryAdapter implements ListingRepository {
     }
 
     @Override
+    public List<Listing> findAllForAdmin() {
+        return jpa.findAll().stream().map(ListingRepositoryAdapter::toDomain).toList();
+    }
+
+    @Override
     @Transactional
     public void save(Listing listing) {
         ListingEntity entity = jpa.findById(listing.id).orElseGet(ListingEntity::new);
@@ -196,6 +205,7 @@ public class ListingRepositoryAdapter implements ListingRepository {
         e.organizationId = l.organizationId;
         e.downloads = l.downloads;
         e.favoriteCount = l.favoriteCount;
+        e.featured = l.featured;
         e.createdAt = l.createdAt;
         e.updatedAt = l.updatedAt;
         e.localizations.clear();
@@ -225,6 +235,7 @@ public class ListingRepositoryAdapter implements ListingRepository {
         l.organizationId = e.organizationId;
         l.downloads = e.downloads;
         l.favoriteCount = e.favoriteCount;
+        l.featured = e.featured != null && e.featured;
         l.createdAt = e.createdAt;
         l.updatedAt = e.updatedAt;
         l.localizations = new ArrayList<>();

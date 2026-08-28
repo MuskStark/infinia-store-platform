@@ -50,6 +50,7 @@ public class StoreProblemDetails {
             Map.entry(StoreErrorCode.TICKET_INVALID, HttpStatus.FORBIDDEN),
             Map.entry(StoreErrorCode.RATE_LIMITED, HttpStatus.TOO_MANY_REQUESTS),
             Map.entry(StoreErrorCode.IDEMPOTENCY_CONFLICT, HttpStatus.CONFLICT),
+            Map.entry(StoreErrorCode.UPSTREAM_DRIFTED, HttpStatus.CONFLICT),
             Map.entry(StoreErrorCode.SCAN_FAILED, HttpStatus.UNPROCESSABLE_ENTITY),
             Map.entry(StoreErrorCode.SIGNATURE_INVALID, HttpStatus.UNPROCESSABLE_ENTITY),
             Map.entry(StoreErrorCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR));
@@ -67,8 +68,16 @@ public class StoreProblemDetails {
         problem.setType(URI.create("https://store.infinia.dev/problems/" + e.code.code));
         problem.setTitle(messages.getMessage("error." + e.code.code + ".title", null,
                 e.code.code, LocaleContextHolder.getLocale()));
-        problem.setDetail(messages.getMessage("error." + e.code.code + ".detail", null,
-                e.getMessage(), LocaleContextHolder.getLocale()));
+        String detail = e.getMessage();
+        if (e.code == StoreErrorCode.INTERNAL_ERROR && detail != null
+                && !detail.isBlank()) {
+            // Internal errors keep the concrete cause — the generic text hides
+            // exactly the information needed to debug delivery failures.
+            problem.setDetail(detail);
+        } else {
+            problem.setDetail(messages.getMessage("error." + e.code.code + ".detail", null,
+                    detail, LocaleContextHolder.getLocale()));
+        }
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("code", e.code.code);
         problem.setProperty("parameters", e.params);
@@ -100,7 +109,9 @@ public class StoreProblemDetails {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> unexpected(Exception e, HttpServletRequest request) {
         log.error("Unhandled error on {} {}", request.getMethod(), request.getRequestURI(), e);
-        return problem(StoreErrorCode.INTERNAL_ERROR, null, request);
+        String detail = e.getMessage() == null ? null
+                : e.getClass().getSimpleName() + ": " + e.getMessage();
+        return problem(StoreErrorCode.INTERNAL_ERROR, detail, request);
     }
 
     private ResponseEntity<ProblemDetail> problem(StoreErrorCode code, String detail,

@@ -144,6 +144,60 @@ public class ReviewService {
                         envelopeJson)));
     }
 
+    /**
+     * Admin override for scan false-positives (design §15.3: exceptions require a
+     * human decision): publishes a REJECTED release after manual review. Audited
+     * distinctly from a normal approval so the exception trail stays visible.
+     */
+    @Transactional
+    public Release forcePublish(UUID adminUserId, UUID releaseId, String reason) {
+        Release release = releases.findById(releaseId).orElseThrow(
+                () -> new DomainException(StoreErrorCode.RELEASE_NOT_FOUND,
+                        "Release not found"));
+        if (release.status == ReleaseStatus.PUBLISHED) {
+            return release; // idempotent
+        }
+        if (release.status != ReleaseStatus.REJECTED) {
+            throw new DomainException(StoreErrorCode.INVALID_STATE_TRANSITION,
+                    "Only REJECTED releases can be force-published (current: "
+                            + release.status + ")");
+        }
+        Listing listing = listings.findById(release.listingId)
+                .orElseThrow(() -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND,
+                        "Listing not found"));
+        reviews.findLatestByReleaseId(release.id).ifPresent(review -> {
+            review.status = "APPROVED";
+            review.notes = "Force-published by platform admin: " + reason;
+            review.reviewerId = adminUserId;
+            review.decidedAt = Instant.now();
+            reviews.save(review);
+        });
+        release.status = ReleaseStatus.PUBLISHED;
+        release.publishedAt = Instant.now();
+        releases.save(release);
+        String envelopeJson = catalog.canonicalJson(catalog.buildEnvelope(listing, release));
+        release.artifacts = new ArrayList<>(release.artifacts);
+        for (int i = 0; i < release.artifacts.size(); i++) {
+            Release.ArtifactInfo a = release.artifacts.get(i);
+            if (a.signature() == null) {
+                release.artifacts.set(i, new Release.ArtifactInfo(a.id(), a.kind(),
+                        a.platform(), a.arch(), a.filename(), a.size(), a.sha256(),
+                        signing.sign(envelopeJson), signing.currentKeyId(), a.blobKey(),
+                        a.mimeType()));
+            }
+        }
+        releases.save(release);
+        enqueue(StoreEventPayloads.RELEASE_PUBLISHED, release.id, toJson(
+                new StoreEventPayloads.ReleasePublished(
+                        listing.coordinate().withVersion(release.version).toString(),
+                        release.id.toString(), release.version.toString(),
+                        release.channel.name().toLowerCase(), release.publishedAt.toString(),
+                        envelopeJson)));
+        audit.record("USER", adminUserId.toString(), "release.force-publish", "RELEASE",
+                release.id.toString(), "REJECTED", "PUBLISHED: " + reason, null);
+        return release;
+    }
+
     // ---- security withdrawals (design §8.1) ----
 
     @Transactional

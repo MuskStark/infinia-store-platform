@@ -32,7 +32,12 @@ async function load() {
 }
 onMounted(load);
 
-const featured = computed(() => items.value.slice(0, 5));
+// Editorial shelf from platform admins (design §12.4); falls back to the most
+// downloaded listings until the admin features something.
+const featured = computed(() =>
+  items.value.some((i: { featured?: boolean }) => i.featured)
+    ? items.value.filter((i: { featured?: boolean }) => i.featured).slice(0, 5)
+    : items.value.slice(0, 5));
 const latest = computed(() => items.value.slice(5));
 const totalDownloads = computed(() =>
   items.value.reduce((sum, item) => sum + (item.downloads ?? 0), 0),

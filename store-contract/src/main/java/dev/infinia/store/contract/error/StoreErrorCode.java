@@ -30,6 +30,7 @@ public enum StoreErrorCode {
     RATE_LIMITED("rate_limited"),
     IDEMPOTENCY_CONFLICT("idempotency_conflict"),
     WRONG_PASSWORD("wrong_password"),
+    UPSTREAM_DRIFTED("upstream_drifted"),
     REPORT_NOT_FOUND("report_not_found"),
     INTERNAL_ERROR("internal_error");
 

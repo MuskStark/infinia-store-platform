@@ -16,5 +16,14 @@ public record UpstreamSource(
         boolean enabled,
         Instant lastSyncAt,
         Boolean lastSyncOk,
-        String lastError) {
+        String lastError,
+        String adapterType) {
+
+    /** Legacy constructor for rows created before adapter typing existed. */
+    public UpstreamSource(UUID id, String name, String marketplaceUrl,
+            String targetNamespace, boolean enabled, Instant lastSyncAt,
+            Boolean lastSyncOk, String lastError) {
+        this(id, name, marketplaceUrl, targetNamespace, enabled, lastSyncAt, lastSyncOk,
+                lastError, null);
+    }
 }

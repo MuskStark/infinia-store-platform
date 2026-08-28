@@ -16,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
 import java.util.UUID;
@@ -31,14 +32,20 @@ public class DeliveryController {
 
     private final CatalogService catalog;
     private final PublisherService publisher;
+    private final dev.infinia.store.domain.port.ReleaseRepository releases;
     private final TicketService tickets;
     private final BlobStorage blobs;
     private final StoreProperties properties;
+    private final dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts;
 
     public DeliveryController(CatalogService catalog, PublisherService publisher,
-            TicketService tickets, BlobStorage blobs, StoreProperties properties) {
+            dev.infinia.store.domain.port.ReleaseRepository releases,
+            TicketService tickets, BlobStorage blobs, StoreProperties properties,
+            dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts) {
+        this.upstreamArtifacts = upstreamArtifacts;
         this.catalog = catalog;
         this.publisher = publisher;
+        this.releases = releases;
         this.tickets = tickets;
         this.blobs = blobs;
         this.properties = properties;
@@ -78,6 +85,40 @@ public class DeliveryController {
                 || !tickets.verify("download", key, Instant.ofEpochSecond(exp), sig)) {
             throw new DomainException(StoreErrorCode.TICKET_INVALID,
                     "Download ticket is invalid or expired");
+        }
+        // Pass-through upstream artifacts (aggregation plan §5.2): rebuild from the
+        // upstream, verify against the recorded content digest, stream — no blob.
+        if (key.startsWith("upstream/")) {
+            java.util.UUID upstreamItemId;
+            try {
+                upstreamItemId = java.util.UUID.fromString(
+                        key.substring("upstream/".length()));
+            } catch (IllegalArgumentException e) {
+                throw new DomainException(StoreErrorCode.TICKET_INVALID,
+                        "Malformed upstream artifact key");
+            }
+            byte[] bytes;
+            try {
+                // The rebuilt package embeds the release version — resolve the
+                // owning release so pass-through bytes match the recorded sha.
+                Release owner = releases.findByArtifactBlobKey(key).orElse(null);
+                bytes = upstreamArtifacts.rebuild(upstreamItemId,
+                        owner == null ? null : owner.version.toString());
+            } catch (RuntimeException e) {
+                String message = String.valueOf(e.getMessage());
+                if (message.contains("changed since sync")) {
+                    throw new DomainException(StoreErrorCode.UPSTREAM_DRIFTED, message);
+                }
+                throw new DomainException(StoreErrorCode.INTERNAL_ERROR,
+                        "Upstream pass-through failed: " + message);
+            } catch (IOException | InterruptedException e) {
+                throw new DomainException(StoreErrorCode.INTERNAL_ERROR,
+                        "Upstream fetch failed: " + e.getMessage());
+            }
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE)
+                    .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(bytes.length))
+                    .body(out -> out.write(bytes, 0, bytes.length));
         }
         InputStream in = blobs.open(key);
         StreamingResponseBody body = out -> {

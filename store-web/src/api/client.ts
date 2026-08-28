@@ -88,9 +88,40 @@ export const api = {
       throw new ApiRequestError({ status: response.status, detail: 'Upload failed' });
     }
   },
+
+  // ── Upstream aggregation admin (aggregation plan §8) ──
+
+  getUpstreams: () =>
+    request<Upstream[]>('/api/v1/admin/upstreams'),
+
+  createUpstream: (body: {
+    name: string
+    marketplaceUrl: string
+    targetNamespace: string
+    adapterType?: string
+  }) => request<Upstream>('/api/v1/admin/upstreams', { method: 'POST', body: JSON.stringify(body) }),
+
+  syncUpstream: (upstreamId: string) =>
+    request<UpstreamSyncResult>(
+      `/api/v1/admin/upstreams/${encodeURIComponent(upstreamId)}/sync`,
+      { method: 'POST' },
+    ),
 };
 
 // ---- typed DTO aliases generated from the contract ----
+export type Upstream = Partial<components['schemas']['Upstream']> & {
+  upstreamId: string
+  name: string
+  marketplaceUrl: string
+  targetNamespace: string
+};
+export type UpstreamSyncResult = {
+  upstream: string
+  imported: number
+  skipped: number
+  failed: number
+  errors: string[]
+};
 export type CatalogItem = components['schemas']['CatalogItem'];
 export type CatalogPage = components['schemas']['CatalogPage'];
 export type ListingDetail = components['schemas']['ListingDetail'];

@@ -57,13 +57,15 @@ store:
   seed:
     demo-content: false
 ---
-# H2 profile for local runs without Docker: `--spring.profiles.active=local`
+# H2 profile for local runs without Docker: `--spring.profiles.active=local`.
+# Paths anchor to the user home so the store data is independent of the working
+# directory (IDEA runs from the project root, maven from the module dir).
 spring:
   config:
     activate:
       on-profile: local
   datasource:
-    url: jdbc:h2:file:./data/storedb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    url: jdbc:h2:file:${user.home}/.infinia-store/storedb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
     username: sa
     password: ""
   jpa:
@@ -71,6 +73,11 @@ spring:
   h2:
     console:
       enabled: true
+
+store:
+  blob-dir: ${user.home}/.infinia-store/blobs
+  key-dir: ${user.home}/.infinia-store/keys
+  export-dir: ${user.home}/.infinia-store/git-exports
 
 ---
 # Seeds local/test accounts; demo catalog fixtures remain opt-in.

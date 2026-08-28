@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "mcp.github",
+  "name": "GitHub Official MCP",
+  "description": "GitHub's official remote MCP server: repos, issues, pull requests and more. Requires a GitHub personal access token supplied locally after install.",
+  "transport": "STREAMABLE_HTTP",
+  "urlTemplate": "https://api.githubcopilot.com/mcp/",
+  "requiredSecrets": [
+    { "name": "authorization", "target": "header", "sensitive": true }
+  ],
+  "defaultEnabled": false,
+  "toolPolicy": { "enabledByDefault": false },
+  "networkHosts": ["api.githubcopilot.com"]
+}

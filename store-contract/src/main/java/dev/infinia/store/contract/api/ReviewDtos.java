@@ -83,10 +83,22 @@ public final class ReviewDtos {
             String name,
             String marketplaceUrl,
             String targetNamespace,
+            String adapterType,
             boolean enabled,
             String lastSyncAt,
             Boolean lastSyncOk,
             String lastError) {}
+
+    public record AdminListingDto(
+            String listingId,
+            String coordinate,
+            String name,
+            String type,
+            String status,
+            String visibility,
+            String latestVersion,
+            boolean featured,
+            long downloads) {}
 
     public record UpstreamSyncResultDto(
             String upstream,

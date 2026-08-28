@@ -60,8 +60,17 @@ class UpstreamController {
             throw new DomainException(StoreErrorCode.IDEMPOTENCY_CONFLICT,
                     "Upstream name already exists");
         }
+        if (request.adapterType() != null && !request.adapterType().isBlank()
+                && !List.of("AUTO", "CLAUDE_MARKETPLACE", "SKILL_REPOSITORY", "MCP_REGISTRY")
+                        .contains(request.adapterType().trim().toUpperCase())) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "adapterType must be AUTO, CLAUDE_MARKETPLACE, SKILL_REPOSITORY"
+                            + " or MCP_REGISTRY");
+        }
         UpstreamSource source = new UpstreamSource(UuidV7.generate(), request.name(),
-                request.marketplaceUrl(), request.targetNamespace(), true, null, null, null);
+                request.marketplaceUrl(), request.targetNamespace(), true, null, null, null,
+                request.adapterType() == null ? null
+                        : request.adapterType().trim().toUpperCase());
         upstreams.save(source);
         audit.record("USER", adminId.toString(), "upstream.create", "UPSTREAM",
                 source.id().toString(), null, source.marketplaceUrl(), null);
@@ -79,11 +88,13 @@ class UpstreamController {
         return result;
     }
 
-    record CreateUpstreamRequest(String name, String marketplaceUrl, String targetNamespace) {}
+    record CreateUpstreamRequest(String name, String marketplaceUrl, String targetNamespace,
+                String adapterType) {}
 
     private static ReviewDtos.UpstreamDto toDto(UpstreamSource source) {
         return new ReviewDtos.UpstreamDto(source.id().toString(), source.name(),
-                source.marketplaceUrl(), source.targetNamespace(), source.enabled(),
+                source.marketplaceUrl(), source.targetNamespace(), source.adapterType(),
+                source.enabled(),
                 source.lastSyncAt() == null ? null : source.lastSyncAt().toString(),
                 source.lastSyncOk(), source.lastError());
     }

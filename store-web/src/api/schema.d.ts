@@ -90,6 +90,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/releases/{releaseId}/install-manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * FengYu Native install manifest (aggregation plan §7.1) — signed artifact + install mode
+         * @description Schema-versioned install contract for the host's SkillInstaller /
+         *     McpInstaller. MCP installs always default to disabled with secrets
+         *     kept local; compatibility surfaces are never a separate trust root.
+         */
+        get: operations["getInstallManifest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/compat/fengyu/mcp-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Legacy-shape MCP catalog with direct template downloads */
+        get: operations["fengyuMcpCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/compat/fengyu/codex/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Codex-consumable skill catalog pointing at native manifests */
+        get: operations["fengyuCodexCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/compat/fengyu/claude-marketplace.json": {
         parameters: {
             query?: never;
@@ -606,6 +662,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/listings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every listing with curation state — PLATFORM_ADMIN */
+        get: operations["listAllListings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/listings/{listingId}/visibility": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delist (UNLISTED) or relist (PUBLIC) a listing — PLATFORM_ADMIN */
+        post: operations["setListingVisibility"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/listings/{listingId}/featured": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Toggle editorial featuring — PLATFORM_ADMIN */
+        post: operations["setListingFeatured"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/reports": {
         parameters: {
             query?: never;
@@ -841,6 +948,8 @@ export interface components {
             publisherName?: string;
             /** Format: date-time */
             updatedAt?: string;
+            /** @description Editorial featuring (admin) */
+            featured?: boolean;
         };
         CatalogPage: {
             items: components["schemas"]["CatalogItem"][];
@@ -1280,12 +1389,27 @@ export interface components {
             latestChannel?: string | null;
             updateAvailable?: boolean;
         };
+        AdminListing: {
+            listingId?: string;
+            coordinate?: string;
+            name?: string;
+            type?: string;
+            status?: string;
+            /** @enum {string} */
+            visibility?: "PUBLIC" | "UNLISTED" | "PRIVATE";
+            latestVersion?: string | null;
+            featured?: boolean;
+            /** Format: int64 */
+            downloads?: number;
+        };
         Upstream: {
             upstreamId?: string;
             name?: string;
             /** Format: uri */
             marketplaceUrl?: string;
             targetNamespace?: string;
+            /** @enum {string} */
+            adapterType?: "AUTO" | "CLAUDE_MARKETPLACE" | "SKILL_REPOSITORY" | "MCP_REGISTRY";
             enabled?: boolean;
             /** Format: date-time */
             lastSyncAt?: string | null;
@@ -1297,6 +1421,8 @@ export interface components {
             /** Format: uri */
             marketplaceUrl: string;
             targetNamespace: string;
+            /** @enum {string} */
+            adapterType?: "AUTO" | "CLAUDE_MARKETPLACE" | "SKILL_REPOSITORY" | "MCP_REGISTRY";
         };
         UpstreamSyncResult: {
             upstream?: string;
@@ -1383,6 +1509,8 @@ export interface operations {
                 os?: components["schemas"]["Platform"];
                 arch?: components["schemas"]["Arch"];
                 sort?: "relevance" | "recent" | "downloads" | "favorites";
+                /** @description Editorial featured shelf only */
+                featured?: boolean;
                 cursor?: string;
                 limit?: number;
             };
@@ -1533,6 +1661,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolveResponse"];
+                };
+            };
+        };
+    };
+    getInstallManifest: {
+        parameters: {
+            query?: {
+                client?: string;
+            };
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Install manifest */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        schemaVersion?: number;
+                        coordinate?: string;
+                        type?: string;
+                        sourceReleaseId?: string;
+                        artifact?: {
+                            /** Format: uri */
+                            url?: string;
+                            sha256?: string;
+                            signature?: string;
+                            keyId?: string;
+                            /** Format: int64 */
+                            size?: number;
+                        };
+                        dependencies?: {
+                            coordinate?: string;
+                            range?: string;
+                            optional?: boolean;
+                        }[];
+                        permissions?: components["schemas"]["Permission"][];
+                        install?: {
+                            /** @enum {string} */
+                            mode?: "SKILL_DIRECTORY" | "MCP_TEMPLATE" | "PLUGIN_PACKAGE";
+                            defaultEnabled?: boolean;
+                            secretsPolicy?: string;
+                        };
+                        /** Format: date-time */
+                        resolvedAt?: string;
+                    };
+                };
+            };
+            /** @description Release not installable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    fengyuMcpCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MCP catalog entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id?: string;
+                        name?: string;
+                        description?: string;
+                        version?: string;
+                        author?: string;
+                        /** @description Direct HMAC-ticketed template URL */
+                        downloadUrl?: string;
+                        sha256?: string;
+                        transport?: string;
+                        official?: boolean;
+                    }[];
+                };
+            };
+        };
+    };
+    fengyuCodexCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Codex catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        schemaVersion?: number;
+                        generator?: string;
+                        skills?: {
+                            name?: string;
+                            skillId?: string;
+                            version?: string;
+                            listing?: string;
+                            installManifest?: string;
+                        }[];
+                    };
                 };
             };
         };
@@ -2302,6 +2550,83 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    listAllListings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All listings regardless of visibility */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminListing"][];
+                };
+            };
+        };
+    };
+    setListingVisibility: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    visibility: "PUBLIC" | "UNLISTED";
+                };
+            };
+        };
+        responses: {
+            /** @description Updated listing */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminListing"];
+                };
+            };
+        };
+    };
+    setListingFeatured: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    featured: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated listing */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminListing"];
+                };
             };
         };
     };
