@@ -18,7 +18,16 @@ const typeLabel = computed(() => t(`type.${props.item.type}`));
     <MagicCard class="h-full transition-transform group-hover:-translate-y-0.5" :bordered="featured">
       <div class="flex h-full flex-col gap-3 p-5">
         <div class="flex items-start justify-between gap-2">
-          <div class="grid h-10 w-10 place-items-center rounded-xl bg-surface-muted font-bold dark:bg-slate-800">
+          <img
+            v-if="item.iconUrl"
+            :src="item.iconUrl"
+            alt=""
+            class="h-10 w-10 rounded-xl object-cover"
+          />
+          <div
+            v-else
+            class="grid h-10 w-10 place-items-center rounded-xl bg-surface-muted font-bold dark:bg-slate-800"
+          >
             {{ item.name.charAt(0) }}
           </div>
           <div class="flex items-center gap-1">
@@ -34,9 +43,17 @@ const typeLabel = computed(() => t(`type.${props.item.type}`));
             {{ item.summary }}
           </p>
         </div>
-        <div class="mt-auto flex items-center justify-between text-xs text-muted dark:text-slate-400">
-          <span>{{ item.namespace }}</span>
-          <span v-if="item.latestVersion">v{{ item.latestVersion }}</span>
+        <div class="mt-auto space-y-1.5">
+          <div v-if="item.category" class="flex flex-wrap gap-1">
+            <Badge tone="accent">{{ item.category }}</Badge>
+          </div>
+          <div class="flex items-center justify-between text-xs text-muted dark:text-slate-400">
+            <span>{{ item.namespace }}</span>
+            <span class="flex items-center gap-2">
+              <span v-if="item.downloads != null">↓ {{ item.downloads.toLocaleString() }}</span>
+              <span v-if="item.latestVersion">v{{ item.latestVersion }}</span>
+            </span>
+          </div>
         </div>
       </div>
     </MagicCard>

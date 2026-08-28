@@ -50,7 +50,7 @@ function submitSearch() {
         class="rounded-xl border border-line bg-surface px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
         aria-label="sort"
       >
-        <option v-for="sort in sorts" :key="sort" :value="sort">{{ sort }}</option>
+        <option v-for="sort in sorts" :key="sort" :value="sort">{{ t(`sort.${sort}`) }}</option>
       </select>
     </div>
 

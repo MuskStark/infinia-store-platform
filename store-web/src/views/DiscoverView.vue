@@ -5,7 +5,6 @@ import { api, type CatalogItem, type CatalogPage } from '../api/client';
 import {
   AnimatedGridPattern,
   BlurFade,
-  MagicCard,
   Marquee,
   NumberTicker,
 } from '@infinia/magic-ui-vue';
@@ -109,14 +108,7 @@ const types = ['APP', 'PLUGIN', 'SKILL', 'MCP', 'FLOW'] as const;
         </RouterLink>
       </div>
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <MagicCard v-for="item in latest" :key="item.coordinate" class="p-5">
-          <RouterLink :to="`/listing/${item.namespace}/${item.slug}`">
-            <h3 class="font-semibold">{{ item.name }}</h3>
-            <p class="mt-1 line-clamp-2 text-sm text-muted dark:text-slate-400">
-              {{ item.summary }}
-            </p>
-          </RouterLink>
-        </MagicCard>
+        <ListingCard v-for="item in latest" :key="item.coordinate" :item="item" />
       </div>
     </section>
   </div>

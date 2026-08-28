@@ -27,6 +27,12 @@ function favoriteRoute(favorite: { listingCoordinate?: string; name?: string }) 
 function itemRoute(item: InstalledItem) {
   return favoriteRoute({ listingCoordinate: item.coordinate });
 }
+
+function formatDate(iso?: string | null): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString();
+}
 </script>
 
 <template>
@@ -96,8 +102,10 @@ function itemRoute(item: InstalledItem) {
               >
                 {{ favorite.name ?? favorite.listingCoordinate }}
               </RouterLink>
-              <div class="mt-2">
+              <div class="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted dark:text-slate-400">
                 <Badge tone="muted">{{ t(`type.${favorite.type}`) }}</Badge>
+                <Badge v-if="favorite.latestVersion" tone="muted">v{{ favorite.latestVersion }}</Badge>
+                <span v-if="favorite.addedAt">{{ t('library.addedAt') }}: {{ formatDate(favorite.addedAt) }}</span>
               </div>
             </li>
           </ul>
