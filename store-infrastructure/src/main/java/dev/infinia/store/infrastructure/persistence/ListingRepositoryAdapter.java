@@ -120,7 +120,8 @@ public class ListingRepositoryAdapter implements ListingRepository {
         }
         Listing last = page.isEmpty() ? null : page.get(page.size() - 1);
         return new ListingQuery.ListingPage(page, hasMore,
-                last == null ? null : sortValue(query, last), last == null ? null : last.id.toString());
+                last == null ? null : sortValue(query, last),
+                last == null ? null : last.id.toString(), matched.size());
     }
 
     private static String sortValue(ListingQuery query, Listing l) {

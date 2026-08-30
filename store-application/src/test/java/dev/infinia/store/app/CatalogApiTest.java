@@ -55,6 +55,18 @@ class CatalogApiTest {
     }
 
     @Test
+    void totalEstimateCountsBeyondTheCurrentPage() throws Exception {
+        ResponseEntity<String> response = http().getJson("/api/v1/catalog?limit=2",
+                String.class, null);
+        Map<String, Object> body = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(response.getBody(), Map.class);
+        assertEquals(2, ((List<?>) body.get("items")).size());
+        assertTrue(((Number) body.get("totalEstimate")).longValue() > 2,
+                "totalEstimate must describe the catalog, not the current page: " + body);
+        assertNotNull(body.get("nextCursor"));
+    }
+
+    @Test
     void filtersByTypeAndSearch() {
         ResponseEntity<String> plugins = http().getJson("/api/v1/catalog?type=PLUGIN",
                 String.class, null);

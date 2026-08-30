@@ -8,6 +8,8 @@ import dev.infinia.store.contract.type.Channel;
 import dev.infinia.store.domain.model.Listing;
 import dev.infinia.store.domain.model.ListingRating;
 import dev.infinia.store.domain.model.Release;
+import dev.infinia.store.domain.port.PublishingRepositories;
+import dev.infinia.store.domain.port.UpstreamRepositories;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,12 +29,18 @@ public class ListingController {
     private final CatalogService catalog;
     private final ModerationService moderation;
     private final CurrentPrincipal principal;
+    private final UpstreamRepositories.UpstreamItemRepository upstreamItems;
+    private final PublishingRepositories.UpstreamSourceRepository upstreamSources;
 
     public ListingController(CatalogService catalog, ModerationService moderation,
-            CurrentPrincipal principal) {
+            CurrentPrincipal principal,
+            UpstreamRepositories.UpstreamItemRepository upstreamItems,
+            PublishingRepositories.UpstreamSourceRepository upstreamSources) {
         this.catalog = catalog;
         this.moderation = moderation;
         this.principal = principal;
+        this.upstreamItems = upstreamItems;
+        this.upstreamSources = upstreamSources;
     }
 
     @GetMapping("/{namespace}/{slug}")
@@ -48,8 +56,12 @@ public class ListingController {
         Channel channelFilter = channel == null ? null
                 : Channel.valueOf(channel.trim().toUpperCase());
         List<Release> releases = catalog.visibleReleases(listing, channelFilter);
+        var upstream = upstreamItems.findLatestByListingId(listing.id).orElse(null);
+        var source = upstream == null ? null
+                : upstreamSources.findById(upstream.sourceId()).orElse(null);
         return ResponseEntity.ok().eTag("\"listing-" + listing.id + "-" + listing.updatedAt + "\"")
-                .body(DtoMapper.listingDetail(listing, releases, listing.favoriteCount));
+                .body(DtoMapper.listingDetail(listing, releases, listing.favoriteCount,
+                        upstream, source));
     }
 
     @GetMapping("/{namespace}/{slug}/ratings")

@@ -32,21 +32,29 @@ public class McpRegistryAdapter implements UpstreamAdapter {
     public List<NormalizedItem> discover(UpstreamSource source, RepoFetcher fetcher)
             throws IOException, InterruptedException {
         JsonNode server = fetcher.fetchJson(source.marketplaceUrl());
-        List<NormalizedItem> items = new ArrayList<>();
         String id = server.path("id").asString(
                 server.path("name").asString("mcp-server"));
         String name = server.path("name").asString(id);
         String description = ClaudeMarketplaceAdapter.clamp(
                 server.path("description").asString(""), 480);
         String version = server.path("version").asString(null);
+        return List.of(new NormalizedItem("mcp-registry:" + id, "MCP", name,
+                ClaudeMarketplaceAdapter.slug(id), description, version, "",
+                source.marketplaceUrl(), null, null, null));
+    }
+
+    @Override
+    public NormalizedItem materialize(UpstreamSource source, NormalizedItem discovered,
+            RepoFetcher fetcher) throws IOException, InterruptedException {
+        JsonNode server = fetcher.fetchJson(discovered.sourceUrl());
 
         ObjectNode template = tools.jackson.databind.json.JsonMapper.builder()
                 .build().createObjectNode();
         template.put("schemaVersion", 1);
         template.put("id", source.targetNamespace() + "."
-                + ClaudeMarketplaceAdapter.slug(id));
-        template.put("name", name);
-        template.put("description", description);
+                + discovered.slug());
+        template.put("name", discovered.name());
+        template.put("description", discovered.description());
         template.put("transport", "STREAMABLE_HTTP");
         template.put("defaultEnabled", false);
         template.putObject("toolPolicy").put("enabledByDefault", false);
@@ -81,13 +89,12 @@ public class McpRegistryAdapter implements UpstreamAdapter {
             throw new IOException("server.json has neither remote nor package deployment");
         }
 
-        items.add(new NormalizedItem("mcp-registry:" + id, "MCP", name,
-                ClaudeMarketplaceAdapter.slug(id), description, version, "",
-                source.marketplaceUrl(), null,
+        return new NormalizedItem(discovered.externalId(), discovered.kind(),
+                discovered.name(), discovered.slug(), discovered.description(),
+                discovered.version(), discovered.sourcePath(), discovered.sourceUrl(), null,
                 tools.jackson.databind.json.JsonMapper.builder().build()
                         .writerWithDefaultPrettyPrinter().writeValueAsBytes(template),
-                null));
-        return items;
+                discovered.license());
     }
 
     private static String hostOf(String url) {

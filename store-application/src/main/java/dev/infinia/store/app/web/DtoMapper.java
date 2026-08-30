@@ -6,6 +6,8 @@ import dev.infinia.store.contract.api.ReviewDtos;
 import dev.infinia.store.domain.model.Listing;
 import dev.infinia.store.domain.model.Release;
 import dev.infinia.store.domain.model.Review;
+import dev.infinia.store.domain.model.UpstreamItem;
+import dev.infinia.store.domain.model.UpstreamSource;
 
 /** Maps domain objects to contract DTOs. */
 public final class DtoMapper {
@@ -14,6 +16,12 @@ public final class DtoMapper {
 
     public static ListingDtos.ListingDetailDto listingDetail(Listing listing,
             java.util.List<Release> releases, long favoriteCount) {
+        return listingDetail(listing, releases, favoriteCount, null, null);
+    }
+
+    public static ListingDtos.ListingDetailDto listingDetail(Listing listing,
+            java.util.List<Release> releases, long favoriteCount,
+            UpstreamItem upstream, UpstreamSource source) {
         return new ListingDtos.ListingDetailDto(
                 listing.id.toString(),
                 listing.coordinate().toString(),
@@ -36,7 +44,16 @@ public final class DtoMapper {
                         .map(l -> new ListingDtos.LocalizationDto(l.locale(), l.name(),
                                 l.summary(), l.descriptionMarkdown(), l.changelogMarkdown()))
                         .toList(),
-                releases.stream().map(DtoMapper::release).toList());
+                releases.stream().map(DtoMapper::release).toList(),
+                upstream == null ? null : new ListingDtos.UpstreamProvenanceDto(
+                        source == null ? listing.namespace : source.name(),
+                        upstream.externalId(),
+                        upstream.sourceUrl() == null && source != null
+                                ? source.marketplaceUrl() : upstream.sourceUrl(),
+                        upstream.sourcePath(), upstream.ref(), upstream.commitSha(),
+                        upstream.upstreamVersion(), upstream.contentSha256(),
+                        upstream.firstSeenAt().toString(), upstream.lastSeenAt().toString(),
+                        "LIVE_NO_RETENTION"));
     }
 
     public static ListingDtos.ListingReleaseDto release(Release release) {
@@ -64,15 +81,16 @@ public final class DtoMapper {
     }
 
     public static ListingDtos.ArtifactDto artifact(Release.ArtifactInfo a) {
+        boolean live = a.blobKey() != null && a.blobKey().startsWith("upstream/");
         return new ListingDtos.ArtifactDto(
                 a.id() == null ? null : a.id().toString(),
                 a.kind().name(),
                 a.platform().name().toLowerCase(),
                 a.arch().name().toLowerCase(),
                 a.filename(),
-                a.size(),
-                a.sha256(),
-                a.keyId(),
+                live ? 0 : a.size(),
+                live ? null : a.sha256(),
+                live ? null : a.keyId(),
                 a.mimeType());
     }
 

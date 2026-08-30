@@ -52,12 +52,10 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Sync orchestrator (aggregation plan §3/§4): adapters discover and normalize
- * upstream entries; every item then flows through the standard publish
- * pipeline (scan → review → sign) with full provenance — source URL, path,
- * commit sha, content digest — recorded in upstream_item / upstream_release.
- * Idempotency is the exact (source, externalId, contentSha256) triple, so a
- * re-sync of unchanged content imports nothing.
+ * Metadata-only upstream catalog synchronizer. A sync reads catalog manifests
+ * and publishes virtual entries, but never fetches repository/archive payloads.
+ * The payload is materialized, scanned and compatibility-packed only when a
+ * user downloads it; no upstream artifact is stored by the store.
  */
 @Service
 public class UpstreamSyncService {
@@ -129,10 +127,11 @@ public class UpstreamSyncService {
             StoreUser bot = requireCiAccount();
             StoreUser reviewer = requireReviewerAccount();
             ensureNamespace(source.targetNamespace(), bot);
+            RepoFetcher.SyncScope provenanceScope = new RepoFetcher.SyncScope();
 
             for (NormalizedItem item : resolveAdapter(source).discover(source, fetcher)) {
                 try {
-                    String contentSha = contentDigest(item);
+                    String contentSha = packageBuilder.metadataDigest(item);
                     var exact = upstreamItems.findExact(source.id(), item.externalId(),
                             contentSha);
                     if (exact.isPresent()) {
@@ -140,14 +139,13 @@ public class UpstreamSyncService {
                             skipped++;
                             continue; // unchanged and already pass-through
                         }
-                        // Legacy blob-backed release with identical content: convert by
-                        // publishing the pass-through form once (aggregation plan §5.2).
+                        // Legacy blob-backed release with identical catalog metadata:
+                        // convert its latest view to pass-through without fetching it.
                         Release published = publish(source, bot, reviewer, item, contentSha,
                                 exact.get().id());
                         upstreamReleases.save(new UpstreamRelease(UuidV7.generate(),
                                 exact.get().id(), published.id, exact.get().commitSha(),
-                                item.version(), sha256Hex(buildArtifact(source, item,
-                                        published.version.toString())), run.id(),
+                                item.version(), contentSha, run.id(),
                                 Instant.now()));
                         imported++;
                         continue;
@@ -157,7 +155,8 @@ public class UpstreamSyncService {
                     if (existing != null
                             && upstreamItems.findLatest(source.id(), item.externalId())
                                     .isEmpty()) {
-                        recordProvenance(source, item, contentSha, existing, run.id());
+                        recordProvenance(source, item, contentSha, existing, run.id(),
+                                UuidV7.generate(), provenanceScope);
                         skipped++;
                         continue;
                     }
@@ -165,7 +164,7 @@ public class UpstreamSyncService {
                     Release published = publish(source, bot, reviewer, item, contentSha,
                             virtualArtifactId);
                     recordProvenance(source, item, contentSha, published, run.id(),
-                            virtualArtifactId);
+                            virtualArtifactId, provenanceScope);
                     imported++;
                 } catch (Exception e) {
                     errors.add(item.slug() + ": " + e.getMessage());
@@ -222,10 +221,9 @@ public class UpstreamSyncService {
     // ---- publishing (plan §8: nothing bypasses scan → review → sign) ----
 
     /**
-     * Publishes one upstream item with a pass-through (virtual) artifact: no blob
-     * is stored — the provenance row is the artifact, downloads rebuild from the
-     * upstream and verify against the recorded content digest. Scanning runs
-     * in-memory on the exact bytes a download would produce.
+     * Publishes one metadata-only pass-through entry. The placeholder hash is a
+     * catalog identity key, not a payload checksum; download-facing APIs suppress
+     * it and the actual payload is scanned and hashed only in the download request.
      */
     private Release publish(UpstreamSource source, StoreUser bot, StoreUser reviewer,
             NormalizedItem item, String contentSha, UUID virtualArtifactId)
@@ -248,12 +246,41 @@ public class UpstreamSyncService {
 
         Release release = allocateVersion(bot, listing, baseVersion(item), item.sourceUrl(),
                 source);
-        byte[] artifact = buildArtifact(source, item, release.version.toString());
         publisher.attachVirtualArtifact(bot.id, release, new Release.ArtifactInfo(
                 UuidV7.generate(), ArtifactKind.PACKAGE, Platform.UNIVERSAL, Arch.UNIVERSAL,
-                artifactName, artifact.length, sha256Hex(artifact), null, null,
+                artifactName, 0, contentSha, null, null,
                 "upstream/" + virtualArtifactId, "application/octet-stream"));
-        return scanAndApprove(source, bot, reviewer, release, artifact, type);
+        return approveMetadataOnly(source, reviewer, release);
+    }
+
+    /**
+     * Metadata is reviewable without touching the payload. Payload security checks
+     * are deliberately deferred to UpstreamArtifactService in the download path.
+     */
+    private Release approveMetadataOnly(UpstreamSource source, StoreUser reviewer,
+            Release release) {
+        ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.UPLOADING);
+        release.status = ReleaseStatus.UPLOADING;
+        releases.save(release);
+        ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.SCANNING);
+        release.status = ReleaseStatus.SCANNING;
+        releases.save(release);
+        ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.IN_REVIEW);
+        release.status = ReleaseStatus.IN_REVIEW;
+        Review review = new Review();
+        review.id = UuidV7.generate();
+        review.releaseId = release.id;
+        review.listingId = release.listingId;
+        review.status = "IN_REVIEW";
+        review.submittedAt = Instant.now();
+        review.findings = new ArrayList<>();
+        reviewRepository.save(review);
+        releases.save(release);
+        reviews.decide(reviewer.id, review.id,
+                new dev.infinia.store.contract.api.ReviewDtos.ReviewDecisionRequest("APPROVE",
+                        "Metadata-only upstream entry; payload scan is enforced at download ("
+                                + source.name() + ")"));
+        return releases.findById(release.id).orElse(release);
     }
 
     /** In-memory scan on the exact pass-through bytes; blocking → fast-fail. */
@@ -273,8 +300,18 @@ public class UpstreamSyncService {
         review.releaseId = release.id;
         review.listingId = release.listingId;
         review.submittedAt = Instant.now();
-        review.findings = new ArrayList<>(result.findings.stream()
-                .map(f -> new Review.Finding(f.severity(), f.rule(), f.message())).toList());
+        // Findings key on (rule, message) — identical duplicates would violate
+        // pk_review_finding; append the file like ScanPipeline so hits in
+        // different files stay distinct while exact duplicates collapse.
+        java.util.LinkedHashMap<String, Review.Finding> distinct =
+                new java.util.LinkedHashMap<>();
+        for (var f : result.findings) {
+            String message = f.file() == null ? f.message()
+                    : f.message() + " (" + f.file() + ")";
+            distinct.putIfAbsent(f.rule() + "|" + message,
+                    new Review.Finding(f.severity(), f.rule(), message));
+        }
+        review.findings = new ArrayList<>(distinct.values());
         if (result.hasBlockingFindings()) {
             ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.REJECTED);
             release.status = ReleaseStatus.REJECTED;
@@ -348,14 +385,10 @@ public class UpstreamSyncService {
     }
 
     private void recordProvenance(UpstreamSource source, NormalizedItem item, String contentSha,
-            Release published, UUID runId) {
-        recordProvenance(source, item, contentSha, published, runId, UuidV7.generate());
-    }
-
-    private void recordProvenance(UpstreamSource source, NormalizedItem item, String contentSha,
-            Release published, UUID runId, UUID virtualArtifactId) {
+            Release published, UUID runId, UUID virtualArtifactId,
+            RepoFetcher.SyncScope provenanceScope) {
         Instant now = Instant.now();
-        String commitSha = commitShaOf(item);
+        String commitSha = commitShaOf(item, provenanceScope);
         UpstreamItem record = new UpstreamItem(virtualArtifactId, source.id(),
                 item.externalId(), published.listingId, item.sourceUrl(), item.sourcePath(),
                 null, commitSha, item.version(), contentSha, now, now, null);
@@ -373,20 +406,16 @@ public class UpstreamSyncService {
                 && release.artifacts.get(0).blobKey().startsWith("upstream/");
     }
 
-    private String commitShaOf(NormalizedItem item) {
+    private String commitShaOf(NormalizedItem item, RepoFetcher.SyncScope provenanceScope) {
         if (item.sourceUrl() == null
                 || !item.sourceUrl().startsWith("https://github.com/")) {
             return null;
         }
         try {
-            return fetcher.commitSha(item.sourceUrl(), null, new RepoFetcher.SyncScope());
+            return fetcher.commitSha(item.sourceUrl(), null, provenanceScope);
         } catch (Exception e) {
             return null; // provenance degrades to ref-only, never blocks the sync
         }
-    }
-
-    private String contentDigest(NormalizedItem item) {
-        return packageBuilder.contentDigest(item.skillFiles(), item.mcpTemplate());
     }
 
     /** Polls until the scan resolves: into review, or rejected with reasons. */
@@ -424,15 +453,24 @@ public class UpstreamSyncService {
     }
 
     private UpstreamSource withStatus(UpstreamSource source, boolean ok, String error) {
+        // last_error is VARCHAR(1000): clamp so a many-item partial sync still
+        // persists its status instead of failing the whole run.
         return new UpstreamSource(source.id(), source.name(), source.marketplaceUrl(),
                 source.targetNamespace(), source.enabled(), Instant.now(), ok,
-                ok ? null : error, source.adapterType());
+                ok ? null : clamp(error, 1000), source.adapterType());
     }
 
     private SyncRun finished(SyncRun run, int imported, int skipped, List<String> errors) {
         return new SyncRun(run.id(), run.sourceId(), run.startedAt(), Instant.now(),
                 imported, skipped, errors.size(), errors.isEmpty() ? "OK" : "PARTIAL",
-                errors.isEmpty() ? null : String.join("; ", errors));
+                errors.isEmpty() ? null : clamp(String.join("; ", errors), 4000));
+    }
+
+    private static String clamp(String value, int max) {
+        if (value == null || value.length() <= max) {
+            return value;
+        }
+        return value.substring(0, max - 1) + "…";
     }
 
     private StoreUser requireCiAccount() {

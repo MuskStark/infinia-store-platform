@@ -41,6 +41,8 @@ const reportDone = ref(false);
 const reportError = ref<string | null>(null);
 
 const latestRelease = computed(() => detail.value?.releases?.[0] ?? null);
+const upstream = computed(() => detail.value?.upstream ?? null);
+const isLiveUpstream = computed(() => upstream.value?.deliveryMode === 'LIVE_NO_RETENTION');
 
 /** Locale-aware localization (zh-CN matches zh first, then en, then anything). */
 const localization = computed(() => {
@@ -56,6 +58,26 @@ const localization = computed(() => {
   );
 });
 const displayName = computed(() => localization.value?.name ?? detail.value?.slug ?? '');
+const overviewText = computed(
+  () => localization.value?.descriptionMarkdown?.trim()
+    || localization.value?.summary?.trim()
+    || t('listing.descriptionUnavailable'),
+);
+const sourceUrl = computed(() => upstream.value?.sourceUrl ?? latestRelease.value?.sourceUrl);
+
+function displayVersion(version?: string | null): string {
+  const declared = upstream.value?.upstreamVersion?.trim();
+  if (declared) return `v${declared}`;
+  if (!version || (isLiveUpstream.value && version === '0.0.0')) {
+    return t('listing.versionUnspecified');
+  }
+  return `v${version}`;
+}
+
+function shortSha(value?: string | null): string {
+  if (!value) return '—';
+  return value.length > 16 ? `${value.slice(0, 12)}…` : value;
+}
 
 function formatDate(iso?: string | null): string {
   if (!iso) return '—';
@@ -234,7 +256,8 @@ const installLabel = computed(() => {
           <div class="flex flex-wrap items-center gap-2">
             <h1 class="text-2xl font-bold">{{ displayName }}</h1>
             <Badge tone="muted">{{ t(`type.${detail.type}`) }}</Badge>
-            <Badge v-if="latestRelease" tone="muted">v{{ latestRelease.version }}</Badge>
+            <Badge v-if="latestRelease" tone="muted">{{ displayVersion(latestRelease.version) }}</Badge>
+            <Badge v-if="isLiveUpstream" tone="accent">{{ t('listing.liveDelivery') }}</Badge>
             <Badge v-if="detail.defaultChannel !== 'stable'" tone="accent">
               {{ t(`channel.${detail.defaultChannel}`) }}
             </Badge>
@@ -331,8 +354,41 @@ const installLabel = computed(() => {
     </nav>
 
     <section v-if="tab === 'overview'" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
-      <article class="prose max-w-none">
-        <p class="whitespace-pre-wrap">{{ localization?.descriptionMarkdown }}</p>
+      <article class="max-w-none space-y-5">
+        <div>
+          <h2 class="text-lg font-semibold">{{ t('listing.aboutTitle') }}</h2>
+          <p class="mt-3 whitespace-pre-wrap leading-7 text-muted dark:text-slate-300">{{ overviewText }}</p>
+        </div>
+        <div
+          v-if="upstream"
+          class="rounded-2xl border border-line bg-surface-muted p-5 dark:border-slate-800 dark:bg-slate-900/60"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-semibold">{{ t('listing.upstreamMetadata') }}</h3>
+            <Badge v-if="isLiveUpstream" tone="success">{{ t('listing.noRetention') }}</Badge>
+          </div>
+          <p v-if="isLiveUpstream" class="mt-2 text-sm leading-6 text-muted dark:text-slate-400">
+            {{ t('listing.liveDeliveryHint') }}
+          </p>
+          <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt class="text-muted dark:text-slate-400">{{ t('listing.upstreamSource') }}</dt>
+              <dd class="mt-1 font-medium">{{ upstream.sourceName || '—' }}</dd>
+            </div>
+            <div>
+              <dt class="text-muted dark:text-slate-400">{{ t('listing.sourcePath') }}</dt>
+              <dd class="mt-1 break-all font-mono text-xs">{{ upstream.sourcePath || upstream.externalId || '—' }}</dd>
+            </div>
+            <div>
+              <dt class="text-muted dark:text-slate-400">{{ t('listing.revision') }}</dt>
+              <dd class="mt-1 font-mono text-xs">{{ shortSha(upstream.commitSha || upstream.ref) }}</dd>
+            </div>
+            <div>
+              <dt class="text-muted dark:text-slate-400">{{ t('listing.lastSynced') }}</dt>
+              <dd class="mt-1">{{ formatDate(upstream.lastSeenAt) }}</dd>
+            </div>
+          </dl>
+        </div>
         <div v-if="detail.screenshots?.length" class="mt-6 grid gap-3 sm:grid-cols-2">
           <img
             v-for="shot in detail.screenshots"
@@ -349,7 +405,7 @@ const installLabel = computed(() => {
         <dl class="space-y-2">
           <div class="flex justify-between gap-3">
             <dt class="shrink-0 text-muted dark:text-slate-400">{{ t('listing.version') }}</dt>
-            <dd class="text-right"><code v-if="latestRelease">v{{ latestRelease.version }}</code><span v-else>—</span></dd>
+            <dd class="text-right"><code v-if="latestRelease">{{ displayVersion(latestRelease.version) }}</code><span v-else>—</span></dd>
           </div>
           <div class="flex justify-between gap-3">
             <dt class="shrink-0 text-muted dark:text-slate-400">{{ t('listing.category') }}</dt>
@@ -376,8 +432,8 @@ const installLabel = computed(() => {
           </div>
         </dl>
         <a
-          v-if="latestRelease?.sourceUrl"
-          :href="latestRelease.sourceUrl"
+          v-if="sourceUrl"
+          :href="sourceUrl"
           target="_blank"
           rel="noopener noreferrer"
           class="block font-medium text-accent underline"
@@ -392,10 +448,17 @@ const installLabel = computed(() => {
     </section>
 
     <section v-if="tab === 'versions'" class="space-y-3">
+      <div
+        v-if="isLiveUpstream && !upstream?.upstreamVersion"
+        class="rounded-2xl border border-accent/30 bg-accent/5 p-4 text-sm text-muted dark:text-slate-300"
+      >
+        <p class="font-semibold text-fg dark:text-white">{{ t('listing.versionUnspecified') }}</p>
+        <p class="mt-1">{{ t('listing.versionPlaceholderHint') }}</p>
+      </div>
       <MagicCard v-for="release in detail.releases" :key="release.releaseId" class="p-5">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-2">
-            <span class="font-semibold">v{{ release.version }}</span>
+            <span class="font-semibold">{{ displayVersion(release.version) }}</span>
             <StateChip :status="release.status" />
             <Badge tone="muted">{{ t(`channel.${release.channel}`) }}</Badge>
             <Badge v-if="(release.rolloutPercent ?? 100) < 100" tone="accent">
@@ -409,6 +472,20 @@ const installLabel = computed(() => {
         </p>
         <p v-if="release.changelogMarkdown" class="mt-2 whitespace-pre-wrap text-sm">{{ release.changelogMarkdown }}</p>
         <p v-else class="mt-2 text-sm text-muted dark:text-slate-400">{{ t('listing.noChangelog') }}</p>
+        <dl v-if="upstream" class="mt-4 grid gap-2 border-t border-line pt-3 text-xs dark:border-slate-800 sm:grid-cols-3">
+          <div>
+            <dt class="text-muted dark:text-slate-400">{{ t('listing.sourcePath') }}</dt>
+            <dd class="mt-1 break-all font-mono">{{ upstream.sourcePath || upstream.externalId || '—' }}</dd>
+          </div>
+          <div>
+            <dt class="text-muted dark:text-slate-400">{{ t('listing.revision') }}</dt>
+            <dd class="mt-1 font-mono">{{ shortSha(upstream.commitSha || upstream.ref) }}</dd>
+          </div>
+          <div>
+            <dt class="text-muted dark:text-slate-400">{{ t('listing.lastSynced') }}</dt>
+            <dd class="mt-1">{{ formatDate(upstream.lastSeenAt) }}</dd>
+          </div>
+        </dl>
       </MagicCard>
     </section>
 
@@ -435,7 +512,15 @@ const installLabel = computed(() => {
           </tr>
         </tbody>
       </table>
-      <p v-else class="text-sm text-muted dark:text-slate-400">{{ t('common.empty') }}</p>
+      <div v-else class="rounded-2xl border border-line p-5 dark:border-slate-800">
+        <h2 class="font-semibold">{{ t('listing.noPermissionsDeclared') }}</h2>
+        <p class="mt-2 text-sm leading-6 text-muted dark:text-slate-400">
+          {{ isLiveUpstream ? t('listing.noPermissionsDeclaredUpstream') : t('listing.noPermissionsDeclaredLocal') }}
+        </p>
+        <p v-if="isLiveUpstream" class="mt-3 rounded-xl bg-surface-muted p-3 text-sm dark:bg-slate-800/60">
+          {{ t('listing.permissionDownloadScan') }}
+        </p>
+      </div>
     </section>
 
     <section v-if="tab === 'dependencies'">
@@ -450,11 +535,28 @@ const installLabel = computed(() => {
           <Badge v-if="!dependency.optional" tone="danger">{{ t('listing.required') }}</Badge>
         </li>
       </ul>
-      <p v-else class="text-sm text-muted dark:text-slate-400">{{ t('common.empty') }}</p>
+      <div v-else class="rounded-2xl border border-line p-5 dark:border-slate-800">
+        <h2 class="font-semibold">{{ t('listing.noDependenciesDeclared') }}</h2>
+        <p class="mt-2 text-sm leading-6 text-muted dark:text-slate-400">
+          {{ isLiveUpstream ? t('listing.noDependenciesDeclaredUpstream') : t('listing.noDependenciesDeclaredLocal') }}
+        </p>
+      </div>
     </section>
 
     <section v-if="tab === 'compatibility'" class="space-y-3">
       <p class="text-sm text-muted dark:text-slate-400">{{ t('listing.compatHint') }}</p>
+      <div v-if="isLiveUpstream" class="grid gap-3 sm:grid-cols-2">
+        <div class="rounded-2xl border border-line p-4 dark:border-slate-800">
+          <p class="text-xs text-muted dark:text-slate-400">{{ t('listing.deliveryMode') }}</p>
+          <p class="mt-1 font-semibold">{{ t('listing.liveDelivery') }}</p>
+          <p class="mt-1 text-sm text-muted dark:text-slate-400">{{ t('listing.noRetention') }}</p>
+        </div>
+        <div class="rounded-2xl border border-line p-4 dark:border-slate-800">
+          <p class="text-xs text-muted dark:text-slate-400">{{ t('listing.targetPlatform') }}</p>
+          <p class="mt-1 font-semibold">universal / universal</p>
+          <p class="mt-1 text-sm text-muted dark:text-slate-400">{{ t('listing.noHostRestriction') }}</p>
+        </div>
+      </div>
       <table class="w-full text-left text-sm">
         <thead>
           <tr class="text-muted">
@@ -470,8 +572,8 @@ const installLabel = computed(() => {
             :key="release.releaseId"
             class="border-t border-line dark:border-slate-800"
           >
-            <td class="p-2 font-mono text-xs">v{{ release.version }}</td>
-            <td class="p-2"><code v-if="release.requiresHost">{{ release.requiresHost }}</code><span v-else class="text-muted">—</span></td>
+            <td class="p-2 font-mono text-xs">{{ displayVersion(release.version) }}</td>
+            <td class="p-2"><code v-if="release.requiresHost">{{ release.requiresHost }}</code><span v-else class="text-muted">{{ t('listing.noHostRestriction') }}</span></td>
             <td class="p-2">{{ t(`channel.${release.channel}`) }}</td>
             <td class="p-2"><StateChip :status="release.status" /></td>
           </tr>
@@ -480,6 +582,30 @@ const installLabel = computed(() => {
     </section>
 
     <section v-if="tab === 'security'" class="space-y-4 text-sm">
+      <div v-if="isLiveUpstream" class="rounded-2xl border border-accent/30 bg-accent/5 p-5">
+        <h2 class="font-semibold">{{ t('listing.liveSecurityTitle') }}</h2>
+        <ol class="mt-3 grid gap-3 sm:grid-cols-2">
+          <li v-for="(item, index) in [
+            t('listing.securityMetadataOnly'),
+            t('listing.securityOnDemand'),
+            t('listing.securityScan'),
+            t('listing.securityNoRetention'),
+          ]" :key="item" class="flex gap-3 rounded-xl bg-surface/70 p-3 dark:bg-slate-900/70">
+            <span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-white">{{ index + 1 }}</span>
+            <span class="leading-6">{{ item }}</span>
+          </li>
+        </ol>
+        <dl class="mt-4 grid gap-3 border-t border-accent/20 pt-4 sm:grid-cols-2">
+          <div>
+            <dt class="text-muted dark:text-slate-400">{{ t('listing.metadataDigest') }}</dt>
+            <dd class="mt-1 break-all font-mono text-xs">{{ upstream?.metadataSha256 || '—' }}</dd>
+          </div>
+          <div>
+            <dt class="text-muted dark:text-slate-400">{{ t('listing.revision') }}</dt>
+            <dd class="mt-1 font-mono text-xs">{{ shortSha(upstream?.commitSha || upstream?.ref) }}</dd>
+          </div>
+        </dl>
+      </div>
       <p v-if="!latestRelease?.artifacts?.length" class="text-muted dark:text-slate-400">
         {{ t('listing.noArtifacts') }}
       </p>
@@ -493,21 +619,22 @@ const installLabel = computed(() => {
             <Badge tone="muted">{{ artifact.kind }}</Badge>
             <span class="font-mono text-xs">{{ artifact.filename }}</span>
             <span class="text-muted dark:text-slate-400">
-              {{ artifact.platform }}/{{ artifact.arch }} · {{ formatSize(artifact.size) }}
+              {{ artifact.platform }}/{{ artifact.arch }} · {{ isLiveUpstream && !artifact.size ? t('listing.generatedOnDemand') : formatSize(artifact.size) }}
             </span>
           </div>
           <p class="break-all">
             <span class="text-muted dark:text-slate-400">{{ t('listing.sha256') }}:</span>
-            <code>{{ artifact.sha256 }}</code>
+            <code>{{ artifact.sha256 || (isLiveUpstream ? t('listing.checksumAtDownload') : '—') }}</code>
           </p>
           <p v-if="artifact.keyId" class="break-all">
             <span class="text-muted dark:text-slate-400">{{ t('listing.signature') }}:</span>
             <code>{{ artifact.keyId }}</code>
           </p>
         </div>
-        <p class="text-muted dark:text-slate-400">
+        <p v-if="!isLiveUpstream" class="text-muted dark:text-slate-400">
           {{ t('listing.signatureNote') }}
         </p>
+        <p v-else class="text-muted dark:text-slate-400">{{ t('listing.liveChecksumNote') }}</p>
       </template>
     </section>
 

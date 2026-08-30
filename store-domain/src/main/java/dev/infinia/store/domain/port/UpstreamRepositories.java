@@ -25,6 +25,9 @@ public final class UpstreamRepositories {
         /** Latest provenance row for one entry regardless of content revision. */
         Optional<UpstreamItem> findLatest(UUID sourceId, String externalId);
 
+        /** Latest provenance attached to a public store listing. */
+        Optional<UpstreamItem> findLatestByListingId(UUID listingId);
+
         List<UpstreamItem> findBySource(UUID sourceId);
     }
 

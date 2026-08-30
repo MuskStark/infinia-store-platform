@@ -80,11 +80,7 @@ class UpstreamAdaptersConformanceTest {
                         "targetNamespace", ns, "adapterType", "MCP_REGISTRY"),
                 Map.class).getBody();
         String upstreamId = (String) created.get("upstreamId");
-
-        Map first = (Map) http().exchangeJson(HttpMethod.POST,
-                "/api/v1/admin/upstreams/" + upstreamId + "/sync", jsonAuth(admin), null,
-                Map.class).getBody();
-        assertEquals(1, ((Number) first.get("imported")).intValue(), "body: " + first);
+        assertEquals(Boolean.TRUE, created.get("lastSyncOk"), "body: " + created);
 
         // The MCP entry is live with a direct template download + provenance recorded.
         List<Map<String, Object>> mcp = (List<Map<String, Object>>) http()
@@ -190,14 +186,11 @@ class UpstreamAdaptersConformanceTest {
                         "marketplaceUrl", "http://127.0.0.1:169.254.169.254/latest/meta-data",
                         "targetNamespace", "blocked"),
                 Map.class).getBody();
-        Map result = (Map) http().exchangeJson(HttpMethod.POST,
-                "/api/v1/admin/upstreams/" + created.get("upstreamId") + "/sync",
-                jsonAuth(admin), null, Map.class).getBody();
-        assertEquals(0, ((Number) result.get("imported")).intValue());
-        assertTrue(String.valueOf(result.get("errors")).toLowerCase().contains("blocked")
-                        || String.valueOf(result.get("errors")).toLowerCase().contains("resolve")
-                        || String.valueOf(result.get("errors")).toLowerCase().contains("aborted"),
-                "SSRF attempt must fail loudly: " + result);
+        assertEquals(Boolean.FALSE, created.get("lastSyncOk"));
+        String error = String.valueOf(created.get("lastError")).toLowerCase();
+        assertTrue(error.contains("blocked") || error.contains("resolve")
+                        || error.contains("aborted") || error.contains("no host"),
+                "SSRF attempt must fail loudly: " + created);
     }
 
     private HttpServer startRegistry(String serverJson) throws IOException {

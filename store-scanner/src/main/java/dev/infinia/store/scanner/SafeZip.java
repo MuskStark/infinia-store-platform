@@ -88,7 +88,7 @@ public final class SafeZip {
         return files;
     }
 
-    private static void validatePath(String name) {
+    public static void validatePath(String name) {
         if (name == null || name.isBlank()) {
             throw new ScanViolation("zip.invalid-path", "Empty entry name");
         }

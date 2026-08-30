@@ -66,6 +66,12 @@ class UpstreamProvenanceAdapters {
         }
 
         @Override
+        public Optional<UpstreamItem> findLatestByListingId(UUID listingId) {
+            return jpa.findFirstByListingIdOrderByLastSeenAtDesc(listingId)
+                    .map(UpstreamItemAdapter::toDomain);
+        }
+
+        @Override
         public List<UpstreamItem> findBySource(UUID sourceId) {
             return jpa.findBySourceId(sourceId).stream()
                     .map(UpstreamItemAdapter::toDomain).toList();

@@ -81,12 +81,18 @@ public class NativeInstallController {
                 .withVersion(release.version).toString());
         manifest.put("type", listing.type.name());
         manifest.put("sourceReleaseId", release.id.toString());
-        manifest.put("artifact", Map.of(
-                "url", url,
-                "sha256", artifact.sha256(),
-                "signature", artifact.signature() == null ? "" : artifact.signature(),
-                "keyId", artifact.keyId() == null ? "" : artifact.keyId(),
-                "size", artifact.size()));
+        boolean live = artifact.blobKey() != null
+                && artifact.blobKey().startsWith("upstream/");
+        Map<String, Object> artifactView = new LinkedHashMap<>();
+        artifactView.put("url", url);
+        artifactView.put("delivery", live ? "LIVE_UPSTREAM" : "IMMUTABLE_BLOB");
+        if (!live) {
+            artifactView.put("sha256", artifact.sha256());
+            artifactView.put("signature", artifact.signature() == null ? "" : artifact.signature());
+            artifactView.put("keyId", artifact.keyId() == null ? "" : artifact.keyId());
+            artifactView.put("size", artifact.size());
+        }
+        manifest.put("artifact", artifactView);
         manifest.put("dependencies", release.dependencies.stream()
                 .map(d -> Map.of("coordinate", d.coordinate(), "range", d.range(),
                         "optional", d.optional())).toList());
@@ -147,7 +153,9 @@ public class NativeInstallController {
             entry.put("homepage", null);
             entry.put("downloadUrl", directDownloadUrl(artifact));
             entry.put("official", false);
-            entry.put("sha256", artifact.sha256());
+            if (artifact.blobKey() == null || !artifact.blobKey().startsWith("upstream/")) {
+                entry.put("sha256", artifact.sha256());
+            }
             entry.put("transport", "STREAMABLE_HTTP");
             entries.add(entry);
         }

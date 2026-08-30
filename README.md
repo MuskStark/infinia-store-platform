@@ -59,13 +59,15 @@ enable their own demo fixtures.
 ### FengYu host sources
 
 Register native `.fyp` listings as a `FENGYU` source using
-`http://localhost:8080/api/v1/compat/fengyu/catalog`. Register Skill and MCP listings as a
-separate `CLAUDE` source using
-`http://localhost:8080/api/v1/compat/fengyu/claude-marketplace.json`.
+`http://localhost:8080/api/v1/compat/fengyu/catalog`. FengYu's direct Skill catalog is
+`http://localhost:8080/api/v1/compat/fengyu/skills-catalog`; MCP entries are available at
+`http://localhost:8080/api/v1/compat/fengyu/mcp-catalog` and through the Native install API.
 
-The two routes are intentionally distinct: a native FengYu plugin cannot be installed by the
-Claude agent-content installer, while Skill/MCP packages are exported as cloneable
-`.claude-plugin/plugin.json` repositories.
+Publisher-owned Skill/MCP blobs may also be exposed at
+`http://localhost:8080/api/v1/compat/fengyu/claude-marketplace.json`. Aggregated upstream
+entries are intentionally excluded from that disk-backed Git export: synchronization stores
+metadata only, and FengYu downloads cause a request-scoped fetch, security scan and compatible
+package build with `Cache-Control: no-store`.
 
 ### Production-like stack (Docker)
 

@@ -49,18 +49,14 @@ public class EcosystemExportService {
     private final ReleaseRepository releases;
     private final ListingRepository listings;
     private final BlobStorage blobs;
-    private final dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts;
     private final LocalGitExporter exporter;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public EcosystemExportService(ReleaseRepository releases, ListingRepository listings,
-            BlobStorage blobs,
-            dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts,
-            LocalGitExporter exporter) {
+            BlobStorage blobs, LocalGitExporter exporter) {
         this.releases = releases;
         this.listings = listings;
         this.blobs = blobs;
-        this.upstreamArtifacts = upstreamArtifacts;
         this.exporter = exporter;
     }
 
@@ -103,6 +99,13 @@ public class EcosystemExportService {
         for (Map.Entry<UUID, Release> e : latest.entrySet()) {
             Listing listing = listingById.get(e.getKey());
             if (listing == null || !listing.isPubliclyVisible()) {
+                continue;
+            }
+            ArtifactInfo selected = packageArtifact(e.getValue());
+            // Never materialize an upstream payload just to build a compatibility
+            // index, and never retain it as a local git object. Upstream entries
+            // remain visible through the FengYu catalogs and are packed on GET.
+            if (selected != null && isUpstreamVirtual(selected)) {
                 continue;
             }
             try {
@@ -205,26 +208,21 @@ public class EcosystemExportService {
         return files;
     }
 
-    /** Local blob or pass-through upstream rebuild (aggregation plan §5.2). */
+    /** Local publisher-owned blobs only; upstream virtual artifacts never export. */
     private byte[] artifactBytes(ArtifactInfo artifact, String releaseVersion) {
         String key = artifact.blobKey();
-        if (key != null && key.startsWith("upstream/")) {
-            try {
-                return upstreamArtifacts.rebuild(
-                        java.util.UUID.fromString(key.substring("upstream/".length())),
-                        releaseVersion);
-            } catch (dev.infinia.store.app.upstream.UpstreamArtifactService
-                    .UpstreamDriftedException e) {
-                throw new IllegalStateException(e.getMessage(), e);
-            } catch (IOException | InterruptedException e) {
-                throw new IllegalStateException("Upstream fetch failed: " + e.getMessage(), e);
-            }
+        if (isUpstreamVirtual(artifact)) {
+            throw new IllegalStateException("Upstream artifacts cannot be persisted as exports");
         }
         try (InputStream in = blobs.open(key)) {
             return in.readAllBytes();
         } catch (IOException e) {
             throw new IllegalStateException("Blob missing: " + key, e);
         }
+    }
+
+    private static boolean isUpstreamVirtual(ArtifactInfo artifact) {
+        return artifact.blobKey() != null && artifact.blobKey().startsWith("upstream/");
     }
 
     private ArtifactInfo packageArtifact(Release release) {

@@ -7,6 +7,8 @@ import tools.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,20 +33,12 @@ public class ClaudeMarketplaceAdapter implements UpstreamAdapter {
     @Override
     public List<NormalizedItem> discover(UpstreamSource source, RepoFetcher fetcher)
             throws IOException, InterruptedException {
-        RepoFetcher.SyncScope scope = new RepoFetcher.SyncScope();
         String marketplaceUrl = source.marketplaceUrl();
         JsonNode document;
         String repoUrl = null;
         if (marketplaceUrl.matches("^https://github\\.com/[^/]+/[^/]+/?$")) {
             repoUrl = marketplaceUrl;
-            Map<String, byte[]> repoFiles = fetcher.repoFiles(repoUrl, scope);
-            byte[] manifest = repoFiles.get(".claude-plugin/marketplace.json");
-            if (manifest == null) {
-                throw new IOException("no .claude-plugin/marketplace.json in " + repoUrl);
-            }
-            document = new String(manifest, StandardCharsets.UTF_8).isEmpty() ? null
-                    : tools.jackson.databind.json.JsonMapper.builder().build()
-                            .readTree(manifest);
+            document = fetcher.githubJsonFile(repoUrl, ".claude-plugin/marketplace.json");
         } else {
             document = fetcher.fetchJson(marketplaceUrl);
         }
@@ -57,58 +51,116 @@ public class ClaudeMarketplaceAdapter implements UpstreamAdapter {
             }
             JsonNode sourceNode = plugin.path("source");
             if (sourceNode.isTextual()) {
-                // Official collection form: skills[] paths inside the marketplace repo.
-                Map<String, byte[]> repoFiles = fetcher.repoFiles(repoUrl, scope);
+                // Textual sources are paths in the marketplace repository. The
+                // manifest can enumerate skills without downloading that repo.
+                if (repoUrl == null) {
+                    continue;
+                }
+                boolean viaSkillPaths = false;
                 for (JsonNode skillPath : plugin.path("skills")) {
-                    NormalizedItem item = skillFromDirectory(source, repoUrl, repoFiles,
-                            skillPath.asText());
-                    if (item != null && seen.add(item.externalId())) {
-                        items.add(item);
-                    }
+                    viaSkillPaths = true;
+                    addMetadata(items, seen, plugin, repoUrl, skillPath.asText());
+                }
+                if (!viaSkillPaths) {
+                    addMetadata(items, seen, plugin, repoUrl, sourceNode.asText());
                 }
             } else {
                 String entryRepo = sourceNode.path("url").asString(null);
-                String subPath = sourceNode.path("path").asString("");
-                if (entryRepo == null) {
-                    continue;
-                }
-                Map<String, byte[]> repoFiles = fetcher.repoFiles(entryRepo, scope);
-                String pluginName = plugin.path("name").asString();
-                // Object sources may point at the whole repo, a named dir or a
-                // subpath; probe the same candidates the legacy importer used.
-                for (String candidate : List.of(subPath, slug(pluginName), "")) {
-                    if (candidate == null) {
-                        continue;
-                    }
-                    NormalizedItem item = skillFromDirectory(source, entryRepo, repoFiles,
-                            candidate);
-                    if (item != null && seen.add(item.externalId())) {
-                        items.add(item);
-                        break;
-                    }
-                }
-            }
-        }
-        // Full-repository sweep (plan §4: the repo, not the manifest, is the catalog).
-        if (repoUrl != null) {
-            Map<String, byte[]> repoFiles = fetcher.repoFiles(repoUrl, scope);
-            for (String path : repoFiles.keySet()) {
-                if (path.startsWith("skills/") && path.endsWith("/SKILL.md")
-                        && path.indexOf('/', 7) == path.lastIndexOf('/')) {
-                    NormalizedItem item = skillFromDirectory(source, repoUrl, repoFiles,
-                            path.substring(0, path.length() - "/SKILL.md".length()));
-                    if (item != null && seen.add(item.externalId())) {
-                        items.add(item);
-                    }
+                if (entryRepo != null) {
+                    addMetadata(items, seen, plugin, entryRepo,
+                            sourceNode.path("path").asString(""));
                 }
             }
         }
         return items;
     }
 
+    @Override
+    public NormalizedItem materialize(UpstreamSource source, NormalizedItem discovered,
+            RepoFetcher fetcher) throws IOException, InterruptedException {
+        Map<String, byte[]> repoFiles = fetcher.repoFiles(discovered.sourceUrl(),
+                new RepoFetcher.SyncScope());
+        java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
+        candidates.add(discovered.sourcePath());
+        candidates.add(slug(discovered.name()));
+        candidates.add("");
+        // Archive feeds often omit a subpath. Probe discovered SKILL.md directories
+        // only after the explicit metadata candidates, at download time.
+        repoFiles.keySet().stream()
+                .filter(p -> p.equals("SKILL.md") || p.endsWith("/SKILL.md"))
+                .map(p -> p.equals("SKILL.md") ? ""
+                        : p.substring(0, p.length() - "/SKILL.md".length()))
+                .sorted().forEach(candidates::add);
+        for (String candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            NormalizedItem payload = skillFromDirectory(source, discovered.sourceUrl(),
+                    repoFiles, candidate);
+            if (payload != null) {
+                return new NormalizedItem(discovered.externalId(), discovered.kind(),
+                        discovered.name(), discovered.slug(), discovered.description(),
+                        discovered.version(), discovered.sourcePath(), discovered.sourceUrl(),
+                        payload.skillFiles(), null, discovered.license());
+            }
+        }
+        throw new IOException("No SKILL.md for " + discovered.externalId());
+    }
+
+    @Override
+    public MaterializedPayload materializeToDirectory(UpstreamSource source,
+            NormalizedItem discovered, RepoFetcher fetcher, Path workspace)
+            throws IOException, InterruptedException {
+        Path repository = fetcher.repoDirectory(discovered.sourceUrl(),
+                workspace.resolve("repository"));
+        java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
+        candidates.add(cleanPath(discovered.sourcePath()));
+        if (discovered.sourcePath() != null
+                && cleanPath(discovered.sourcePath()).startsWith("skills/")) {
+            candidates.add(cleanPath(discovered.sourcePath()).substring("skills/".length()));
+        }
+        candidates.add(slug(discovered.name()));
+        candidates.add("");
+        try (var paths = Files.walk(repository)) {
+            paths.filter(Files::isRegularFile)
+                    .filter(p -> "SKILL.md".equals(String.valueOf(p.getFileName())))
+                    .map(Path::getParent)
+                    .map(repository::relativize)
+                    .map(Path::toString)
+                    .sorted()
+                    .forEach(candidates::add);
+        }
+        for (String candidate : candidates) {
+            Path directory = repository.resolve(candidate == null ? "" : candidate)
+                    .normalize();
+            if (directory.startsWith(repository)
+                    && Files.isRegularFile(directory.resolve("SKILL.md"))) {
+                return new MaterializedPayload(discovered, directory, null);
+            }
+        }
+        throw new IOException("No SKILL.md for " + discovered.externalId());
+    }
+
+    private static void addMetadata(List<NormalizedItem> items, java.util.Set<String> seen,
+            JsonNode plugin, String repoUrl, String path) {
+        String clean = cleanPath(path);
+        String name = plugin.path("name").asString("skill");
+        String identity = clean.isBlank() ? slug(name) : clean;
+        String externalId = "claude:" + identity;
+        if (!seen.add(externalId)) {
+            return;
+        }
+        String version = plugin.path("version").asString(null);
+        String license = plugin.path("license").asString(null);
+        items.add(new NormalizedItem(externalId, "SKILL", name,
+                slug(identity.substring(identity.lastIndexOf('/') + 1)),
+                clamp(plugin.path("description").asString(""), 480),
+                version, clean, repoUrl, null, null, license));
+    }
+
     private NormalizedItem skillFromDirectory(UpstreamSource source, String repoUrl,
             Map<String, byte[]> repoFiles, String dir) {
-        String clean = dir.replaceAll("^\\./", "").replaceAll("^/+", "").replaceAll("/+$", "");
+        String clean = cleanPath(dir);
         // Collection entries carry "./skills/xlsx" paths; the sweep yields "xlsx".
         // Both describe the same skill — normalize identity so they dedupe, while
         // files stay rooted at the real repository directory.
@@ -141,6 +193,12 @@ public class ClaudeMarketplaceAdapter implements UpstreamAdapter {
                 name, slug, description,
                 frontmatterField(skillMd, "version"), identity, repoUrl, files, null,
                 frontmatterField(skillMd, "license"));
+    }
+
+    private static String cleanPath(String path) {
+        return path == null ? ""
+                : path.replaceAll("^\\./", "").replaceAll("^/+", "")
+                        .replaceAll("/+$", "");
     }
 
     static String frontmatterField(byte[] skillMd, String field) {

@@ -1,16 +1,22 @@
 package dev.infinia.store.scanner;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class PackageScannerTest {
+
+    @TempDir
+    Path temp;
 
     private static byte[] zip(String name, String content) throws IOException {
         return zipOf(new String[][] {{name, content}});
@@ -184,6 +190,25 @@ class PackageScannerTest {
                 {"SKILL.md", "# x"}}));
         assertTrue(official.findings.stream()
                 .anyMatch(f -> f.rule().equals("skill.official-reserved")));
+    }
+
+    @Test
+    void scansSkillFromDiskWithoutLoadingThePackageAsOneByteArray() throws IOException {
+        Path pkg = temp.resolve("skill.fys");
+        Files.write(pkg, zipOf(new String[][] {
+                {"manifest.json", "{\"schemaVersion\":1,\"id\":\"community.disk-skill\","
+                        + "\"name\":\"Disk Skill\",\"description\":\"streamed\","
+                        + "\"version\":\"1.0.0\",\"author\":\"community\","
+                        + "\"official\":false}"},
+                {"SKILL.md", "# Disk Skill"},
+                {"scripts/run.py", "print('ok')"}}));
+
+        ScanResult result = new PackageScanner().scan("SKILL", "1.0.0", pkg);
+
+        assertFalse(result.hasBlockingFindings(), () -> result.findings.toString());
+        assertEquals("application/zip", result.mimeType);
+        assertTrue(result.files.contains("scripts/run.py"));
+        assertTrue(result.sbom.contains("scripts/run.py"));
     }
 
     @Test

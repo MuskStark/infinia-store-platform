@@ -5,6 +5,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -16,10 +17,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.zip.GZIPOutputStream;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,7 +41,12 @@ class UpstreamSyncFlowTest {
     @LocalServerPort
     int port;
 
+    @Autowired
+    dev.infinia.store.domain.port.BlobStorage blobs;
+
     private HttpServer upstream;
+    private final AtomicInteger payloadRequests = new AtomicInteger();
+    private final AtomicInteger metadataRequests = new AtomicInteger();
 
     @AfterEach
     void stopUpstream() {
@@ -59,12 +69,14 @@ class UpstreamSyncFlowTest {
                 dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
 
         // Register the upstream (PLATFORM_ADMIN only).
+        String upstreamName = "claude-official-" + UUID.randomUUID().toString().substring(0, 6);
         ResponseEntity<Map> created = http().exchangeJson(HttpMethod.POST,
                 "/api/v1/admin/upstreams", jsonAuth(adminToken),
-                Map.of("name", "claude-official-" + UUID.randomUUID().toString().substring(0, 6),
+                Map.of("name", upstreamName,
                         "marketplaceUrl", "http://127.0.0.1:" + upstream.getAddress().getPort()
                                 + "/marketplace.json",
-                        "targetNamespace", "claude"),
+                        "targetNamespace", "claude",
+                        "adapterType", "CLAUDE_MARKETPLACE"),
                 Map.class);
         assertEquals(201, created.getStatusCode().value());
         String upstreamId = (String) created.getBody().get("upstreamId");
@@ -73,14 +85,25 @@ class UpstreamSyncFlowTest {
                 "/api/v1/admin/upstreams", jsonAuth(null), Map.of(), String.class);
         assertEquals(401, denied.getStatusCode().value());
 
-        // First sync imports the skill and publishes it.
+        // Registration immediately indexes metadata; no separate admin action is
+        // required before the upstream item becomes visible.
+        assertEquals(Boolean.TRUE, created.getBody().get("lastSyncOk"));
+        assertEquals(0, payloadRequests.get(),
+                "catalog indexing must not pull the referenced repository artifact");
+        assertEquals(2, metadataRequests.get(),
+                "transient metadata failures should recover without admin intervention");
+
+        // A manual sync after registration is idempotent.
         ResponseEntity<Map> first = http().exchangeJson(HttpMethod.POST,
                 "/api/v1/admin/upstreams/" + upstreamId + "/sync", jsonAuth(adminToken), null,
                 Map.class);
         assertEquals(200, first.getStatusCode().value());
-        assertEquals(1, ((Number) first.getBody().get("imported")).intValue(),
+        assertEquals(0, ((Number) first.getBody().get("imported")).intValue(),
                 "body: " + first.getBody());
+        assertEquals(1, ((Number) first.getBody().get("skipped")).intValue());
         assertEquals(0, ((Number) first.getBody().get("failed")).intValue());
+        assertEquals(0, payloadRequests.get(),
+                "catalog sync must not pull the referenced repository artifact");
 
         // The aggregated skill reaches both host-facing skill surfaces, versioned
         // from the upstream SKILL.md frontmatter.
@@ -93,15 +116,54 @@ class UpstreamSyncFlowTest {
         assertEquals("2.0.0", aggregated.get("version"));
         assertEquals("claude", aggregated.get("author"));
 
+        ResponseEntity<Map> detail = http().getJson(
+                "/api/v1/listings/claude/example-skill", Map.class, null);
+        assertEquals(200, detail.getStatusCode().value());
+        Map<String, Object> provenance = (Map<String, Object>) detail.getBody().get("upstream");
+        assertNotNull(provenance, "upstream provenance missing from listing detail");
+        assertEquals(upstreamName, provenance.get("sourceName"));
+        assertEquals("2.0.0", provenance.get("upstreamVersion"));
+        assertEquals("LIVE_NO_RETENTION", provenance.get("deliveryMode"));
+        assertTrue(String.valueOf(provenance.get("sourceUrl")).endsWith("/repo.tar.gz"));
+        assertNotNull(provenance.get("metadataSha256"));
+        assertEquals(0, payloadRequests.get(),
+                "listing detail must expose provenance without fetching the artifact");
+
+        String downloadUrl = String.valueOf(aggregated.get("downloadUrl"));
+        assertTrue(downloadUrl.contains("/api/v1/blobs/upstream/"));
+        String virtualKey = downloadUrl.substring(downloadUrl.indexOf("/blobs/") + 7,
+                downloadUrl.indexOf('?'));
+        assertFalse(blobs.exists(virtualKey), "virtual upstream key must not exist on disk");
+
         ResponseEntity<Map> ecosystem = http().getJson(
                 "/api/v1/compat/fengyu/claude-marketplace.json", Map.class, null);
         List<Map<String, Object>> plugins =
                 (List<Map<String, Object>>) ecosystem.getBody().get("plugins");
-        assertTrue(plugins.stream().anyMatch(p ->
-                        "claude-example-skill".equals(p.get("name"))
-                                && ((Map<String, Object>) p.get("source")).get("url")
-                                        .toString().startsWith("file://")),
-                "exported for the ecosystem source: " + plugins);
+        assertFalse(plugins.stream().anyMatch(p ->
+                        "claude-example-skill".equals(p.get("name"))),
+                "upstream payloads must not be retained as local git exports: " + plugins);
+        assertEquals(0, payloadRequests.get(),
+                "compatibility catalog rendering must remain metadata-only");
+
+        // A user download is the first operation allowed to pull the repository.
+        Set<Path> tempBefore = upstreamTempDirectories();
+        var download = http().getBytes(downloadUrl.replaceFirst("^http://[^/]+", ""));
+        assertEquals(200, download.getStatusCode().value(),
+                () -> new String(download.getBody(), StandardCharsets.UTF_8));
+        assertEquals("no-store", download.getHeaders().getFirst("Cache-Control"));
+        assertNotNull(download.getHeaders().getFirst("X-Checksum-SHA256"));
+        Map<String, dev.infinia.store.scanner.SafeZip.ExtractedFile> packed =
+                dev.infinia.store.scanner.SafeZip.extract(
+                        new java.io.ByteArrayInputStream(download.getBody()),
+                        dev.infinia.store.scanner.SafeZip.Limits.defaults());
+        assertTrue(packed.containsKey("manifest.json"), "FengYu manifest added on demand");
+        assertTrue(packed.containsKey("SKILL.md"), "upstream skill retained in package");
+        assertTrue(packed.containsKey("scripts/helper.py"), "skill resources retained");
+        assertEquals(1, payloadRequests.get());
+        assertEquals(tempBefore, upstreamTempDirectories(),
+                "request-scoped upstream workspace must be deleted after streaming");
+        assertFalse(blobs.exists(virtualKey),
+                "downloaded/generated upstream package must not be retained on disk");
 
         // Second sync with unchanged content is idempotent.
         ResponseEntity<Map> second = http().exchangeJson(HttpMethod.POST,
@@ -116,6 +178,7 @@ class UpstreamSyncFlowTest {
         upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         byte[] marketplace = ("{\"plugins\":[{\"name\":\"Example Skill\","
                 + "\"description\":\"" + description + "\","
+                + "\"version\":\"" + version + "\","
                 + "\"source\":{\"source\":\"url\",\"url\":\"http://127.0.0.1:"
                 + "PORTHOLDER/repo.tar.gz\"}}]}")
                         .replace("PORTHOLDER", String.valueOf(upstream.getAddress().getPort()))
@@ -134,6 +197,11 @@ class UpstreamSyncFlowTest {
         }
 
         upstream.createContext("/marketplace.json", exchange -> {
+            if (metadataRequests.incrementAndGet() == 1) {
+                exchange.sendResponseHeaders(429, -1);
+                exchange.close();
+                return;
+            }
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, marketplace.length);
             try (InputStream ignored = exchange.getRequestBody()) {
@@ -142,6 +210,7 @@ class UpstreamSyncFlowTest {
             exchange.close();
         });
         upstream.createContext("/repo.tar.gz", exchange -> {
+            payloadRequests.incrementAndGet();
             byte[] body = gz.toByteArray();
             exchange.getResponseHeaders().set("Content-Type", "application/gzip");
             exchange.sendResponseHeaders(200, body.length);
@@ -155,5 +224,15 @@ class UpstreamSyncFlowTest {
 
     Http http() {
         return new Http(port);
+    }
+
+    private static Set<Path> upstreamTempDirectories() throws IOException {
+        Path temp = Path.of(System.getProperty("java.io.tmpdir"));
+        try (var entries = Files.list(temp)) {
+            return entries.filter(Files::isDirectory)
+                    .filter(path -> String.valueOf(path.getFileName())
+                            .startsWith("infinia-upstream-"))
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        }
     }
 }

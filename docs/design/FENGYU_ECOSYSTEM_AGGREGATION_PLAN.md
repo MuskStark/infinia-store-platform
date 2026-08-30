@@ -6,6 +6,8 @@
 
 ## 1. 结论
 
+> 当前实现约束（2026-08）：为控制商店硬盘占用，上游聚合采用“只索引元数据、下载时物化”。同步阶段只读取 marketplace / registry / Git tree 元数据，不下载仓库归档，不生成或保存 Artifact；FengYu 发起带票据的下载后，商店才获取所选上游内容，在请求级临时目录中通过受限文件流完成扫描和兼容打包，并以 `no-store` 返回。响应完成或失败时删除整个临时目录；上游虚拟条目不得进入 BlobStorage 或本地 Git 导出。
+
 采用“**多上游适配器 + 统一规范化目录 + FengYu 原生安装协议 + 第三方兼容导出**”四层方案：
 
 ```text
@@ -91,7 +93,7 @@ NormalizedListing
   version, files, deployments, permissions, provenance
 ```
 
-每次同步必须使用“发现 → 固定版本 → 下载 → 解包 → 规范化 → 扫描 → 入库”的流水线。网络请求需要超时、大小限制、重试、ETag/If-None-Match、速率限制和 SSRF 防护；禁止根据上游内容访问内网地址、云 metadata 地址或任意本地文件。
+同步采用“发现目录元数据 → 固定来源定位 → 建立虚拟 Listing/Release”的流水线，不获取制品内容。用户下载时才执行“获取所选制品 → 解包 → 规范化 → 扫描 → 兼容打包 → 流式返回”，请求结束即释放，禁止写入 BlobStorage、导出目录或其他持久缓存。网络请求需要超时、大小限制、重试、ETag/If-None-Match、速率限制和 SSRF 防护；禁止根据上游内容访问内网地址、云 metadata 地址或任意本地文件。
 
 ## 4. 统一目录和来源追踪
 
@@ -133,7 +135,7 @@ upstream_release
 ### 4.2 版本规则
 
 - 上游有合法 SemVer：保留原版本，同时在 `Release` 中记录来源版本。
-- 上游版本相同但内容 digest 变化：创建新的不可变上游 revision，不覆盖旧 Artifact；是否对用户展示为更新由商店版本策略决定。
+- 上游版本或目录元数据变化：创建新的元数据 revision，不覆盖旧 Release；未下载内容不计算或保存制品 digest。
 - 上游没有版本：使用 `0.0.0` 作为内部基础版本，并用 `sourceCommitSha/contentSha256` 做唯一更新依据，不能伪造一个看似正式的版本。
 - 上游删除或撤回：标记 `DEPRECATED` / `YANKED`，不删除已安装内容；新安装停止解析到该版本。
 - 上游回滚到旧 commit：不复活旧本地 release，生成一次同步事件并按照安全策略等待审核。
@@ -163,7 +165,7 @@ Claude 官方文档要求 Skill 目录包含 `SKILL.md`，并说明 Skill 可以
 
 ### 5.2 多生态导出
 
-商店内部保存一份规范化 Artifact，按客户端生成视图：
+商店内部只保存规范化元数据；收到客户端下载请求后，在请求级临时目录中生成对应视图，并在响应结束后删除：
 
 | 出口 | 用途 | 约束 |
 |---|---|---|
@@ -285,7 +287,7 @@ MCP 安装要求：
 - 现有插件目录只返回 `PLUGIN`，Skill / MCP 不得混入；
 - 现有 Skill catalog 字段和 HTTP 状态保持不变；
 - 新客户端优先使用 Native API，旧客户端继续使用旧目录；
-- 任何旧接口不得返回未经过扫描和发布的上游内容；
+- 任何旧接口不得返回未在本次下载请求中通过扫描的上游内容；
 - Native API 的 schema 采用显式版本号，字段只增不删，破坏性变更走 `/api/v2`。
 
 ## 9. 数据库与代码落点
@@ -333,12 +335,14 @@ FengYu 主项目
 
 ### 10.1 商店侧
 
+- 同步只请求目录/manifest/Git tree 元数据，不请求上游仓库归档或包体。
+- 首次制品请求发生在 FengYu 下载路径；实时扫描和兼容打包后使用 `no-store` 返回，磁盘不产生 Blob 或 Git 导出。
 - Claude marketplace 的同仓库、GitHub、git-subdir、archive、固定 commit 均可同步。
 - Codex / Agent Skills 仓库可按目录导入，保留 `SKILL.md`、scripts、references、assets。
 - MCP Registry 的 stdio 包和 Streamable HTTP 远程定义均可规范化；缺少 digest、明文 secret、HTTP 明文地址、动态 shell 命令时阻断。
 - 同一个来源重复同步不生成重复 release；内容变化生成新 revision；上游删除只下架不删本地内容。
 - 上游网络超时、ETag 未变化、单条目损坏不会导致整批同步状态错误或重复导入。
-- 任何上游内容都必须经过扫描和审计；同步服务不能绕过发布状态机。
+- 任何上游内容都必须在返回下载响应前经过扫描；同步服务只处理元数据，不能获取制品内容。
 
 ### 10.2 FengYu 主项目侧
 
@@ -408,7 +412,7 @@ FengYu 主项目
 当以下条件全部满足时，认为本方案完成：
 
 1. 商店能通过适配器聚合 Claude、Codex/Agent Skills 和 MCP Registry 的 Skill / MCP，并保留可验证 provenance。
-2. 所有聚合内容经过统一扫描、审核、签名、依赖解析和版本化。
+2. 所有聚合目录元数据经过审核和版本化；制品内容在每次下载时统一获取，并在受限临时目录中流式扫描、兼容打包；临时文件不进入持久存储且请求结束即删除。
 3. FengYu 主项目通过 Native API 可正常安装、发现、配置、启用、更新、回滚、卸载 Skill / MCP。
 4. 现有 FengYu Skill 安装路径和现有 Claude marketplace 兼容路径回归通过。
 5. 商店离线、上游异常、安装失败、MCP 缺少密钥等场景不会破坏 FengYu 已安装生态。

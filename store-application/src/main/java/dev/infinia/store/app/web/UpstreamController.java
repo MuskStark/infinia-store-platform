@@ -74,7 +74,12 @@ class UpstreamController {
         upstreams.save(source);
         audit.record("USER", adminId.toString(), "upstream.create", "UPSTREAM",
                 source.id().toString(), null, source.marketplaceUrl(), null);
-        return ResponseEntity.status(HttpStatus.CREATED).body(toDto(source));
+        // Registration immediately indexes metadata so the public catalog does not
+        // stay empty until an administrator notices the separate sync action. The
+        // sync is metadata-only; repository/archive payloads remain download-time.
+        sync.sync(source.id());
+        UpstreamSource indexed = upstreams.findById(source.id()).orElse(source);
+        return ResponseEntity.status(HttpStatus.CREATED).body(toDto(indexed));
     }
 
     /** Runs the aggregation now and returns the per-run summary. */

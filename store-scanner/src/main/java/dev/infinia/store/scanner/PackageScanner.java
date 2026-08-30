@@ -6,9 +6,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Enumeration;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /**
  * Package scanning facade (design §8.2 steps 3-6). Validates native manifests of all
@@ -42,6 +51,41 @@ public class PackageScanner {
                 default -> result.error("scanner.unknown-type",
                         "Unsupported listing type: " + listingType);
             }
+        } catch (ScanViolation violation) {
+            result.findings.add(new ScanResult.Finding("CRITICAL", violation.rule,
+                    violation.getMessage(), null));
+        } catch (IOException e) {
+            result.error("scanner.io", "Package could not be read: " + e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * Disk-backed scan entry point for live upstream delivery. Skill archives are
+     * inspected through {@link ZipFile}; only individual text files up to 2 MiB
+     * are read for content rules, never the complete package.
+     */
+    public ScanResult scan(String listingType, String expectedVersion, Path content) {
+        if (!"SKILL".equalsIgnoreCase(listingType)) {
+            try {
+                long size = Files.size(content);
+                if (size > 16L * 1024 * 1024) {
+                    ScanResult result = new ScanResult();
+                    result.error("scanner.file-too-large",
+                            "Non-archive template exceeds the 16 MiB scan limit");
+                    return result;
+                }
+                return scan(listingType, expectedVersion, Files.readAllBytes(content));
+            } catch (IOException e) {
+                ScanResult result = new ScanResult();
+                result.error("scanner.io", "Package could not be read: " + e.getMessage());
+                return result;
+            }
+        }
+        ScanResult result = new ScanResult();
+        result.mimeType = "application/zip";
+        try {
+            scanSkill(content, expectedVersion, result);
         } catch (ScanViolation violation) {
             result.findings.add(new ScanResult.Finding("CRITICAL", violation.rule,
                     violation.getMessage(), null));
@@ -206,6 +250,112 @@ public class PackageScanner {
                 Ed25519Signer.sha256Hex(content), files);
     }
 
+    private void scanSkill(Path content, String expectedVersion, ScanResult result)
+            throws IOException {
+        Map<String, Long> inventory = new LinkedHashMap<>();
+        byte[] manifestBytes = null;
+        boolean hasSkillMd = false;
+        long total = 0;
+        int entries = 0;
+        try (ZipFile zip = new ZipFile(content.toFile())) {
+            Enumeration<? extends ZipEntry> cursor = zip.entries();
+            while (cursor.hasMoreElements()) {
+                ZipEntry entry = cursor.nextElement();
+                entries++;
+                if (entries > limits.maxEntries()) {
+                    throw new ScanViolation("zip.too-many-entries",
+                            "Archive exceeds the maximum of " + limits.maxEntries()
+                                    + " entries");
+                }
+                SafeZip.validatePath(entry.getName());
+                if (entry.isDirectory()) {
+                    continue;
+                }
+                long size = entry.getSize();
+                long compressed = entry.getCompressedSize();
+                if (size < 0 || size > limits.maxEntryBytes()) {
+                    throw new ScanViolation("zip.entry-too-large",
+                            "Entry " + entry.getName() + " exceeds the single-entry size limit");
+                }
+                total += size;
+                if (total > limits.maxTotalBytes()) {
+                    throw new ScanViolation("zip.total-too-large",
+                            "Archive exceeds the total uncompressed size limit");
+                }
+                if (compressed > 0 && size / compressed > limits.maxRatio()) {
+                    throw new ScanViolation("zip.bomb",
+                            "Entry " + entry.getName() + " exceeds the compression ratio limit");
+                }
+                if (inventory.putIfAbsent(entry.getName(), size) != null) {
+                    throw new ScanViolation("zip.duplicate-entry",
+                            "Archive contains duplicate entry " + entry.getName());
+                }
+                result.files.add(entry.getName());
+                if ("SKILL.md".equals(entry.getName())) {
+                    hasSkillMd = true;
+                }
+                if ("manifest.json".equals(entry.getName())) {
+                    manifestBytes = readEntry(zip, entry, 2L * 1024 * 1024);
+                }
+                if (size <= 2L * 1024 * 1024) {
+                    byte[] text = readEntry(zip, entry, 2L * 1024 * 1024);
+                    ContentScanners.scanFile(entry.getName(),
+                            new String(text, StandardCharsets.UTF_8), result);
+                }
+            }
+        }
+        if (manifestBytes == null) {
+            result.error("skill.manifest-missing",
+                    "Missing manifest.json (host skill package contract)");
+            return;
+        }
+        JsonNode json;
+        try {
+            json = mapper.readTree(manifestBytes);
+        } catch (IOException e) {
+            result.error("skill.manifest-invalid", "manifest.json is not valid JSON");
+            return;
+        }
+        validateSkillManifest(json, expectedVersion, hasSkillMd, result);
+        result.sbom = SbomGenerator.generateInventory("SKILL", expectedVersion,
+                sha256Hex(content), inventory);
+    }
+
+    private void validateSkillManifest(JsonNode json, String expectedVersion,
+            boolean hasSkillMd, ScanResult result) {
+        result.manifestName = text(json, "name");
+        result.manifestVersion = text(json, "version");
+        if (json.path("schemaVersion").asInt(-1) != FengYuHostRules.SKILL_SCHEMA_VERSION) {
+            result.error("skill.schema-version", "manifest.json schemaVersion must be "
+                    + FengYuHostRules.SKILL_SCHEMA_VERSION);
+        }
+        String id = text(json, "id");
+        if (id == null || !FengYuHostRules.ID_PATTERN.matcher(id).matches()) {
+            result.error("skill.manifest-field",
+                    "manifest.json 'id' must be a lowercase reverse-domain identifier");
+        } else if (id.startsWith(FengYuHostRules.OFFICIAL_NAMESPACE)
+                || Boolean.TRUE.equals(json.path("official").asBoolean(false))) {
+            result.error("skill.official-reserved",
+                    "Only FengYu-trusted publishers may use the official namespace");
+        }
+        if (isBlank(result.manifestName)) {
+            result.error("skill.manifest-field", "Manifest field 'name' is required");
+        }
+        if (result.manifestVersion == null
+                || !FengYuHostRules.SKILL_VERSION_PATTERN.matcher(result.manifestVersion)
+                        .matches()) {
+            result.error("skill.manifest-field",
+                    "Manifest field 'version' must be MAJOR.MINOR.PATCH");
+        } else if (!result.manifestVersion.equals(expectedVersion)) {
+            result.error("plugin.version-mismatch",
+                    "Manifest version " + result.manifestVersion
+                            + " does not match release version " + expectedVersion);
+        }
+        if (!hasSkillMd) {
+            result.error("skill.skill-md-missing", "SKILL.md must exist at the package root");
+        }
+    }
+
     // ---- FLOW (.fyflow zip: manifest.json + workflow.json + dependencies.lock.json) ----
 
     private void scanFlow(byte[] content, String expectedVersion, ScanResult result)
@@ -345,6 +495,45 @@ public class PackageScanner {
     private void scanContents(Map<String, SafeZip.ExtractedFile> files, ScanResult result) {
         for (Map.Entry<String, SafeZip.ExtractedFile> e : files.entrySet()) {
             ContentScanners.scanFile(e.getKey(), e.getValue().text(), result);
+        }
+    }
+
+    private static byte[] readEntry(ZipFile zip, ZipEntry entry, long maxBytes)
+            throws IOException {
+        if (entry.getSize() > maxBytes) {
+            throw new IOException("Entry exceeds read limit: " + entry.getName());
+        }
+        try (InputStream in = zip.getInputStream(entry);
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            long total = 0;
+            int read;
+            while ((read = in.read(buffer)) >= 0) {
+                total += read;
+                if (total > maxBytes) {
+                    throw new IOException("Entry exceeds read limit: " + entry.getName());
+                }
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
+        }
+    }
+
+    private static String sha256Hex(Path path) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream in = Files.newInputStream(path)) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(buffer)) >= 0) {
+                    if (read > 0) {
+                        digest.update(buffer, 0, read);
+                    }
+                }
+            }
+            return java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
         }
     }
 

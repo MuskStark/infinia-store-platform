@@ -973,7 +973,8 @@ export interface components {
             filename: string;
             /** Format: int64 */
             size: number;
-            sha256: string;
+            /** @description Absent for live upstream delivery */
+            sha256?: string | null;
             keyId?: string;
             mimeType?: string;
         };
@@ -1033,6 +1034,25 @@ export interface components {
             updatedAt?: string;
             localizations?: components["schemas"]["Localization"][];
             releases?: components["schemas"]["ListingRelease"][];
+            upstream?: components["schemas"]["UpstreamProvenance"];
+        };
+        /** @description Metadata provenance for a live, non-retained upstream artifact. */
+        UpstreamProvenance: {
+            sourceName?: string;
+            externalId?: string;
+            /** Format: uri */
+            sourceUrl?: string;
+            sourcePath?: string;
+            ref?: string;
+            commitSha?: string;
+            upstreamVersion?: string;
+            metadataSha256?: string;
+            /** Format: date-time */
+            firstSeenAt?: string;
+            /** Format: date-time */
+            lastSeenAt?: string;
+            /** @enum {string} */
+            deliveryMode?: "LIVE_NO_RETENTION";
         };
         ClientEnvironment: {
             hostVersion: string;
@@ -1082,7 +1102,8 @@ export interface components {
             url: string;
             /** Format: date-time */
             expiresAt?: string;
-            sha256: string;
+            /** @description Absent for live upstream delivery */
+            sha256?: string | null;
             signature?: string;
             keyId?: string;
             /** Format: int64 */

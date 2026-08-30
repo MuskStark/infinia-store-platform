@@ -11,6 +11,14 @@ public final class SbomGenerator {
 
     public static String generate(String coordinate, String version, String sha256,
             Map<String, SafeZip.ExtractedFile> files) {
+        Map<String, Long> inventory = new java.util.LinkedHashMap<>();
+        files.forEach((name, file) -> inventory.put(name, (long) file.content().length));
+        return generateInventory(coordinate, version, sha256, inventory);
+    }
+
+    /** Generates an SBOM from disk-backed inventory without retaining file bytes. */
+    public static String generateInventory(String coordinate, String version, String sha256,
+            Map<String, Long> files) {
         StringBuilder sb = new StringBuilder(2048);
         sb.append("{\n");
         sb.append("  \"bomFormat\": \"CycloneDX\",\n");
@@ -27,13 +35,13 @@ public final class SbomGenerator {
         sb.append("  },\n");
         sb.append("  \"components\": [\n");
         boolean first = true;
-        for (Map.Entry<String, SafeZip.ExtractedFile> e : files.entrySet()) {
+        for (Map.Entry<String, Long> e : files.entrySet()) {
             if (!first) {
                 sb.append(",\n");
             }
             first = false;
             sb.append("    {\"type\": \"file\", \"name\": \"").append(json(e.getKey()))
-                    .append("\", \"size\": ").append(e.getValue().content().length).append("}");
+                    .append("\", \"size\": ").append(e.getValue()).append("}");
         }
         sb.append("\n  ]\n");
         sb.append("}");

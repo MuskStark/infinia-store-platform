@@ -19,6 +19,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.UUID;
 
 /**
@@ -68,10 +69,12 @@ public class DeliveryController {
         String url = "/api/v1/blobs/" + artifact.blobKey() + "?"
                 + TicketService.encodeTicketParams("download", artifact.blobKey(), expiresAt,
                         signature);
+        boolean live = artifact.blobKey() != null && artifact.blobKey().startsWith("upstream/");
         return new DeliveryDtos.DownloadTicketDto(release.id.toString(),
                 artifact.id() == null ? null : artifact.id().toString(), url,
-                expiresAt.toString(), artifact.sha256(), artifact.signature(), artifact.keyId(),
-                artifact.size());
+                expiresAt.toString(), live ? null : artifact.sha256(),
+                live ? null : artifact.signature(), live ? null : artifact.keyId(),
+                live ? 0 : artifact.size());
     }
 
     /** Ticketed blob download; anonymous by design (ticket IS the authorization). */
@@ -97,17 +100,21 @@ public class DeliveryController {
                 throw new DomainException(StoreErrorCode.TICKET_INVALID,
                         "Malformed upstream artifact key");
             }
-            byte[] bytes;
+            dev.infinia.store.app.upstream.UpstreamArtifactService.PreparedArtifact prepared;
             try {
                 // The rebuilt package embeds the release version — resolve the
                 // owning release so pass-through bytes match the recorded sha.
                 Release owner = releases.findByArtifactBlobKey(key).orElse(null);
-                bytes = upstreamArtifacts.rebuild(upstreamItemId,
+                prepared = upstreamArtifacts.prepare(upstreamItemId,
                         owner == null ? null : owner.version.toString());
             } catch (RuntimeException e) {
                 String message = String.valueOf(e.getMessage());
                 if (message.contains("changed since sync")) {
                     throw new DomainException(StoreErrorCode.UPSTREAM_DRIFTED, message);
+                }
+                if (e instanceof dev.infinia.store.app.upstream.UpstreamArtifactService
+                        .UpstreamPayloadRejectedException) {
+                    throw new DomainException(StoreErrorCode.SCAN_FAILED, message);
                 }
                 throw new DomainException(StoreErrorCode.INTERNAL_ERROR,
                         "Upstream pass-through failed: " + message);
@@ -115,10 +122,20 @@ public class DeliveryController {
                 throw new DomainException(StoreErrorCode.INTERNAL_ERROR,
                         "Upstream fetch failed: " + e.getMessage());
             }
+            byte[] digest = java.util.HexFormat.of().parseHex(prepared.sha256());
+            StreamingResponseBody body = out -> {
+                try (prepared; InputStream in = java.nio.file.Files
+                        .newInputStream(prepared.file())) {
+                    in.transferTo(out);
+                }
+            };
             return ResponseEntity.ok()
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE)
-                    .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(bytes.length))
-                    .body(out -> out.write(bytes, 0, bytes.length));
+                    .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(prepared.size()))
+                    .header("Digest", "sha-256=" + Base64.getEncoder().encodeToString(digest))
+                    .header("X-Checksum-SHA256", prepared.sha256())
+                    .header("Cache-Control", "no-store")
+                    .body(body);
         }
         InputStream in = blobs.open(key);
         StreamingResponseBody body = out -> {

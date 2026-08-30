@@ -14,6 +14,7 @@ import ErrorState from '../components/ErrorState.vue';
 
 const { t } = useI18n();
 const items = ref<CatalogItem[]>([]);
+const totalListings = ref(0);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
@@ -23,6 +24,7 @@ async function load() {
   try {
     const page = await api.get<CatalogPage>('/api/v1/catalog?limit=24&sort=downloads');
     items.value = page.items ?? [];
+    totalListings.value = page.totalEstimate ?? items.value.length;
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'error';
   } finally {
@@ -63,7 +65,7 @@ const types = ['APP', 'PLUGIN', 'SKILL', 'MCP', 'FLOW'] as const;
         <div class="mt-6 flex gap-8">
           <div>
             <div class="text-2xl font-bold">
-              <NumberTicker :value="items.length" />
+              <NumberTicker :value="totalListings" />
             </div>
             <div class="text-xs text-muted dark:text-slate-400">{{ t('discover.statsListings') }}</div>
           </div>

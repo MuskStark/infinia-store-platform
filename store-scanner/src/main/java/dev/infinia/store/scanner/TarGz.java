@@ -4,7 +4,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.zip.GZIPInputStream;
@@ -86,6 +90,134 @@ public final class TarGz {
             }
         }
         return stripped;
+    }
+
+    /**
+     * Streams a tar.gz archive into a request-scoped directory without retaining
+     * file contents in heap memory. Symlinks and non-regular entries are ignored;
+     * every output path is normalized beneath {@code targetDirectory}.
+     */
+    public static void extractToDirectory(InputStream tarGz, Path targetDirectory,
+            long maxTotalBytes, long maxEntryBytes) throws IOException {
+        Path root = targetDirectory.toAbsolutePath().normalize();
+        Files.createDirectories(root);
+        long total = 0;
+        int entries = 0;
+        try (GZIPInputStream gzip = new GZIPInputStream(tarGz)) {
+            byte[] header = new byte[512];
+            String pendingLongName = null;
+            while (true) {
+                readFully(gzip, header, "truncated tar header");
+                if (isZeroBlock(header)) {
+                    break;
+                }
+                entries++;
+                if (entries > 20_000) {
+                    throw new IOException("tar archive has too many entries");
+                }
+                String name = cString(header, 0, 100);
+                long size = octal(header, 124, 12);
+                char type = (char) header[156];
+                if (size < 0 || size > maxEntryBytes) {
+                    throw new IOException("tar entry too large: " + name);
+                }
+                if (type == 'L') {
+                    if (size > 1024 * 1024) {
+                        throw new IOException("tar long name exceeds limit");
+                    }
+                    byte[] content = new byte[(int) size];
+                    readFully(gzip, content, "truncated tar long name");
+                    skipPad(gzip, size);
+                    pendingLongName = new String(content, StandardCharsets.UTF_8).trim();
+                    continue;
+                }
+                if (pendingLongName != null) {
+                    name = pendingLongName;
+                    pendingLongName = null;
+                }
+                if (type == '0' || type == '\0') {
+                    total += size;
+                    if (total > maxTotalBytes) {
+                        throw new IOException("tar archive exceeds size budget");
+                    }
+                    String relativeName = stripArchiveRoot(name);
+                    if (relativeName.isBlank()) {
+                        skipExactly(gzip, size);
+                    } else {
+                        Path output = root.resolve(relativeName).normalize();
+                        if (!output.startsWith(root)) {
+                            throw new IOException("tar path escapes target directory: " + name);
+                        }
+                        Files.createDirectories(output.getParent());
+                        try (OutputStream out = Files.newOutputStream(output,
+                                StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+                            copyExactly(gzip, out, size, name);
+                        }
+                    }
+                } else {
+                    // Directories are created as parents of regular files. Links,
+                    // devices and other special entries are deliberately discarded.
+                    skipExactly(gzip, size);
+                }
+                skipPad(gzip, size);
+            }
+        }
+    }
+
+    private static String stripArchiveRoot(String name) throws IOException {
+        String normalized = name.replace('\\', '/');
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        if (normalized.startsWith("/") || normalized.indexOf('\0') >= 0) {
+            throw new IOException("invalid tar path: " + name);
+        }
+        int slash = normalized.indexOf('/');
+        String stripped = slash < 0 ? normalized : normalized.substring(slash + 1);
+        for (String part : stripped.split("/")) {
+            if (part.equals("..")) {
+                throw new IOException("tar path traversal is not allowed: " + name);
+            }
+        }
+        return stripped;
+    }
+
+    private static void copyExactly(InputStream in, OutputStream out, long size, String name)
+            throws IOException {
+        byte[] buffer = new byte[8192];
+        long remaining = size;
+        while (remaining > 0) {
+            int read = in.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+            if (read < 0) {
+                throw new EOFException("truncated tar entry: " + name);
+            }
+            out.write(buffer, 0, read);
+            remaining -= read;
+        }
+    }
+
+    private static void skipExactly(InputStream in, long size) throws IOException {
+        long remaining = size;
+        byte[] buffer = new byte[8192];
+        while (remaining > 0) {
+            int read = in.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+            if (read < 0) {
+                throw new EOFException("truncated tar entry");
+            }
+            remaining -= read;
+        }
+    }
+
+    private static void readFully(InputStream in, byte[] bytes, String error)
+            throws IOException {
+        int offset = 0;
+        while (offset < bytes.length) {
+            int read = in.read(bytes, offset, bytes.length - offset);
+            if (read < 0) {
+                throw new EOFException(error);
+            }
+            offset += read;
+        }
     }
 
     private static void skipPad(InputStream in, long size) throws IOException {

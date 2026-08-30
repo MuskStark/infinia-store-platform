@@ -1251,7 +1251,7 @@ components:
 
     Artifact:
       type: object
-      required: [artifactId, kind, platform, arch, filename, size, sha256]
+      required: [artifactId, kind, platform, arch, filename, size]
       properties:
         artifactId: { type: string }
         kind: { $ref: '#/components/schemas/ArtifactKind' }
@@ -1259,7 +1259,7 @@ components:
         arch: { $ref: '#/components/schemas/Arch' }
         filename: { type: string }
         size: { type: integer, format: int64 }
-        sha256: { type: string }
+        sha256: { type: string, nullable: true, description: Absent for live upstream delivery }
         keyId: { type: string }
         mimeType: { type: string }
 
@@ -1320,6 +1320,23 @@ components:
         updatedAt: { type: string, format: date-time }
         localizations: { type: array, items: { $ref: '#/components/schemas/Localization' } }
         releases: { type: array, items: { $ref: '#/components/schemas/ListingRelease' } }
+        upstream: { $ref: '#/components/schemas/UpstreamProvenance' }
+
+    UpstreamProvenance:
+      type: object
+      description: Metadata provenance for a live, non-retained upstream artifact.
+      properties:
+        sourceName: { type: string }
+        externalId: { type: string }
+        sourceUrl: { type: string, format: uri }
+        sourcePath: { type: string }
+        ref: { type: string }
+        commitSha: { type: string }
+        upstreamVersion: { type: string }
+        metadataSha256: { type: string }
+        firstSeenAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        deliveryMode: { type: string, enum: [LIVE_NO_RETENTION] }
 
     ClientEnvironment:
       type: object
@@ -1376,13 +1393,13 @@ components:
 
     DownloadTicket:
       type: object
-      required: [releaseId, artifactId, url, sha256]
+      required: [releaseId, artifactId, url]
       properties:
         releaseId: { type: string }
         artifactId: { type: string }
         url: { type: string, format: uri }
         expiresAt: { type: string, format: date-time }
-        sha256: { type: string }
+        sha256: { type: string, nullable: true, description: Absent for live upstream delivery }
         signature: { type: string }
         keyId: { type: string }
         size: { type: integer, format: int64 }

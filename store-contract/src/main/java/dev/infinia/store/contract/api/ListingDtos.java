@@ -30,7 +30,22 @@ public final class ListingDtos {
             String createdAt,
             String updatedAt,
             List<LocalizationDto> localizations,
-            List<ListingReleaseDto> releases) {
+            List<ListingReleaseDto> releases,
+            UpstreamProvenanceDto upstream) {
+    }
+
+    public record UpstreamProvenanceDto(
+            String sourceName,
+            String externalId,
+            String sourceUrl,
+            String sourcePath,
+            String ref,
+            String commitSha,
+            String upstreamVersion,
+            String metadataSha256,
+            String firstSeenAt,
+            String lastSeenAt,
+            String deliveryMode) {
     }
 
     public record ListingReleaseDto(

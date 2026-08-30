@@ -15,5 +15,7 @@ public interface UpstreamItemJpaRepository extends JpaRepository<UpstreamItemEnt
     Optional<UpstreamItemEntity> findFirstBySourceIdAndExternalIdOrderByLastSeenAtDesc(
             UUID sourceId, String externalId);
 
+    Optional<UpstreamItemEntity> findFirstByListingIdOrderByLastSeenAtDesc(UUID listingId);
+
     List<UpstreamItemEntity> findBySourceId(UUID sourceId);
 }

@@ -78,7 +78,8 @@ public class CatalogService {
             }
             items.add(toCatalogItem(listing, latest));
         }
-        return new CatalogPageDto(items, page.hasMore() ? page.lastId() : null, items.size());
+        return new CatalogPageDto(items, page.hasMore() ? page.lastId() : null,
+                page.totalEstimate());
     }
 
     /** Finds a listing across all five types for (namespace, slug). */

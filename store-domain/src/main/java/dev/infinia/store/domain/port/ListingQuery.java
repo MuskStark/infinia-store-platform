@@ -21,5 +21,6 @@ public record ListingQuery(ListingType type, String text, String category, Chann
 
     public enum ListingSort { RELEVANCE, RECENT, DOWNLOADS, FAVORITES }
 
-    public record ListingPage(List<Listing> items, boolean hasMore, String lastSortValue, String lastId) {}
+    public record ListingPage(List<Listing> items, boolean hasMore, String lastSortValue,
+            String lastId, long totalEstimate) {}
 }
