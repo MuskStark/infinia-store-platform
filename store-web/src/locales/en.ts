@@ -359,6 +359,7 @@ export default {
     unauthenticated: 'Please sign in',
     forbidden: 'You do not have access to this resource',
     email_taken: 'This email is already registered',
+    invalid_credentials: 'Email or password is incorrect',
     server: 'Server error — please try again later',
     offline: 'Network unreachable',
   },

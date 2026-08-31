@@ -4,15 +4,15 @@ import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { api, ApiRequestError, setAccessToken, type PublicUser } from '../api/client';
 import { useAuthStore } from '../stores/auth';
+import { submitOAuthSessionLogin } from '../auth/sessionLogin';
 import { MagicCard, ShimmerButton } from '@infinia/magic-ui-vue';
 
 /**
  * Sign-in / registration (design §7.4).
  *
- * Sign-in posts email + password to /api/v1/auth/login and stores the returned
- * access token in memory — one step, no redirect to the authorization server's
- * page. The OAuth + PKCE flow remains available through /callback for host
- * integrations. Registration auto-signs the user in with the same credentials.
+ * Normal Store sign-in uses the direct token endpoint. Host OAuth requests arrive
+ * with ?oauth=1 and establish the Authorization Server browser session here before
+ * Spring resumes the saved PKCE authorization request.
  */
 const { t } = useI18n();
 const route = useRoute();
@@ -28,7 +28,8 @@ const passwordConfirm = ref('');
 const displayName = ref('');
 const showPassword = ref(false);
 
-const error = ref<string | null>(null);
+const oauthMode = computed(() => route.query.oauth === '1');
+const error = ref<string | null>(route.query.error === '1' ? t('errors.invalid_credentials') : null);
 const notice = ref<string | null>(null);
 
 /** Seeded demo accounts (local/test profiles) — one click fills the form. */
@@ -85,6 +86,10 @@ async function signIn() {
   busy.value = true;
   error.value = null;
   try {
+    if (oauthMode.value) {
+      await submitOAuthSessionLogin(email.value, password.value);
+      return;
+    }
     const response = await api.post<{ accessToken: string; user?: PublicUser }>(
       '/api/v1/auth/login',
       { email: email.value, password: password.value },
@@ -108,6 +113,10 @@ async function register() {
       password: password.value,
       displayName: displayName.value || undefined,
     });
+    if (oauthMode.value) {
+      await submitOAuthSessionLogin(email.value, password.value);
+      return;
+    }
     // Register → immediately signed in with the same credentials.
     const response = await api.post<{ accessToken: string }>('/api/v1/auth/login', {
       email: email.value,

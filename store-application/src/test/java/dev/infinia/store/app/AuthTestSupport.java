@@ -22,65 +22,86 @@ import java.util.regex.Pattern;
 public final class AuthTestSupport {
 
     private static final SecureRandom RANDOM = new SecureRandom();
-    private static final Pattern CSRF_A = Pattern.compile("name=\"_csrf\"[^>]*value=\"([^\"]+)\"");
-    private static final Pattern CSRF_B = Pattern.compile("value=\"([^\"]+)\"[^>]*name=\"_csrf\"");
-    private static final Pattern STATE = Pattern.compile("name=\"state\"[^>]*value=\"([^\"]+)\"");
-
     private AuthTestSupport() {}
 
+    public record OAuthGrant(String accessToken, String refreshToken) {}
+
     public static String login(Http rest, String baseUrl, String email, String password) {
+        return loginGrant(rest, email, password, "store-web", null,
+                "http://localhost:8089/callback", "openid").accessToken();
+    }
+
+    public static OAuthGrant desktopLogin(Http rest, String email, String password) {
+        return loginGrant(rest, email, password, "fengyu-desktop",
+                "dev-only-desktop-secret", "http://127.0.0.1:24057/callback",
+                "openid profile offline_access");
+    }
+
+    public static OAuthGrant refreshDesktop(Http rest, String refreshToken) {
+        java.util.Map<String, String> form = new java.util.LinkedHashMap<>();
+        form.put("grant_type", "refresh_token");
+        form.put("refresh_token", refreshToken);
+        form.put("client_id", "fengyu-desktop");
+        form.put("client_secret", "dev-only-desktop-secret");
+        ResponseEntity<String> token = rest.postForm("/oauth2/token", form, null);
+        if (!token.getStatusCode().is2xxSuccessful()) {
+            throw new IllegalStateException("Refresh failed: " + token.getStatusCode()
+                    + " " + token.getBody());
+        }
+        return tokenGrant(token.getBody());
+    }
+
+    private static OAuthGrant loginGrant(Http rest, String email, String password,
+            String clientId, String clientSecret, String redirectUri, String scope) {
         String verifier = randomToken(48);
         String challenge = s256(verifier);
         String state = randomToken(12);
 
         ResponseEntity<String> authorize = rest.exchange(HttpMethod.GET,
-                "/oauth2/authorize?response_type=code&client_id=store-web"
-                        + "&redirect_uri=http://localhost:8089/callback&scope=openid"
+                "/oauth2/authorize?response_type=code&client_id=" + clientId
+                        + "&redirect_uri=" + redirectUri
+                        + "&scope=" + scope.replace(" ", "+")
                         + "&state=" + state
-                        + "&code_challenge=" + challenge + "&code_challenge_method=S256",
+                        + "&code_challenge=" + challenge
+                        + "&code_challenge_method=S256",
                 Http.acceptHtml(), null);
 
-        String sessionCookie = cookie(authorize);
-        // Follow redirects (authorize -> login page) manually since redirects are off.
-        String loginHtml = authorize.getBody();
-        String location = authorize.getHeaders().getFirst(HttpHeaders.LOCATION);
-        int hops = 0;
-        while ((loginHtml == null || !loginHtml.contains("_csrf"))
-                && location != null && hops++ < 5) {
-            HttpHeaders nextHeaders = Http.acceptHtml();
-            if (sessionCookie != null) {
-                nextHeaders.add(HttpHeaders.COOKIE, sessionCookie);
-            }
-            ResponseEntity<String> next = rest.exchange(HttpMethod.GET, location, nextHeaders,
-                    null);
-            String nextCookie = Http.cookie(next);
-            if (nextCookie != null) {
-                sessionCookie = nextCookie;
-            }
-            loginHtml = next.getBody();
-            location = next.getHeaders().getFirst(HttpHeaders.LOCATION);
+        String signInLocation = authorize.getHeaders().getFirst(HttpHeaders.LOCATION);
+        if (signInLocation == null
+                || !signInLocation.startsWith("http://localhost:8089/signin?oauth=1")) {
+            throw new IllegalStateException("OAuth did not redirect to Store Web sign-in: "
+                    + signInLocation);
         }
 
-        String csrf = extract(loginHtml, CSRF_A);
-        if (csrf == null) {
-            csrf = extract(loginHtml, CSRF_B);
+        String sessionCookie = cookie(authorize);
+        HttpHeaders csrfHeaders = new HttpHeaders();
+        csrfHeaders.setAccept(List.of(MediaType.APPLICATION_JSON));
+        if (sessionCookie != null) {
+            csrfHeaders.add(HttpHeaders.COOKIE, sessionCookie);
         }
-        String loginState = extract(loginHtml, STATE);
+        ResponseEntity<String> csrfResponse = rest.exchange(HttpMethod.GET,
+                "/oauth2/session-login/csrf", csrfHeaders, null);
+        String csrfCookie = Http.cookie(csrfResponse);
+        if (csrfCookie != null) {
+            sessionCookie = csrfCookie;
+        }
+        String csrfParameter = jsonString(csrfResponse.getBody(), "parameterName");
+        String csrf = jsonString(csrfResponse.getBody(), "token");
+        if (!csrfResponse.getStatusCode().is2xxSuccessful()
+                || csrfParameter == null || csrf == null) {
+            throw new IllegalStateException("Session-login CSRF initialization failed: "
+                    + csrfResponse.getStatusCode() + " " + csrfResponse.getBody());
+        }
 
         java.util.Map<String, String> form = new java.util.LinkedHashMap<>();
         form.put("username", email);
         form.put("password", password);
-        if (csrf != null) {
-            form.put("_csrf", csrf.replace("+", "%2B"));
-        }
-        if (loginState != null) {
-            form.put("state", loginState);
-        }
+        form.put(csrfParameter, csrf);
         HttpHeaders loginHeaders = new HttpHeaders();
         if (sessionCookie != null) {
             loginHeaders.add(HttpHeaders.COOKIE, sessionCookie);
         }
-        ResponseEntity<String> login = rest.postForm("/login", form, loginHeaders);
+        ResponseEntity<String> login = rest.postForm("/oauth2/session-login", form, loginHeaders);
 
         // After successful login we are redirected to the authorize endpoint and then
         // back to the SPA redirect URI carrying ?code=...
@@ -88,31 +109,30 @@ public final class AuthTestSupport {
         if (loginCookie != null) {
             sessionCookie = loginCookie; // session id may rotate on authentication
         }
-        String codeLocation = followToCode(rest, baseUrl, login, sessionCookie);
+        String codeLocation = followToCode(rest, login, sessionCookie);
         String code = param(codeLocation, "code");
         if (code == null) {
             throw new IllegalStateException("No authorization code; last location: " + codeLocation
                     + " (login status " + login.getStatusCode() + ")");
         }
 
-        // Token exchange with PKCE verifier (public client, no secret).
+        // Token exchange with PKCE verifier; desktop additionally authenticates
+        // as the confidential host client so the refresh grant can be used.
         java.util.Map<String, String> tokenForm = new java.util.LinkedHashMap<>();
         tokenForm.put("grant_type", "authorization_code");
         tokenForm.put("code", code);
-        tokenForm.put("redirect_uri", "http://localhost:8089/callback");
-        tokenForm.put("client_id", "store-web");
+        tokenForm.put("redirect_uri", redirectUri);
+        tokenForm.put("client_id", clientId);
+        if (clientSecret != null) {
+            tokenForm.put("client_secret", clientSecret);
+        }
         tokenForm.put("code_verifier", verifier);
         ResponseEntity<String> token = rest.postForm("/oauth2/token", tokenForm, null);
         if (!token.getStatusCode().is2xxSuccessful()) {
             throw new IllegalStateException("Token exchange failed: " + token.getStatusCode()
                     + " " + token.getBody());
         }
-        Matcher access = Pattern.compile("\"access_token\"\\s*:\\s*\"([^\"]+)\"")
-                .matcher(token.getBody());
-        if (!access.find()) {
-            throw new IllegalStateException("No access_token in response: " + token.getBody());
-        }
-        return access.group(1);
+        return tokenGrant(token.getBody());
     }
 
     public static String clientCredentialsToken(Http rest, String clientId, String clientSecret) {
@@ -130,7 +150,7 @@ public final class AuthTestSupport {
         return access.group(1);
     }
 
-    private static String followToCode(Http rest, String baseUrl, ResponseEntity<String> response,
+    private static String followToCode(Http rest, ResponseEntity<String> response,
             String sessionCookie) {
         String location = response.getHeaders().getFirst(HttpHeaders.LOCATION);
         if (location != null && location.contains("error")) {
@@ -152,13 +172,6 @@ public final class AuthTestSupport {
         return location == null ? "" : location;
     }
 
-    private static String toAbsolute(String baseUrl, String location) {
-        if (location.startsWith("http")) {
-            return location;
-        }
-        return baseUrl + location;
-    }
-
     private static String cookie(ResponseEntity<?> response) {
         List<String> setCookie = response.getHeaders().get(HttpHeaders.SET_COOKIE);
         if (setCookie == null || setCookie.isEmpty()) {
@@ -168,16 +181,22 @@ public final class AuthTestSupport {
                 .orElse(null);
     }
 
-    private static String extract(String html, Pattern pattern) {
-        if (html == null) {
-            return null;
-        }
-        Matcher matcher = pattern.matcher(html);
+    private static String param(String uri, String name) {
+        Matcher matcher = Pattern.compile("[?&]" + name + "=([^&]+)").matcher(uri);
         return matcher.find() ? matcher.group(1) : null;
     }
 
-    private static String param(String uri, String name) {
-        Matcher matcher = Pattern.compile("[?&]" + name + "=([^&]+)").matcher(uri);
+    private static OAuthGrant tokenGrant(String body) {
+        String accessToken = jsonString(body, "access_token");
+        if (accessToken == null) {
+            throw new IllegalStateException("No access_token in response: " + body);
+        }
+        return new OAuthGrant(accessToken, jsonString(body, "refresh_token"));
+    }
+
+    private static String jsonString(String body, String name) {
+        Matcher matcher = Pattern.compile("\"" + Pattern.quote(name)
+                + "\"\\s*:\\s*\"([^\"]+)\"").matcher(body == null ? "" : body);
         return matcher.find() ? matcher.group(1) : null;
     }
 

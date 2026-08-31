@@ -81,6 +81,36 @@ class AuthAndAccountFlowTest {
     }
 
     @Test
+    void deprecatedBackendLoginRedirectsToStoreWebSignIn() {
+        ResponseEntity<String> response = http().exchange(HttpMethod.GET, "/login",
+                Http.acceptHtml(), null);
+        assertEquals(302, response.getStatusCode().value());
+        assertEquals("http://localhost:8089/signin",
+                response.getHeaders().getFirst(HttpHeaders.LOCATION));
+        assertEquals("true", response.getHeaders().getFirst("Deprecation"));
+    }
+
+    @Test
+    void fengYuDesktopPkceGrantCanRefreshAndCallMe() {
+        AuthTestSupport.OAuthGrant grant = AuthTestSupport.desktopLogin(http(),
+                "user@infinia.local", dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
+        assertNotNull(grant.refreshToken(),
+                "desktop authorization with offline_access must issue a refresh token");
+
+        ResponseEntity<Map> me = http().getJson("/api/v1/me", Map.class,
+                Http.bearer(grant.accessToken()));
+        assertEquals(200, me.getStatusCode().value());
+        assertEquals("user@infinia.local", me.getBody().get("email"));
+
+        AuthTestSupport.OAuthGrant refreshed = AuthTestSupport.refreshDesktop(http(),
+                grant.refreshToken());
+        ResponseEntity<Map> refreshedMe = http().getJson("/api/v1/me", Map.class,
+                Http.bearer(refreshed.accessToken()));
+        assertEquals(200, refreshedMe.getStatusCode().value());
+        assertEquals(me.getBody().get("userId"), refreshedMe.getBody().get("userId"));
+    }
+
+    @Test
     void unauthenticatedMeReturns401Problem() {
         ResponseEntity<Map> response = http().getJson("/api/v1/me", Map.class, null);
         assertEquals(401, response.getStatusCode().value());

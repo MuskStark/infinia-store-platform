@@ -65,21 +65,19 @@ public class SecurityConfig {
     @Bean
     @Order(1)
     public SecurityFilterChain authorizationServerChain(HttpSecurity http,
-            RegisteredClientRepository clients) throws Exception {
+            RegisteredClientRepository clients, StoreProperties properties) throws Exception {
         OAuth2AuthorizationServerConfigurer authorizationServer =
                 new OAuth2AuthorizationServerConfigurer();
         http.securityMatcher(authorizationServer.getEndpointsMatcher())
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/oauth2/token", "/oauth2/revoke"))
                 .exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
-                        new LoginUrlAuthenticationEntryPoint("/login"),
+                        new LoginUrlAuthenticationEntryPoint(
+                                properties.webSignInUri() + "?oauth=1"),
                         new MediaTypeRequestMatcher(MediaType.TEXT_HTML)))
                 .oauth2ResourceServer(rs -> rs.jwt(Customizer.withDefaults()))
                 .with(authorizationServer, configurer -> configurer
-                        .oidc(Customizer.withDefaults()))
-                // The StoreUserDetailsService bean backs form login through the global
-                // AuthenticationManager auto-configuration.
-                .formLogin(Customizer.withDefaults());
+                        .oidc(Customizer.withDefaults()));
         return http.build();
     }
 
@@ -105,14 +103,26 @@ public class SecurityConfig {
 
     @Bean
     @Order(3)
-    public SecurityFilterChain defaultChain(HttpSecurity http) throws Exception {
-        // Actuator health for probes; everything else handled above.
-        http.securityMatcher("/actuator/**", "/login", "/logout", "/error", "/web/**", "/")
+    public SecurityFilterChain defaultChain(HttpSecurity http,
+            StoreProperties properties) throws Exception {
+        // Actuator health, legacy login redirect, and the Store Web session-login bridge;
+        // everything else is handled above.
+        http.securityMatcher("/actuator/**", "/login", "/logout", "/error", "/web/**", "/",
+                        "/oauth2/session-login", "/oauth2/session-login/csrf")
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/actuator/health/**", "/login", "/error", "/web/**", "/")
+                        .requestMatchers("/actuator/health/**", "/login", "/error", "/web/**", "/",
+                                "/oauth2/session-login", "/oauth2/session-login/csrf")
                         .permitAll()
                         .anyRequest().authenticated())
-                .formLogin(Customizer.withDefaults());
+                // Store Web renders the credential UI. This internal POST endpoint only
+                // establishes the browser session needed to resume a saved OAuth request.
+                .formLogin(form -> form
+                        // Spring requires loginPage to be an application-relative matcher.
+                        // GET /login is a deprecated redirect to Store Web, never a form.
+                        .loginPage("/login")
+                        .loginProcessingUrl("/oauth2/session-login")
+                        .failureHandler((request, response, failure) -> response.sendRedirect(
+                                properties.webSignInUri() + "?oauth=1&error=1")));
         return http.build();
     }
 
@@ -173,6 +183,7 @@ public class SecurityConfig {
                         org.springframework.security.oauth2.core.AuthorizationGrantType.REFRESH_TOKEN)
                 .scope("openid")
                 .scope("profile")
+                .scope("offline_access")
                 .clientSettings(ClientSettings.builder().requireAuthorizationConsent(false)
                         .requireProofKey(true).build())
                 .tokenSettings(TokenSettings.builder()

@@ -357,6 +357,7 @@ export default {
     unauthenticated: '请先登录',
     forbidden: '你没有该资源的访问权限',
     email_taken: '该邮箱已注册',
+    invalid_credentials: '邮箱或密码不正确',
     server: '服务器错误，请稍后重试',
     offline: '网络不可用',
   },

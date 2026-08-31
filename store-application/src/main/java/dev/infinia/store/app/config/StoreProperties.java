@@ -52,4 +52,9 @@ public record StoreProperties(
         cliClientSecret = cliClientSecret == null || cliClientSecret.isBlank()
                 ? "dev-only-cli-secret" : cliClientSecret;
     }
+
+    /** Product sign-in page derived from the configured Store Web callback origin. */
+    public String webSignInUri() {
+        return java.net.URI.create(webRedirectUri).resolve("/signin").toString();
+    }
 }

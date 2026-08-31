@@ -335,7 +335,9 @@ assets/                 # 仅允许安全媒体/示例；总大小受限
 - `organization` / `organization_member`：团队发布与权限；
 - `namespace`：商品名称所有权，避免抢注；
 - `device` / `authorization_grant`：主程序设备和授权；
-- 本地新增 `cloud_account_binding`：只保存云端 subject、展示信息、同步状态；refresh token 进入 OS Keychain。
+- 本地新增 `cloud_account_binding`：保存云端 subject、展示信息、同步状态，以及经本机绑定
+  AES-GCM 信封加密的 access/refresh token；部署方可通过 `FENGYU_MACHINE_KEY` 从 OS Keychain
+  注入主密钥材料。
 
 现有 `SysUserEntity` 和虚拟用户 `id=1` 暂时继续负责本地数据库行归属。首版账号登录**不迁移或切换**本地聊天、Flow、插件数据的 owner，避免登出或换号造成数据不可见及跨账号泄露。若未来支持多本地 Profile，应另立迁移项目。
 
@@ -345,27 +347,38 @@ assets/                 # 仅允许安全媒体/示例；总大小受限
 
 ```mermaid
 sequenceDiagram
-  participant UI as Electron Renderer
+  participant UI as Vue SPA
   participant Host as Loopback Host
   participant Browser as System Browser
   participant Auth as Store Authorization Server
-  participant Keychain as OS Keychain
+  participant Vault as Encrypted Local Binding
 
   UI->>Host: POST /api/account/sign-in
-  Host->>Host: 生成 state、nonce、PKCE verifier
-  Host-->>UI: authorizationUrl
-  UI->>Browser: 打开系统浏览器
-  Browser->>Auth: 登录/授权
-  Auth-->>Host: 127.0.0.1 临时回调 code+state
+  Host->>Host: 生成 state、PKCE verifier
+  Host-->>UI: attemptId + authorizationUrl
+  UI->>Browser: 通过 Electron IPC / 新标签页打开
+  Browser->>Auth: GET /oauth2/authorize
+  Auth-->>Browser: 302 Store Web /signin?oauth=1
+  Browser->>Auth: CSRF 保护的 /oauth2/session-login
+  Auth-->>Browser: 恢复已保存的授权请求
+  Auth-->>Host: 127.0.0.1:24057/callback code+state
   Host->>Auth: code + verifier 换 token
-  Host->>Keychain: 保存 refresh token
-  Host-->>UI: SSE/轮询返回已登录用户
+  Host->>Auth: GET /api/v1/me
+  Host->>Vault: 加密保存 access/refresh token
+  Host-->>UI: 轮询返回已登录用户
 ```
 
 约束：
 
-- 回调端口随机、一次性、短时有效，严格验证 `state`、`nonce` 和 redirect URI；
-- access token 只保存在内存，refresh token 只保存在 Keychain；
+- 回调固定为精确注册的 `http://127.0.0.1:24057/callback`，listener 仅在登录尝试期间存在，
+  严格验证 `state` 和 redirect URI；
+- Host 请求 `openid profile offline_access`；Store 的 `fengyu-desktop` 客户端必须同时允许
+  authorization-code、refresh grant 和这三个 scope，否则首次登录成功后不会签发 refresh token；
+- Store Web 的 `http://localhost:8089/signin` 是唯一产品登录界面；OAuth 模式使用 `?oauth=1`
+  和受 CSRF 保护的 session-login bridge 恢复原授权请求。后端 `/login` 仅做弃用重定向，
+  不得重新启用 Spring 默认表单页；
+- access/refresh token 不进入 renderer 或日志；写入本地绑定前使用本机绑定 AES-GCM 信封加密，
+  `FENGYU_MACHINE_KEY` 是 OS Keychain 注入点；
 - 纯 headless 模式使用 OAuth Device Authorization Grant；
 - 浏览器商店使用 `HttpOnly + Secure + SameSite` 会话 Cookie 和 CSRF 保护；
 - 发布 CLI 使用短期 Device Flow 或作用域受限的 Personal Access Token，PAT 只存哈希。
@@ -811,7 +824,7 @@ ui/magic-ui-vue/                     # Vue 3 + Tailwind + Motion 的受控端口
 ### Phase 2：账号与我的库（4–6 周）
 
 - Authorization Server、注册、OIDC、PKCE、Device Flow、设备和会话；
-- Host `cloud_account_binding` + Keychain；
+- Host `cloud_account_binding` + 本机绑定加密（支持 Keychain 注入主密钥）；
 - 收藏、免费 entitlement、安装记录和账号页面；
 - 验收：登录/登出不改变本地 owner=1 数据；撤销设备后 refresh token 立即失效。
 
