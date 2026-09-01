@@ -49,7 +49,10 @@ public class CatalogController {
                 cursor,
                 Math.min(Math.max(limit, 1), 100)));
         String etag = "\"catalog-" + Integer.toHexString(page.hashCode()) + "\"";
-        return ResponseEntity.ok().eTag(etag).header("Cache-Control", "public, max-age=30")
+        // no-cache (revalidate-always) rather than max-age: a stale browser copy
+        // would hide freshly relisted listings for the whole TTL after admin
+        // delist/relist cycles. ETag revalidation keeps unchanged responses 304.
+        return ResponseEntity.ok().eTag(etag).header("Cache-Control", "no-cache")
                 .body(page);
     }
 }
