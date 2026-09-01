@@ -34,10 +34,10 @@ const notice = ref<string | null>(null);
 
 /** Seeded demo accounts (local/test profiles) — one click fills the form. */
 const demoAccounts = computed(() => [
-  { email: 'admin@infinia.local', label: t('auth.roleAdmin') },
-  { email: 'reviewer@infinia.local', label: t('auth.roleReviewer') },
-  { email: 'publisher@infinia.local', label: t('auth.rolePublisher') },
-  { email: 'user@infinia.local', label: t('auth.roleUser') },
+  { email: 'admin@infinia.local', label: t('role.PLATFORM_ADMIN') },
+  { email: 'reviewer@infinia.local', label: t('role.REVIEWER') },
+  { email: 'publisher@infinia.local', label: t('role.PUBLISHER') },
+  { email: 'user@infinia.local', label: t('role.USER') },
 ]);
 
 const emailInvalid = computed(() => email.value.length > 0 && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.value));

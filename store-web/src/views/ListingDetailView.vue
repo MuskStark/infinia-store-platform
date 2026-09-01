@@ -553,7 +553,7 @@ const installLabel = computed(() => {
         </div>
         <div class="rounded-2xl border border-line p-4 dark:border-slate-800">
           <p class="text-xs text-muted dark:text-slate-400">{{ t('listing.targetPlatform') }}</p>
-          <p class="mt-1 font-semibold">universal / universal</p>
+          <p class="mt-1 font-semibold">{{ t('listing.targetPlatformUniversal') }}</p>
           <p class="mt-1 text-sm text-muted dark:text-slate-400">{{ t('listing.noHostRestriction') }}</p>
         </div>
       </div>

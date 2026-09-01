@@ -36,7 +36,9 @@ function signOut() {
 <template>
   <div class="flex min-h-screen flex-col">
     <header class="sticky top-0 z-40 border-b border-line bg-surface/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
-      <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
+      <!-- Wider than <main> so signed-in navigation (8 links + search + actions)
+           stays on one line at common desktop widths instead of wrapping. -->
+      <div class="mx-auto flex max-w-[110rem] flex-wrap items-center gap-3 px-4 py-3">
         <RouterLink :to="{ name: 'discover' }" class="flex items-center gap-2 font-bold">
           <span class="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent2 text-white">
             ∞
@@ -44,51 +46,51 @@ function signOut() {
           <span class="hidden sm:inline">Infinia Store</span>
         </RouterLink>
 
-        <nav class="flex items-center gap-1 text-sm" aria-label="primary">
-          <RouterLink class="rounded-lg px-3 py-2 hover:bg-surface-muted" :to="{ name: 'discover' }">
+        <nav class="flex items-center gap-0.5 text-sm" aria-label="primary">
+          <RouterLink class="rounded-lg px-2.5 py-2 hover:bg-surface-muted" :to="{ name: 'discover' }">
             {{ t('nav.discover') }}
           </RouterLink>
-          <RouterLink class="rounded-lg px-3 py-2 hover:bg-surface-muted" :to="{ name: 'browse' }">
+          <RouterLink class="rounded-lg px-2.5 py-2 hover:bg-surface-muted" :to="{ name: 'browse' }">
             {{ t('nav.browse') }}
           </RouterLink>
           <RouterLink
             v-if="auth.isAuthenticated"
-            class="rounded-lg px-3 py-2 hover:bg-surface-muted"
+            class="rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'library' }"
           >
             {{ t('nav.library') }}
           </RouterLink>
           <RouterLink
             v-if="auth.isAuthenticated"
-            class="rounded-lg px-3 py-2 hover:bg-surface-muted"
+            class="rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'organizations' }"
           >
             {{ t('nav.organizations') }}
           </RouterLink>
           <RouterLink
             v-if="auth.isAuthenticated"
-            class="rounded-lg px-3 py-2 hover:bg-surface-muted"
+            class="rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'account' }"
           >
             {{ t('nav.account') }}
           </RouterLink>
           <RouterLink
             v-if="auth.roles.some((r) => ['PUBLISHER', 'ORG_ADMIN', 'REVIEWER', 'PLATFORM_ADMIN'].includes(r))"
-            class="rounded-lg px-3 py-2 hover:bg-surface-muted"
+            class="rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'publisher' }"
           >
             {{ t('nav.publisher') }}
           </RouterLink>
           <RouterLink
             v-if="auth.roles.some((r) => ['REVIEWER', 'PLATFORM_ADMIN'].includes(r))"
-            class="rounded-lg px-3 py-2 hover:bg-surface-muted"
+            class="rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'review' }"
           >
             {{ t('nav.review') }}
           </RouterLink>
           <RouterLink
             v-if="auth.roles.includes('PLATFORM_ADMIN')"
-            class="rounded-lg px-3 py-2 hover:bg-surface-muted"
+            class="rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'admin' }"
           >
             {{ t('nav.admin') }}
@@ -96,7 +98,7 @@ function signOut() {
         </nav>
 
         <form
-          class="order-last w-full sm:order-none sm:ml-auto sm:w-72"
+          class="order-last w-full sm:order-none sm:ml-auto sm:w-52"
           @submit.prevent="router.push({ name: 'browse' })"
         >
           <label class="sr-only" for="global-search">{{ t('common.search') }}</label>
@@ -111,14 +113,14 @@ function signOut() {
 
         <div class="flex items-center gap-1">
           <button
-            class="rounded-lg px-3 py-2 text-sm hover:bg-surface-muted"
+            class="rounded-lg px-2.5 py-2 text-sm hover:bg-surface-muted"
             :aria-label="t('common.language')"
             @click="switchLocale"
           >
             {{ locale === 'en' ? '中' : 'EN' }}
           </button>
           <button
-            class="rounded-lg px-3 py-2 text-sm hover:bg-surface-muted"
+            class="rounded-lg px-2.5 py-2 text-sm hover:bg-surface-muted"
             :aria-label="t('common.theme')"
             @click="toggleTheme"
           >
@@ -133,7 +135,7 @@ function signOut() {
           </button>
           <button
             v-else
-            class="rounded-lg px-3 py-2 text-sm hover:bg-surface-muted"
+            class="rounded-lg px-2.5 py-2 text-sm hover:bg-surface-muted"
             @click="signOut"
           >
             {{ t('nav.signOut') }}
@@ -147,7 +149,7 @@ function signOut() {
     </main>
 
     <footer class="border-t border-line py-6 text-center text-xs text-muted dark:border-slate-800">
-      Infinia Store Platform · Signed · Reviewed · Rollback-safe
+      {{ t('common.footerTagline') }}
     </footer>
   </div>
 </template>

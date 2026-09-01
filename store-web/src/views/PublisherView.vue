@@ -215,7 +215,7 @@ onMounted(() => {
     </p>
 
     <section>
-      <h2 class="mb-3 font-semibold">{{ t('publisher.listings') }}</h2>
+      <h2 class="mb-3 text-lg font-semibold">{{ t('publisher.listings') }}</h2>
       <EmptyState v-if="!store.listings.length" :title="t('common.empty')" />
       <ul v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <li
@@ -314,8 +314,8 @@ onMounted(() => {
       <form class="grid gap-3 sm:grid-cols-4" @submit.prevent="createRelease">
         <input v-model="releaseForm.version" required placeholder="1.0.0" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
         <select v-model="releaseForm.channel" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <option value="stable">stable</option>
-          <option value="beta">beta</option>
+          <option value="stable">{{ t('channel.stable') }}</option>
+          <option value="beta">{{ t('channel.beta') }}</option>
         </select>
         <input v-model="releaseForm.requiresHost" placeholder=">=4.0.0 <5.0.0" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
         <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>

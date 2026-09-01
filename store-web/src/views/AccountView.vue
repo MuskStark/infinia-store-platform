@@ -56,6 +56,12 @@ async function changePassword() {
         : t('common.error');
   }
 }
+
+function formatDateTime(iso?: string | null): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+}
 </script>
 
 <template>
@@ -70,7 +76,7 @@ async function changePassword() {
         <div class="sm:col-span-2">
           <dt class="text-muted">{{ t('account.roles') }}</dt>
           <dd class="mt-1 flex flex-wrap gap-1">
-            <Badge v-for="role in user.roles" :key="role" tone="accent">{{ role }}</Badge>
+            <Badge v-for="role in user.roles" :key="role" tone="accent">{{ t(`role.${role}`) }}</Badge>
           </dd>
         </div>
       </dl>
@@ -121,7 +127,7 @@ async function changePassword() {
         >
           <div>
             <div class="font-medium">{{ session.clientId }}</div>
-            <div class="text-xs text-muted">{{ session.kind }} · {{ session.createdAt }}</div>
+            <div class="text-xs text-muted">{{ session.kind }} · {{ formatDateTime(session.createdAt) }}</div>
           </div>
           <button class="rounded-lg border border-red-300 px-3 py-2 text-xs text-red-600 dark:border-red-900 dark:text-red-400" @click="revokeSession(session.sessionId)">
             {{ t('account.revoke') }}
@@ -141,7 +147,7 @@ async function changePassword() {
         >
           <div>
             {{ device.name }} · {{ device.platform }}
-            <Badge v-if="device.revoked" tone="danger">revoked</Badge>
+            <Badge v-if="device.revoked" tone="danger">{{ t('account.revoked') }}</Badge>
           </div>
           <button
             v-if="!device.revoked"

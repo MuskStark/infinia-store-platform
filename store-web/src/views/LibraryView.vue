@@ -33,6 +33,12 @@ function formatDate(iso?: string | null): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString();
 }
+
+function formatDateTime(iso?: string | null): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+}
 </script>
 
 <template>
@@ -148,7 +154,7 @@ function formatDate(iso?: string | null): string {
               <td class="p-2"><code class="text-xs">{{ event.coordinate }}</code></td>
               <td class="p-2">{{ event.action }}</td>
               <td class="p-2">{{ event.outcome }}</td>
-              <td class="p-2 text-muted">{{ event.occurredAt }}</td>
+              <td class="p-2 text-muted">{{ formatDateTime(event.occurredAt) }}</td>
             </tr>
           </tbody>
         </table>

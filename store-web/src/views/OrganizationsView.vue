@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api, type AuditEvent, type Organization, type OrganizationMember, type Webhook } from '../api/client';
-import { Badge, MagicCard } from '@infinia/magic-ui-vue';
+import { Badge, MagicCard, ShimmerButton } from '@infinia/magic-ui-vue';
 import EmptyState from '../components/EmptyState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
 import ErrorState from '../components/ErrorState.vue';
@@ -139,12 +139,9 @@ async function createWebhook() {
             :placeholder="t('publisher.orgName')"
             class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
           />
-          <button
-            :disabled="busy"
-            class="shrink-0 whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
-          >
+          <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">
             {{ t('common.confirm') }}
-          </button>
+          </ShimmerButton>
         </form>
         <p class="mt-2 text-xs text-muted">{{ t('org.createHint') }}</p>
       </MagicCard>
@@ -187,7 +184,7 @@ async function createWebhook() {
                   :aria-label="t('org.role')"
                   @change="changeRole(member, ($event.target as HTMLSelectElement).value)"
                 >
-                  <option v-for="role in ['PUBLISHER', 'ORG_ADMIN']" :key="role" :value="role">{{ role }}</option>
+                  <option v-for="role in ['PUBLISHER', 'ORG_ADMIN']" :key="role" :value="role">{{ t(`role.${role}`) }}</option>
                 </select>
                 <button
                   v-if="!member.owner"
@@ -212,12 +209,12 @@ async function createWebhook() {
               class="rounded-xl border border-line bg-surface px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
               :aria-label="t('org.role')"
             >
-              <option value="PUBLISHER">PUBLISHER</option>
-              <option value="ORG_ADMIN">ORG_ADMIN</option>
+              <option value="PUBLISHER">{{ t('role.PUBLISHER') }}</option>
+              <option value="ORG_ADMIN">{{ t('role.ORG_ADMIN') }}</option>
             </select>
-            <button :disabled="busy" class="shrink-0 whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
+            <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">
               {{ t('org.addMember') }}
-            </button>
+            </ShimmerButton>
           </form>
         </section>
 
@@ -244,9 +241,9 @@ async function createWebhook() {
               placeholder="https://ci.example.com/hooks/infinia"
               class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
             />
-            <button :disabled="busy" class="shrink-0 whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
+            <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">
               {{ t('org.addWebhook') }}
-            </button>
+            </ShimmerButton>
           </form>
           <p class="mt-2 text-xs text-muted">{{ t('org.webhookHint') }}</p>
         </section>
