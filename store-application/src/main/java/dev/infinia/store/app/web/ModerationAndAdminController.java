@@ -1,6 +1,7 @@
 package dev.infinia.store.app.web;
 
 import dev.infinia.store.app.service.AuditService;
+import dev.infinia.store.app.service.BeeLevelService;
 import dev.infinia.store.app.service.CatalogService;
 import dev.infinia.store.app.service.CurrentPrincipal;
 import dev.infinia.store.app.service.ModerationService;
@@ -22,12 +23,14 @@ class ReportsController {
     private final ModerationService moderation;
     private final CatalogService catalog;
     private final CurrentPrincipal principal;
+    private final BeeLevelService beeLevels;
 
     ReportsController(ModerationService moderation, CatalogService catalog,
-            CurrentPrincipal principal) {
+            CurrentPrincipal principal, BeeLevelService beeLevels) {
         this.moderation = moderation;
         this.catalog = catalog;
         this.principal = principal;
+        this.beeLevels = beeLevels;
     }
 
     @PostMapping("/reports")
@@ -35,6 +38,8 @@ class ReportsController {
         UUID reporterId = principal.requireUserId();
         Listing listing = catalog.listingOrThrow(
                 dev.infinia.store.contract.coordinate.InfiniaCoordinate.parse(body.coordinate()));
+        // Reporting a bee-level gated listing requires meeting the gate (蜜蜂等级).
+        beeLevels.requireListingAccess(listing);
         ListingReport record = moderation.report(reporterId, listing, body.reason(), body.details());
         return ResponseEntity.status(HttpStatus.CREATED).body(toDto(record, listing));
     }
@@ -89,7 +94,7 @@ class AdminController {
                     .findFirst().map(r -> r.version.toString()).orElse(null);
             return new ReviewDtos.AdminListingDto(l.id.toString(), l.coordinate().toString(),
                     l.name("en"), l.type.name(), l.status, l.visibility.name(), latest,
-                    l.featured, l.downloads);
+                    l.featured, l.minBeeLevel, l.downloads);
         }).toList();
     }
 
@@ -137,12 +142,41 @@ class AdminController {
         return toAdminDto(listing);
     }
 
+    /**
+     * Adjust the listing's bee-level gate (蜜蜂等级门槛): 0 keeps it public for
+     * everyone including anonymous visitors; 1..4 restricts view and download
+     * to signed-in accounts at or above that hive level.
+     */
+    @PostMapping("/listings/{listingId}/min-bee-level")
+    public ReviewDtos.AdminListingDto minBeeLevel(@PathVariable java.util.UUID listingId,
+            @RequestBody MinBeeLevelBody body) {
+        java.util.UUID admin = principal.requireUserId();
+        dev.infinia.store.domain.model.Listing listing = listings.findById(listingId)
+                .orElseThrow(() -> new dev.infinia.store.domain.DomainException(
+                        dev.infinia.store.contract.error.StoreErrorCode.LISTING_NOT_FOUND,
+                        "Listing not found"));
+        java.lang.Integer requested = body == null ? null : body.minBeeLevel();
+        if (requested == null || !dev.infinia.store.contract.type.BeeLevel.isValid(requested)) {
+            throw new dev.infinia.store.domain.DomainException(
+                    dev.infinia.store.contract.error.StoreErrorCode.VALIDATION_FAILED,
+                    "Minimum Infinia Level (minBeeLevel) must be 0 (public) through "
+                            + dev.infinia.store.contract.type.BeeLevel.MAX_LEVEL + " (QUEEN)");
+        }
+        int before = listing.minBeeLevel;
+        listing.minBeeLevel = requested;
+        listing.updatedAt = java.time.Instant.now();
+        listings.save(listing);
+        audit.record("USER", admin.toString(), "listing.minBeeLevel", "LISTING",
+                listing.id.toString(), "L" + before, "L" + requested, null);
+        return toAdminDto(listing);
+    }
+
     private ReviewDtos.AdminListingDto toAdminDto(dev.infinia.store.domain.model.Listing l) {
         String latest = releases.findVisibleByListingId(l.id).stream()
                 .findFirst().map(r -> r.version.toString()).orElse(null);
         return new ReviewDtos.AdminListingDto(l.id.toString(), l.coordinate().toString(),
                 l.name("en"), l.type.name(), l.status, l.visibility.name(), latest,
-                l.featured, l.downloads);
+                l.featured, l.minBeeLevel, l.downloads);
     }
 
     /**
@@ -166,6 +200,8 @@ class AdminController {
     record VisibilityBody(String visibility) {}
 
     record FeaturedBody(Boolean featured) {}
+
+    record MinBeeLevelBody(Integer minBeeLevel) {}
 
     @GetMapping("/reports")
     public List<ReviewDtos.ReportDto> reports(@RequestParam(required = false) String status) {

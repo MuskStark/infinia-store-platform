@@ -1,5 +1,6 @@
 package dev.infinia.store.app.web;
 
+import dev.infinia.store.app.service.BeeLevelService;
 import dev.infinia.store.app.service.CatalogService;
 import dev.infinia.store.app.service.CurrentPrincipal;
 import dev.infinia.store.app.service.ModerationService;
@@ -29,16 +30,18 @@ public class ListingController {
     private final CatalogService catalog;
     private final ModerationService moderation;
     private final CurrentPrincipal principal;
+    private final BeeLevelService beeLevels;
     private final UpstreamRepositories.UpstreamItemRepository upstreamItems;
     private final PublishingRepositories.UpstreamSourceRepository upstreamSources;
 
     public ListingController(CatalogService catalog, ModerationService moderation,
-            CurrentPrincipal principal,
+            CurrentPrincipal principal, BeeLevelService beeLevels,
             UpstreamRepositories.UpstreamItemRepository upstreamItems,
             PublishingRepositories.UpstreamSourceRepository upstreamSources) {
         this.catalog = catalog;
         this.moderation = moderation;
         this.principal = principal;
+        this.beeLevels = beeLevels;
         this.upstreamItems = upstreamItems;
         this.upstreamSources = upstreamSources;
     }
@@ -53,6 +56,7 @@ public class ListingController {
                     dev.infinia.store.contract.error.StoreErrorCode.LISTING_NOT_FOUND,
                     "Listing not found: " + namespace + "/" + slug);
         }
+        beeLevels.requireListingAccess(listing);
         Channel channelFilter = channel == null ? null
                 : Channel.valueOf(channel.trim().toUpperCase());
         List<Release> releases = catalog.visibleReleases(listing, channelFilter);
@@ -67,7 +71,9 @@ public class ListingController {
     @GetMapping("/{namespace}/{slug}/ratings")
     public ListingDtos.RatingsPageDto ratings(@PathVariable String namespace,
             @PathVariable String slug) {
-        return moderation.ratingsOf(requireListing(namespace, slug));
+        Listing listing = requireListing(namespace, slug);
+        beeLevels.requireListingAccess(listing);
+        return moderation.ratingsOf(listing);
     }
 
     /** Creates or updates the caller's rating; one per user per listing (design §12.4). */
@@ -75,6 +81,7 @@ public class ListingController {
     public ListingDtos.RatingDto rate(@PathVariable String namespace, @PathVariable String slug,
             @RequestBody ListingDtos.UpsertRatingRequest request) {
         Listing listing = requireListing(namespace, slug);
+        beeLevels.requireListingAccess(listing);
         ListingRating rating = moderation.rate(principal.requireUserId(), listing,
                 request.stars(), request.comment());
         return new ListingDtos.RatingDto(rating.id().toString(), rating.userId().toString(),

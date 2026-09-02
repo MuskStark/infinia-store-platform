@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -37,6 +38,13 @@ public class UserAdapter implements IdentityRepositories.UserRepository {
     }
 
     @Override
+    public List<StoreUser> findAll() {
+        return jpa.findAll(org.springframework.data.domain.Sort.by(
+                org.springframework.data.domain.Sort.Direction.ASC, "createdAt"))
+                .stream().map(UserAdapter::toDomain).toList();
+    }
+
+    @Override
     @Transactional
     public void save(StoreUser user) {
         UserEntity e = jpa.findById(user.id).orElseGet(UserEntity::new);
@@ -46,6 +54,7 @@ public class UserAdapter implements IdentityRepositories.UserRepository {
         e.displayName = user.displayName;
         e.roles = String.join(",", user.roles.stream().map(Enum::name).toList());
         e.status = user.status;
+        e.beeLevel = user.beeLevel;
         e.mfaEnabled = user.mfaEnabled;
         e.createdAt = user.createdAt;
         e.lastLoginAt = user.lastLoginAt;
@@ -62,7 +71,7 @@ public class UserAdapter implements IdentityRepositories.UserRepository {
             }
         }
         StoreUser user = new StoreUser(e.id, e.email, e.emailNormalized, e.displayName, roles,
-                e.status, e.createdAt);
+                e.status, e.beeLevel, e.createdAt);
         user.mfaEnabled = e.mfaEnabled;
         user.lastLoginAt = e.lastLoginAt;
         return user;

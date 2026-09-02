@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type DownloadTicket, type Library, type ListingDetail, type RatingsPage, type ResolveResponse } from '../api/client';
+import { api, ApiRequestError, type DownloadTicket, type Library, type ListingDetail, type RatingsPage, type ResolveResponse } from '../api/client';
 import { Badge, MagicCard, ShimmerButton, ProgressBar, BorderBeam } from '@infinia/magic-ui-vue';
 import StateChip from '../components/StateChip.vue';
+import BeeLevelBadge from '../components/BeeLevelBadge.vue';
 import ErrorState from '../components/ErrorState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
 import { useAuthStore } from '../stores/auth';
@@ -21,6 +22,8 @@ const auth = useAuthStore();
 const detail = ref<ListingDetail | null>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
+/** Set when the listing is Infinia Level gated and the viewer ranks below it. */
+const gateRequired = ref<number | null>(null);
 const tab = ref<'overview' | 'versions' | 'permissions' | 'dependencies' | 'compatibility' | 'security' | 'reviews'>('overview');
 
 const installStage = ref<
@@ -116,6 +119,7 @@ const installInfo = computed(() => {
 async function load() {
   loading.value = true;
   error.value = null;
+  gateRequired.value = null;
   try {
     detail.value = await api.get<ListingDetail>(
       `/api/v1/listings/${props.namespace}/${props.slug}`,
@@ -131,7 +135,11 @@ async function load() {
       );
     }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'error';
+    if (e instanceof ApiRequestError && e.code === 'bee_level_required') {
+      gateRequired.value = Number(e.parameters?.requiredBeeLevel ?? 1);
+    } else {
+      error.value = e instanceof Error ? e.message : 'error';
+    }
   } finally {
     loading.value = false;
   }
@@ -296,6 +304,26 @@ const installLabel = computed(() => {
 <template>
   <ErrorState v-if="error" :message="error" @retry="load" />
   <LoadingGrid v-else-if="loading" />
+  <div
+    v-else-if="gateRequired !== null"
+    class="rounded-3xl border border-line bg-surface p-10 text-center dark:border-slate-800 dark:bg-slate-900"
+  >
+    <div class="text-5xl">🐝</div>
+    <h1 class="mt-4 text-2xl font-bold">{{ t('listing.beeGateTitle') }}</h1>
+    <p class="mx-auto mt-3 max-w-md text-sm text-muted dark:text-slate-400">
+      {{ t('listing.beeGateBody') }}
+    </p>
+    <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
+      <BeeLevelBadge :level="gateRequired" demands />
+      <RouterLink
+        v-if="!auth.isAuthenticated"
+        to="/signin"
+        class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
+      >
+        {{ t('listing.beeGateSignIn') }}
+      </RouterLink>
+    </div>
+  </div>
   <div v-else-if="detail" class="space-y-8">
     <header class="relative overflow-visible rounded-3xl border border-line bg-surface p-8 dark:border-slate-800 dark:bg-slate-900">
       <BorderBeam v-if="latestRelease?.channel === 'beta'" :size="2" :duration="7" />
@@ -318,6 +346,7 @@ const installLabel = computed(() => {
             <Badge tone="muted">{{ t(`type.${detail.type}`) }}</Badge>
             <Badge v-if="latestRelease" tone="muted">{{ displayVersion(latestRelease.version) }}</Badge>
             <Badge v-if="isLiveUpstream" tone="accent">{{ t('listing.liveDelivery') }}</Badge>
+            <BeeLevelBadge v-if="detail.minBeeLevel && detail.minBeeLevel > 0" :level="detail.minBeeLevel" demands />
             <Badge v-if="detail.defaultChannel !== 'stable'" tone="accent">
               {{ t(`channel.${detail.defaultChannel}`) }}
             </Badge>

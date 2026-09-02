@@ -22,7 +22,8 @@ public final class CatalogDtos {
             long downloads,
             String publisherName,
             String updatedAt,
-            boolean featured) {
+            boolean featured,
+            int minBeeLevel) {
     }
 
     public record CatalogPageDto(

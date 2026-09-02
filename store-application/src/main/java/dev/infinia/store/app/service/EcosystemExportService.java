@@ -98,7 +98,10 @@ public class EcosystemExportService {
         }
         for (Map.Entry<UUID, Release> e : latest.entrySet()) {
             Listing listing = listingById.get(e.getKey());
-            if (listing == null || !listing.isPubliclyVisible()) {
+            if (listing == null || !listing.isPubliclyVisible()
+                    // The exported marketplace is anonymous — bee-level gated
+                    // listings (蜜蜂等级) never leak into the git mirror.
+                    || listing.minBeeLevel > 0) {
                 continue;
             }
             ArtifactInfo selected = packageArtifact(e.getValue());

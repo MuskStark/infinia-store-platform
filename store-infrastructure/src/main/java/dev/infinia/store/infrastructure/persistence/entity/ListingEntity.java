@@ -59,6 +59,9 @@ public class ListingEntity {
     public long favoriteCount;
     @Column(nullable = false)
     public Boolean featured;
+    /** Minimum bee level to view/download (0 = public). */
+    @Column(name = "min_bee_level", nullable = false)
+    public int minBeeLevel;
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;
     @Column(name = "updated_at", nullable = false)

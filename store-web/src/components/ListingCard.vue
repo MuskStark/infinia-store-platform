@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MagicCard, Badge } from '@infinia/magic-ui-vue';
+import BeeLevelBadge from './BeeLevelBadge.vue';
 import type { CatalogItem } from '../api/client';
 
 const props = defineProps<{ item: CatalogItem; featured?: boolean }>();
@@ -44,8 +45,13 @@ const typeLabel = computed(() => t(`type.${props.item.type}`));
           </p>
         </div>
         <div class="mt-auto space-y-1.5">
-          <div v-if="item.category" class="flex flex-wrap gap-1">
-            <Badge tone="accent">{{ item.category }}</Badge>
+          <div v-if="item.category || (item.minBeeLevel && item.minBeeLevel > 0)" class="flex flex-wrap gap-1">
+            <Badge v-if="item.category" tone="accent">{{ item.category }}</Badge>
+            <BeeLevelBadge
+              v-if="item.minBeeLevel && item.minBeeLevel > 0"
+              :level="item.minBeeLevel"
+              require
+            />
           </div>
           <div class="flex items-center justify-between text-xs text-muted dark:text-slate-400">
             <span>{{ item.namespace }}</span>

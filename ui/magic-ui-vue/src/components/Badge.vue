@@ -3,9 +3,12 @@
   Static presentational badge with soft accent background.
 -->
 <script setup lang="ts">
-withDefaults(defineProps<{ tone?: 'accent' | 'muted' | 'success' | 'danger' }>(), {
-  tone: 'accent',
-});
+withDefaults(
+  defineProps<{ tone?: 'accent' | 'muted' | 'success' | 'danger' | 'gold' }>(),
+  {
+    tone: 'accent',
+  },
+);
 </script>
 
 <template>
@@ -45,5 +48,11 @@ withDefaults(defineProps<{ tone?: 'accent' | 'muted' | 'success' | 'danger' }>()
   color: #b91c1c;
   background: #b91c1c14;
   border-color: #b91c1c33;
+}
+/* Royal gold — reserved for the top bee level (蜂王). */
+.magic-badge--gold {
+  color: #a16207;
+  background: linear-gradient(135deg, #fde68a4d, #f59e0b26);
+  border-color: #d9770666;
 }
 </style>

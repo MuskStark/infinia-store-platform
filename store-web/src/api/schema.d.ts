@@ -611,6 +611,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/publisher/listings/{listingId}/min-bee-level": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publisher adjustment of the Infinia Level gate on an owned listing
+         * @description 0 keeps the listing public (anonymous included); 1..4 restricts view and download to signed-in accounts at or above that hive level.
+         */
+        post: operations["setOwnListingMinBeeLevel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reviews": {
         parameters: {
             query?: never;
@@ -724,6 +744,159 @@ export interface paths {
         put?: never;
         /** Toggle editorial featuring — PLATFORM_ADMIN */
         post: operations["setListingFeatured"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/databases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Registered remote database endpoints — PLATFORM_ADMIN */
+        get: operations["listRemoteDatabases"];
+        put?: never;
+        /**
+         * Register a remote database endpoint — PLATFORM_ADMIN
+         * @description Only jdbc:postgresql:// and jdbc:h2: URLs are accepted (the shipped drivers); H2 INIT/RUNSCRIPT parameters are rejected. The password is AES-GCM sealed at rest and never returned by the API.
+         */
+        post: operations["createRemoteDatabase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/databases/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What the running instance is connected to right now — PLATFORM_ADMIN */
+        get: operations["dataSourceStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/databases/{databaseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update a registered endpoint — PLATFORM_ADMIN
+         * @description A blank/absent password keeps the stored credential.
+         */
+        put: operations["updateRemoteDatabase"];
+        post?: never;
+        /**
+         * Remove a registered endpoint — PLATFORM_ADMIN
+         * @description Deleting the active connection also drops the data-source override.
+         */
+        delete: operations["deleteRemoteDatabase"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/databases/{databaseId}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Live connectivity probe (real JDBC connection) — PLATFORM_ADMIN */
+        post: operations["testRemoteDatabase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/databases/{databaseId}/activation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate as the store data source (applied on restart) — PLATFORM_ADMIN
+         * @description Activation requires a successful live probe, disables any previously active connection and writes the data-source override file read at startup. enabled=false deactivates the override globally.
+         */
+        post: operations["setRemoteDatabaseActivation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every account with Infinia Level, status and roles — PLATFORM_ADMIN */
+        get: operations["listAdminUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/users/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Adjust Infinia Level, status, roles or display name — PLATFORM_ADMIN
+         * @description Disabling an account revokes its live sessions immediately. Admins cannot disable themselves or drop their own PLATFORM_ADMIN role. All changes are audited.
+         */
+        put: operations["updateAdminUser"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/listings/{listingId}/min-bee-level": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adjust the listing's Infinia Level gate (门槛) — PLATFORM_ADMIN */
+        post: operations["setListingMinBeeLevel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -967,6 +1140,8 @@ export interface components {
             updatedAt?: string;
             /** @description Editorial featuring (admin) */
             featured?: boolean;
+            /** @description Infinia Level gate: 0 = public; 1..4 restricts view/download to accounts at or above that level */
+            minBeeLevel?: number;
         };
         CatalogPage: {
             items: components["schemas"]["CatalogItem"][];
@@ -1047,6 +1222,8 @@ export interface components {
             downloads?: number;
             /** Format: int64 */
             favorites?: number;
+            /** @description Infinia Level gate: 0 = public; 1..4 restricts view/download to accounts at or above that level */
+            minBeeLevel?: number;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -1178,8 +1355,87 @@ export interface components {
             email: string;
             displayName: string;
             roles: string[];
+            /** @description Infinia Level position: 0 LARVA · 1 WORKER · 2 FORAGER · 3 GUARD · 4 QUEEN */
+            beeLevel?: number;
             /** Format: date-time */
             createdAt?: string;
+        };
+        /** @description A registered remote database endpoint (远程数据库配置) — the sealed password is never returned. */
+        RemoteDatabase: {
+            databaseId?: string;
+            name?: string;
+            /** @example jdbc:postgresql://db.example.com:5432/store */
+            jdbcUrl?: string;
+            username?: string;
+            /** @description True when active as the data-source override */
+            enabled?: boolean;
+            /** Format: date-time */
+            lastTestedAt?: string | null;
+            lastTestOk?: boolean | null;
+            lastTestError?: string | null;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        CreateRemoteDatabaseRequest: {
+            name: string;
+            /** @example jdbc:postgresql://db.example.com:5432/store */
+            jdbcUrl: string;
+            username: string;
+            password: string;
+        };
+        /** @description Partial update; a blank/absent password keeps the stored credential. */
+        UpdateRemoteDatabaseRequest: {
+            name?: string;
+            jdbcUrl?: string;
+            username?: string;
+            password?: string;
+        };
+        RemoteDatabaseTestResult: {
+            ok?: boolean;
+            /** @example PostgreSQL */
+            productName?: string | null;
+            /** @example 16.4 */
+            productVersion?: string | null;
+            /** Format: date-time */
+            testedAt?: string;
+            error?: string | null;
+        };
+        /** @description The data source the running instance uses right now. */
+        DataSourceStatus: {
+            productName?: string | null;
+            productVersion?: string | null;
+            /** @description Password-masked JDBC URL */
+            url?: string | null;
+            username?: string | null;
+            /** @description True when a remote database activated in the console is in effect */
+            remoteOverrideActive?: boolean;
+            overrideName?: string | null;
+        };
+        /** @description Admin-console view of one account (user management). */
+        AdminUser: {
+            userId?: string;
+            email?: string;
+            displayName?: string;
+            roles?: string[];
+            /** @enum {string} */
+            status?: "ACTIVE" | "DISABLED";
+            beeLevel?: number;
+            mfaEnabled?: boolean;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            lastLoginAt?: string | null;
+        };
+        /** @description Partial admin update; omitted fields keep their current values. */
+        UpdateAdminUserRequest: {
+            beeLevel?: number;
+            /** @enum {string} */
+            status?: "ACTIVE" | "DISABLED";
+            /** @description Full replacement role list; USER is always kept */
+            roles?: string[];
+            displayName?: string;
         };
         Session: {
             sessionId?: string;
@@ -1248,6 +1504,11 @@ export interface components {
             descriptionMarkdown?: string;
             /** @default en */
             locale: string;
+            /**
+             * @description Infinia Level gate the publisher sets: 0 = public; 1..4 = only signed-in accounts at or above that level may view and download
+             * @default 0
+             */
+            minBeeLevel: number;
         };
         CreateReleaseRequest: {
             /** @example 1.2.0 */
@@ -1444,6 +1705,7 @@ export interface components {
             visibility?: "PUBLIC" | "UNLISTED" | "PRIVATE";
             latestVersion?: string | null;
             featured?: boolean;
+            minBeeLevel?: number;
             /** Format: int64 */
             downloads?: number;
         };
@@ -2535,6 +2797,34 @@ export interface operations {
             403: components["responses"]["ProblemForbidden"];
         };
     };
+    setOwnListingMinBeeLevel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    minBeeLevel: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated listing */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListingDetail"];
+                };
+            };
+        };
+    };
     listReviews: {
         parameters: {
             query?: {
@@ -2689,6 +2979,240 @@ export interface operations {
             content: {
                 "application/json": {
                     featured: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated listing */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminListing"];
+                };
+            };
+        };
+    };
+    listRemoteDatabases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connections (credentials never returned) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteDatabase"][];
+                };
+            };
+        };
+    };
+    createRemoteDatabase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRemoteDatabaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Registered connection */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteDatabase"];
+                };
+            };
+        };
+    };
+    dataSourceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current data source (URL password-masked) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataSourceStatus"];
+                };
+            };
+        };
+    };
+    updateRemoteDatabase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                databaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRemoteDatabaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated connection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteDatabase"];
+                };
+            };
+        };
+    };
+    deleteRemoteDatabase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                databaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    testRemoteDatabase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                databaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Probe outcome incl. server product/version on success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteDatabaseTestResult"];
+                };
+            };
+        };
+    };
+    setRemoteDatabaseActivation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                databaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated connection state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteDatabase"];
+                };
+            };
+        };
+    };
+    listAdminUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accounts, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUser"][];
+                };
+            };
+        };
+    };
+    updateAdminUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAdminUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated account */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUser"];
+                };
+            };
+        };
+    };
+    setListingMinBeeLevel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    minBeeLevel: number;
                 };
             };
         };

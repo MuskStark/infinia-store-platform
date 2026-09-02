@@ -1,20 +1,182 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type AuditEvent, type Report } from '../api/client';
+import { api, type AdminListing, type AdminUser, type AuditEvent, type DataSourceStatus, type RemoteDatabase, type RemoteDatabaseTestResult, type Report } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
+import BeeLevelBadge from '../components/BeeLevelBadge.vue';
+import { beeMark } from '../bee-levels';
 import EmptyState from '../components/EmptyState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
 import ErrorState from '../components/ErrorState.vue';
 
 /**
- * Platform admin console (design §12.4 管理): abuse report queue, security
+ * Platform admin console (design §12.4 管理): user management (Infinia Level),
+ * listing curation incl. Infinia Level gates, abuse report queue, security
  * withdrawals (yank / quarantine by release id) and the global audit trail.
  * Review decisions stay in the reviewer queue.
  */
 const { t } = useI18n();
 
-const tab = ref<'upstreams' | 'listings' | 'reports' | 'withdraw' | 'audit'>('upstreams');
+const tab = ref<'users' | 'databases' | 'upstreams' | 'listings' | 'reports' | 'withdraw' | 'audit'>('users');
+
+// ---- remote databases (远程数据库配置) ----
+const databases = ref<RemoteDatabase[]>([]);
+const dataSourceStatus = ref<DataSourceStatus | null>(null);
+const databasesLoading = ref(false);
+const databasesError = ref<string | null>(null);
+const dbBusyId = ref<string | null>(null);
+const lastProbe = ref<RemoteDatabaseTestResult | null>(null);
+const newDb = ref({ name: '', jdbcUrl: '', username: '', password: '' });
+const addingDb = ref(false);
+
+async function loadDatabases() {
+  databasesLoading.value = true;
+  databasesError.value = null;
+  try {
+    const [rows, status] = await Promise.all([
+      api.getRemoteDatabases(),
+      api.getDataSourceStatus(),
+    ]);
+    databases.value = rows;
+    dataSourceStatus.value = status;
+  } catch (e) {
+    databasesError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    databasesLoading.value = false;
+  }
+}
+
+async function addDatabase() {
+  if (!newDb.value.name || !newDb.value.jdbcUrl || !newDb.value.username || !newDb.value.password) {
+    return;
+  }
+  addingDb.value = true;
+  databasesError.value = null;
+  try {
+    await api.createRemoteDatabase({ ...newDb.value });
+    newDb.value = { name: '', jdbcUrl: '', username: '', password: '' };
+    await loadDatabases();
+  } catch (e) {
+    databasesError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    addingDb.value = false;
+  }
+}
+
+async function probeDatabase(row: RemoteDatabase) {
+  dbBusyId.value = row.databaseId;
+  databasesError.value = null;
+  lastProbe.value = null;
+  try {
+    lastProbe.value = await api.testRemoteDatabase(row.databaseId);
+    await loadDatabases();
+  } catch (e) {
+    databasesError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    dbBusyId.value = null;
+  }
+}
+
+async function toggleActivation(row: RemoteDatabase) {
+  dbBusyId.value = row.databaseId;
+  databasesError.value = null;
+  try {
+    await api.setRemoteDatabaseActivation(row.databaseId, !row.enabled);
+    await loadDatabases();
+  } catch (e) {
+    databasesError.value = e instanceof Error ? e.message : String(e);
+    await loadDatabases();
+  } finally {
+    dbBusyId.value = null;
+  }
+}
+
+async function removeDatabase(row: RemoteDatabase) {
+  dbBusyId.value = row.databaseId;
+  databasesError.value = null;
+  try {
+    await api.deleteRemoteDatabase(row.databaseId);
+    await loadDatabases();
+  } catch (e) {
+    databasesError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    dbBusyId.value = null;
+  }
+}
+
+// ---- user management (Infinia Level · 用户管理) ----
+const users = ref<AdminUser[]>([]);
+const usersLoading = ref(false);
+const usersError = ref<string | null>(null);
+const savingUserId = ref<string | null>(null);
+const userSearch = ref('');
+const BEE_LEVELS = [0, 1, 2, 3, 4];
+/** Option label mirrors the badge: the emblem changes with the level. */
+function beeLevelLabel(level: number, suffix = ''): string {
+  return `${beeMark(level).emblem} ${t(`beeLevel.${level}`)} · Lv${level}${suffix}`;
+}
+
+const filteredUsers = ref<AdminUser[]>([]);
+function applyUserFilter() {
+  const q = userSearch.value.trim().toLowerCase();
+  filteredUsers.value = q
+    ? users.value.filter(
+        (u) =>
+          u.email.toLowerCase().includes(q)
+          || (u.displayName ?? '').toLowerCase().includes(q),
+      )
+    : [...users.value];
+}
+
+async function loadUsers() {
+  usersLoading.value = true;
+  usersError.value = null;
+  try {
+    users.value = await api.getAdminUsers();
+    applyUserFilter();
+  } catch (e) {
+    usersError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
+async function setUserBeeLevel(user: AdminUser, level: number) {
+  if (level === user.beeLevel) return;
+  savingUserId.value = user.userId;
+  usersError.value = null;
+  try {
+    const updated = await api.updateAdminUser(user.userId, { beeLevel: level });
+    Object.assign(user, updated);
+  } catch (e) {
+    usersError.value = e instanceof Error ? e.message : String(e);
+    await loadUsers();
+  } finally {
+    savingUserId.value = null;
+  }
+}
+
+async function toggleUserStatus(user: AdminUser) {
+  savingUserId.value = user.userId;
+  usersError.value = null;
+  try {
+    const updated = await api.updateAdminUser(user.userId, {
+      status: user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
+    });
+    Object.assign(user, updated);
+  } catch (e) {
+    usersError.value = e instanceof Error ? e.message : String(e);
+    await loadUsers();
+  } finally {
+    savingUserId.value = null;
+  }
+}
+
+function formatDateTime(iso?: string | null): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+}
 
 // ---- upstream aggregation (aggregation plan §3/§8) ----
 interface UpstreamRow {
@@ -92,18 +254,7 @@ async function syncNow(row: UpstreamRow) {
 
 void [upstreamsLoading, adding, syncingId, lastSync];
 
-// ---- listing curation (design §12.4 管理: 上下架/推荐) ----
-interface AdminListing {
-  listingId: string;
-  coordinate: string;
-  name: string;
-  type: string;
-  status: string;
-  visibility: string;
-  latestVersion: string | null;
-  featured: boolean;
-  downloads: number;
-}
+// ---- listing curation (design §12.4 管理: 上下架/推荐/Infinia Level 门槛) ----
 const listings = ref<AdminListing[]>([]);
 const listingsLoading = ref(false);
 
@@ -127,6 +278,12 @@ async function toggleFeatured(row: AdminListing) {
   const updated = await api.post<AdminListing>(
     `/api/v1/admin/listings/${row.listingId}/featured`,
     { featured: !row.featured });
+  Object.assign(row, updated);
+}
+
+async function setListingLevel(row: AdminListing, level: number) {
+  if (level === row.minBeeLevel) return;
+  const updated = await api.setListingMinBeeLevel(row.listingId, level);
   Object.assign(row, updated);
 }
 
@@ -163,6 +320,8 @@ async function load() {
 }
 onMounted(() => {
   void load();
+  void loadUsers();
+  void loadDatabases();
   void loadListings();
   void loadUpstreams();
 });
@@ -191,7 +350,7 @@ async function withdraw(kind: 'yank' | 'quarantine') {
     <template v-else>
       <nav class="flex flex-wrap gap-1 border-b border-line dark:border-slate-800" role="tablist">
         <button
-          v-for="key in ['upstreams', 'listings', 'reports', 'withdraw', 'audit'] as const"
+          v-for="key in ['users', 'databases', 'upstreams', 'listings', 'reports', 'withdraw', 'audit'] as const"
           :key="key"
           role="tab"
           :aria-selected="tab === key"
@@ -202,6 +361,256 @@ async function withdraw(kind: 'yank' | 'quarantine') {
           {{ t(`admin.${key}`) }}
         </button>
       </nav>
+
+      <section v-if="tab === 'users'" class="space-y-3">
+        <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.usersHint') }}</p>
+        <p
+          v-if="usersError"
+          class="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+          role="alert"
+        >
+          {{ usersError }}
+        </p>
+        <input
+          v-model="userSearch"
+          :placeholder="t('admin.userSearch')"
+          class="w-full max-w-md rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+          @input="applyUserFilter"
+        />
+        <LoadingGrid v-if="usersLoading && !users.length" />
+        <EmptyState v-else-if="!filteredUsers.length" :title="t('common.empty')" />
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="text-muted">
+                <th class="p-2">{{ t('admin.userAccount') }}</th>
+                <th class="p-2">{{ t('account.roles') }}</th>
+                <th class="p-2">{{ t('beeLevel.title') }}</th>
+                <th class="p-2">{{ t('admin.userStatus') }}</th>
+                <th class="p-2">{{ t('admin.userLastLogin') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in filteredUsers"
+                :key="row.userId"
+                class="border-t border-line dark:border-slate-800"
+              >
+                <td class="p-2">
+                  <div class="font-medium">{{ row.displayName }}</div>
+                  <code class="block text-xs text-muted">{{ row.email }}</code>
+                </td>
+                <td class="p-2">
+                  <span class="flex flex-wrap gap-1">
+                    <Badge v-for="role in row.roles" :key="role" tone="muted">
+                      {{ t(`role.${role}`) }}
+                    </Badge>
+                  </span>
+                </td>
+                <td class="p-2">
+                  <div class="flex items-center gap-2">
+                    <BeeLevelBadge :level="row.beeLevel" />
+                    <select
+                      :value="row.beeLevel"
+                      :disabled="savingUserId === row.userId"
+                      :aria-label="t('admin.setBeeLevel')"
+                      class="rounded-lg border border-line bg-surface px-2 py-1 text-xs dark:border-slate-800 dark:bg-slate-900"
+                      @change="setUserBeeLevel(row, Number(($event.target as HTMLSelectElement).value))"
+                    >
+                      <option v-for="level in BEE_LEVELS" :key="level" :value="level">
+                        {{ beeLevelLabel(level) }}
+                      </option>
+                    </select>
+                  </div>
+                </td>
+                <td class="p-2">
+                  <button
+                    class="rounded-lg px-3 py-1.5 text-xs font-semibold"
+                    :class="row.status === 'ACTIVE'
+                      ? 'border border-line text-muted dark:border-slate-800'
+                      : 'bg-red-600 text-white'"
+                    :disabled="savingUserId === row.userId"
+                    @click="toggleUserStatus(row)"
+                  >
+                    {{ row.status === 'ACTIVE' ? t('admin.disable') : t('admin.enable') }}
+                  </button>
+                </td>
+                <td class="p-2 text-xs text-muted">{{ formatDateTime(row.lastLoginAt) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section v-if="tab === 'databases'" class="space-y-5">
+        <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.databasesHint') }}</p>
+        <p
+          v-if="databasesError"
+          class="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+          role="alert"
+        >
+          {{ databasesError }}
+        </p>
+
+        <MagicCard v-if="dataSourceStatus" class="p-6">
+          <h3 class="mb-3 font-semibold">{{ t('admin.currentDataSource') }}</h3>
+          <dl class="grid gap-2 text-sm sm:grid-cols-2">
+            <div>
+              <dt class="text-muted">{{ t('admin.dbProduct') }}</dt>
+              <dd class="font-medium">
+                {{ dataSourceStatus.productName ?? '—' }}
+                {{ dataSourceStatus.productVersion ? `(${dataSourceStatus.productVersion})` : '' }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-muted">{{ t('admin.dbUser') }}</dt>
+              <dd class="font-medium">{{ dataSourceStatus.username ?? '—' }}</dd>
+            </div>
+            <div class="sm:col-span-2">
+              <dt class="text-muted">{{ t('admin.dbUrl') }}</dt>
+              <dd><code class="break-all text-xs">{{ dataSourceStatus.url ?? '—' }}</code></dd>
+            </div>
+            <div class="sm:col-span-2">
+              <dt class="text-muted">{{ t('admin.remoteOverride') }}</dt>
+              <dd class="mt-1 flex flex-wrap items-center gap-2">
+                <Badge v-if="dataSourceStatus.remoteOverrideActive" tone="success">
+                  {{ t('admin.overrideActive') }}{{ dataSourceStatus.overrideName
+                    ? ` · ${dataSourceStatus.overrideName}` : '' }}
+                </Badge>
+                <Badge v-else tone="muted">{{ t('admin.overrideInactive') }}</Badge>
+              </dd>
+            </div>
+          </dl>
+        </MagicCard>
+
+        <MagicCard class="p-6">
+          <h3 class="mb-3 font-semibold">{{ t('admin.addDatabase') }}</h3>
+          <form class="grid gap-3 sm:grid-cols-2" @submit.prevent="addDatabase">
+            <label class="block text-sm">
+              {{ t('admin.dbName') }}
+              <input
+                v-model="newDb.name"
+                required
+                maxlength="100"
+                placeholder="production-pg"
+                class="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+              />
+            </label>
+            <label class="block text-sm">
+              {{ t('admin.dbUser') }}
+              <input
+                v-model="newDb.username"
+                required
+                maxlength="200"
+                placeholder="store"
+                class="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+              />
+            </label>
+            <label class="block text-sm sm:col-span-2">
+              {{ t('admin.dbJdbcUrl') }}
+              <input
+                v-model="newDb.jdbcUrl"
+                required
+                maxlength="500"
+                placeholder="jdbc:postgresql://db.example.com:5432/store"
+                class="mt-1 w-full rounded-xl border border-line px-3 py-2 font-mono text-sm dark:border-slate-800 dark:bg-slate-900"
+              />
+            </label>
+            <label class="block text-sm">
+              {{ t('admin.dbPassword') }}
+              <input
+                v-model="newDb.password"
+                required
+                type="password"
+                autocomplete="new-password"
+                class="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+              />
+            </label>
+            <div class="sm:self-end">
+              <button
+                :disabled="addingDb"
+                class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {{ addingDb ? t('common.loading') : t('admin.addDatabase') }}
+              </button>
+            </div>
+            <p class="text-xs text-muted sm:col-span-2">{{ t('admin.dbSecurityHint') }}</p>
+          </form>
+        </MagicCard>
+
+        <LoadingGrid v-if="databasesLoading && !databases.length" />
+        <EmptyState v-else-if="!databases.length" :title="t('admin.noDatabases')" />
+        <ul v-else class="space-y-2">
+          <li
+            v-for="row in databases"
+            :key="row.databaseId"
+            class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-4 dark:border-slate-800"
+          >
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-semibold">{{ row.name }}</span>
+                <Badge v-if="row.enabled" tone="success">{{ t('admin.dbEnabled') }}</Badge>
+                <Badge
+                  v-if="row.lastTestOk === true"
+                  tone="success"
+                >{{ t('admin.dbTestOk') }}</Badge>
+                <Badge
+                  v-else-if="row.lastTestOk === false"
+                  tone="danger"
+                >{{ t('admin.dbTestFailed') }}</Badge>
+              </div>
+              <code class="block truncate text-xs text-muted">{{ row.jdbcUrl }}</code>
+              <p v-if="row.lastTestError" class="mt-1 text-xs text-red-600 dark:text-red-400">
+                {{ row.lastTestError }}
+              </p>
+              <p v-if="row.lastTestedAt" class="text-xs text-muted">
+                {{ t('admin.dbLastTested') }}: {{ formatDateTime(row.lastTestedAt) }}
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                :disabled="dbBusyId === row.databaseId"
+                class="rounded-xl border border-line px-3 py-2 text-sm font-semibold disabled:opacity-50 dark:border-slate-800"
+                @click="probeDatabase(row)"
+              >
+                {{ t('admin.dbTest') }}
+              </button>
+              <button
+                :disabled="dbBusyId === row.databaseId"
+                class="rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
+                :class="row.enabled
+                  ? 'border border-line text-muted dark:border-slate-800'
+                  : 'bg-accent text-white'"
+                @click="toggleActivation(row)"
+              >
+                {{ row.enabled ? t('admin.dbDeactivate') : t('admin.dbActivate') }}
+              </button>
+              <button
+                :disabled="dbBusyId === row.databaseId"
+                class="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                @click="removeDatabase(row)"
+              >
+                {{ t('admin.dbDelete') }}
+              </button>
+            </div>
+          </li>
+        </ul>
+
+        <div
+          v-if="lastProbe"
+          class="rounded-xl border border-line p-4 text-sm dark:border-slate-800"
+          role="status"
+        >
+          <template v-if="lastProbe.ok">
+            ✅ {{ t('admin.dbTestOk') }} — {{ lastProbe.productName }}
+            {{ lastProbe.productVersion }}
+          </template>
+          <template v-else>
+            ❌ {{ t('admin.dbTestFailed') }} — {{ lastProbe.error }}
+          </template>
+        </div>
+        <p class="text-xs text-muted">{{ t('admin.dbActivateHint') }}</p>
+      </section>
 
       <section v-if="tab === 'upstreams'" class="space-y-5">
         <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.upstreamsHint') }}</p>
@@ -335,6 +744,7 @@ async function withdraw(kind: 'yank' | 'quarantine') {
                 <th class="p-2">{{ t('publisher.version') }}</th>
                 <th class="p-2">{{ t('admin.visibility') }}</th>
                 <th class="p-2">{{ t('admin.featured') }}</th>
+                <th class="p-2">{{ t('admin.minBeeLevel') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -369,6 +779,20 @@ async function withdraw(kind: 'yank' | 'quarantine') {
                   >
                     {{ row.featured ? '★ ' + t('admin.featured') : t('admin.feature') }}
                   </button>
+                </td>
+                <td class="p-2">
+                  <select
+                    :value="row.minBeeLevel"
+                    :aria-label="t('admin.minBeeLevel')"
+                    class="rounded-lg border border-line bg-surface px-2 py-1 text-xs dark:border-slate-800 dark:bg-slate-900"
+                    @change="setListingLevel(row, Number(($event.target as HTMLSelectElement).value))"
+                  >
+                    <option v-for="level in BEE_LEVELS" :key="level" :value="level">
+                      {{ level === 0
+                        ? t('admin.beeLevelPublic')
+                        : beeLevelLabel(level, '+') }}
+                    </option>
+                  </select>
                 </td>
               </tr>
             </tbody>

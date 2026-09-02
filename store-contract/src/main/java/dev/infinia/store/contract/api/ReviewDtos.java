@@ -98,6 +98,7 @@ public final class ReviewDtos {
             String visibility,
             String latestVersion,
             boolean featured,
+            int minBeeLevel,
             long downloads) {}
 
     public record UpstreamSyncResultDto(

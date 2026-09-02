@@ -20,7 +20,8 @@ public record StoreProperties(
         String cliClientId,
         String cliClientSecret,
         String appCoordinate,
-        String appMinimumSupportedVersion) {
+        String appMinimumSupportedVersion,
+        String remoteDatasourceFile) {
 
     public StoreProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8080" : baseUrl;
@@ -66,6 +67,8 @@ public record StoreProperties(
         if (appMinimumSupportedVersion == null || appMinimumSupportedVersion.isBlank()) {
             appMinimumSupportedVersion = "4.0.0";
         }
+        remoteDatasourceFile = RemoteDataSourceOverride.overridePath(remoteDatasourceFile)
+                .toString();
     }
 
     /** Product sign-in page derived from the configured Store Web callback origin. */

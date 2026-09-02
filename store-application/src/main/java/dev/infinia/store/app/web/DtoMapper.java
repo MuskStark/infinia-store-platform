@@ -38,6 +38,7 @@ public final class DtoMapper {
                 listing.namespace,
                 listing.downloads,
                 favoriteCount,
+                listing.minBeeLevel,
                 listing.createdAt.toString(),
                 listing.updatedAt.toString(),
                 listing.localizations.stream()

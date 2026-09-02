@@ -1,5 +1,6 @@
 package dev.infinia.store.app.web;
 
+import dev.infinia.store.app.service.BeeLevelService;
 import dev.infinia.store.app.service.CatalogService;
 import dev.infinia.store.contract.api.ListingDtos;
 import dev.infinia.store.contract.api.ResolutionDtos;
@@ -7,6 +8,8 @@ import dev.infinia.store.contract.coordinate.InfiniaCoordinate;
 import dev.infinia.store.contract.type.Channel;
 import dev.infinia.store.domain.DomainException;
 import dev.infinia.store.contract.error.StoreErrorCode;
+import dev.infinia.store.domain.model.Listing;
+import dev.infinia.store.domain.port.ListingRepository;
 import dev.infinia.store.domain.service.DependencySolver;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,9 +27,14 @@ import java.util.Map;
 public class ResolutionController {
 
     private final CatalogService catalog;
+    private final ListingRepository listings;
+    private final BeeLevelService beeLevels;
 
-    public ResolutionController(CatalogService catalog) {
+    public ResolutionController(CatalogService catalog, ListingRepository listings,
+            BeeLevelService beeLevels) {
         this.catalog = catalog;
+        this.listings = listings;
+        this.beeLevels = beeLevels;
     }
 
     @PostMapping("/resolutions")
@@ -42,6 +50,9 @@ public class ResolutionController {
         } catch (IllegalArgumentException e) {
             throw new DomainException(StoreErrorCode.INVALID_COORDINATE, e.getMessage());
         }
+        // Infinia Level gate on the requested root: below-threshold viewers get a
+        // concrete bee_level_required problem instead of a missing-dependency maze.
+        listings.findByCoordinate(root).ifPresent(beeLevels::requireListingAccess);
         Map<String, String> installed = new LinkedHashMap<>();
         if (body.client().installed() != null) {
             for (ResolutionDtos.InstalledRef ref : body.client().installed()) {

@@ -40,15 +40,18 @@ public class CatalogService {
     private final RolloutBucketer bucketer;
     private final ObjectMapper mapper;
     private final TicketService tickets;
+    private final BeeLevelService beeLevels;
 
     public CatalogService(ListingRepository listings, ReleaseRepository releases,
-            StoreProperties properties, ObjectMapper mapper, TicketService tickets) {
+            StoreProperties properties, ObjectMapper mapper, TicketService tickets,
+            BeeLevelService beeLevels) {
         this.listings = listings;
         this.releases = releases;
         this.properties = properties;
         this.bucketer = new RolloutBucketer(properties.rolloutSecret());
         this.mapper = mapper;
         this.tickets = tickets;
+        this.beeLevels = beeLevels;
     }
 
     // ---- catalog ----
@@ -69,7 +72,8 @@ public class CatalogService {
         ListingQuery.ListingPage page = listings.search(new ListingQuery(
                 query.type(), query.text(), query.category(), query.channel(), null,
                 query.sort() == null ? ListingQuery.ListingSort.RELEVANCE : query.sort(),
-                null, query.afterId(), query.featured(), query.limit()));
+                null, query.afterId(), query.featured(), beeLevels.viewerLevel(),
+                query.limit()));
 
         List<CatalogItemDto> items = new ArrayList<>();
         for (Listing listing : page.items()) {
@@ -136,6 +140,12 @@ public class CatalogService {
         if (listing == null || !listing.isPubliclyVisible()) {
             return List.of();
         }
+        // Bee-level gate: below-threshold listings resolve as if they did not
+        // exist, for viewers without access (the root listing gets an explicit
+        // bee_level_required problem from the controller instead).
+        if (listing.minBeeLevel > 0 && listing.minBeeLevel > beeLevels.viewerLevel()) {
+            return List.of();
+        }
         List<DependencySolver.Candidate> candidates = new ArrayList<>();
         for (Release release : releases.findVisibleByListingId(listing.id)) {
             if (release.status != ReleaseStatus.PUBLISHED) {
@@ -187,7 +197,12 @@ public class CatalogService {
         InfiniaCoordinate configured = InfiniaCoordinate.parse(properties.appCoordinate());
         Listing appListing = listings.findByCoordinate(configured).orElse(null);
         if (appListing == null || appListing.type != ListingType.APP
-                || !appListing.isPubliclyVisible()) {
+                || !appListing.isPubliclyVisible()
+                // A bee-level gated APP listing is treated as absent here: the
+                // host updater has no user context and must serve an empty feed
+                // rather than 403 half-way through an update check (蜜蜂等级).
+                || (appListing.minBeeLevel > 0
+                        && appListing.minBeeLevel > beeLevels.viewerLevel())) {
             return new UpdateFeed(null, null, null, 0, null, List.of());
         }
         Release best = null;
@@ -328,7 +343,8 @@ public class CatalogService {
                 listing.namespace,
                 latest == null || latest.publishedAt == null ? null
                         : latest.publishedAt.toString(),
-                listing.featured);
+                listing.featured,
+                listing.minBeeLevel);
     }
 
 }

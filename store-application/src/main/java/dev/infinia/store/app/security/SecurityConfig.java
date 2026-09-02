@@ -234,6 +234,9 @@ public class SecurityConfig {
             if (user == null) {
                 return;
             }
+            // Track the last login for the admin user console (design §12.4 用户管理).
+            user.lastLoginAt = java.time.Instant.now();
+            userRepository.save(user);
             context.getClaims().claim("uid", user.id.toString());
             context.getClaims().claim("roles", user.roles.stream().map(Enum::name).toList());
             context.getClaims().claim("email", user.email);

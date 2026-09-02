@@ -27,6 +27,7 @@ public final class ListingDtos {
             String publisherName,
             long downloads,
             long favorites,
+            int minBeeLevel,
             String createdAt,
             String updatedAt,
             List<LocalizationDto> localizations,

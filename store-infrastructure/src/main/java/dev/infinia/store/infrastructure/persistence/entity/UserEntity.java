@@ -24,6 +24,9 @@ public class UserEntity {
     public String roles;
     @Column(name = "status", nullable = false)
     public String status;
+    /** Bee ladder position 0..4 (蜜蜂等级); gates level-restricted listings. */
+    @Column(name = "bee_level", nullable = false)
+    public int beeLevel;
     @Column(name = "mfa_enabled", nullable = false)
     public boolean mfaEnabled;
     @Column(name = "created_at", nullable = false)

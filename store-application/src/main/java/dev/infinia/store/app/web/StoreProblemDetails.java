@@ -52,6 +52,7 @@ public class StoreProblemDetails {
             Map.entry(StoreErrorCode.UPLOAD_NOT_COMPLETE, HttpStatus.CONFLICT),
             Map.entry(StoreErrorCode.UPLOAD_EXPIRED, HttpStatus.GONE),
             Map.entry(StoreErrorCode.TICKET_INVALID, HttpStatus.FORBIDDEN),
+            Map.entry(StoreErrorCode.BEE_LEVEL_REQUIRED, HttpStatus.FORBIDDEN),
             Map.entry(StoreErrorCode.RATE_LIMITED, HttpStatus.TOO_MANY_REQUESTS),
             Map.entry(StoreErrorCode.IDEMPOTENCY_CONFLICT, HttpStatus.CONFLICT),
             Map.entry(StoreErrorCode.UPSTREAM_DRIFTED, HttpStatus.CONFLICT),

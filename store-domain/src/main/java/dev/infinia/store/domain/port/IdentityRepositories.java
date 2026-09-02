@@ -27,6 +27,9 @@ public final class IdentityRepositories {
 
         boolean existsByEmailNormalized(String emailNormalized);
 
+        /** Every account, oldest first — the admin user console. */
+        List<StoreUser> findAll();
+
         void save(StoreUser user);
     }
 

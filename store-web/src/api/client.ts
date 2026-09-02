@@ -11,6 +11,8 @@ export type ApiError = {
   detail?: string;
   status?: number;
   traceId?: string;
+  /** Structured parameters from problem+json (e.g. requiredBeeLevel). */
+  parameters?: Record<string, unknown>;
 };
 
 export class ApiRequestError extends Error implements ApiError {
@@ -19,6 +21,7 @@ export class ApiRequestError extends Error implements ApiError {
   detail?: string;
   status: number;
   traceId?: string;
+  parameters?: Record<string, unknown>;
 
   constructor(body: ApiError) {
     super(body.detail ?? body.title ?? 'Request failed');
@@ -27,6 +30,7 @@ export class ApiRequestError extends Error implements ApiError {
     this.detail = body.detail;
     this.status = body.status ?? 0;
     this.traceId = body.traceId;
+    this.parameters = body.parameters;
   }
 }
 
@@ -106,6 +110,68 @@ export const api = {
       `/api/v1/admin/upstreams/${encodeURIComponent(upstreamId)}/sync`,
       { method: 'POST' },
     ),
+
+  // ── Admin user management (Infinia Level · 用户管理) ──
+
+  getAdminUsers: () =>
+    request<AdminUser[]>('/api/v1/admin/users'),
+
+  updateAdminUser: (userId: string, body: UpdateAdminUser) =>
+    request<AdminUser>(`/api/v1/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  setListingMinBeeLevel: (listingId: string, minBeeLevel: number) =>
+    request<AdminListing>(`/api/v1/admin/listings/${encodeURIComponent(listingId)}/min-bee-level`, {
+      method: 'POST',
+      body: JSON.stringify({ minBeeLevel }),
+    }),
+
+  // ── Admin remote database configuration (远程数据库配置) ──
+
+  getRemoteDatabases: () =>
+    request<RemoteDatabase[]>('/api/v1/admin/databases'),
+
+  createRemoteDatabase: (body: {
+    name: string
+    jdbcUrl: string
+    username: string
+    password: string
+  }) =>
+    request<RemoteDatabase>('/api/v1/admin/databases', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateRemoteDatabase: (
+    databaseId: string,
+    body: { name?: string; jdbcUrl?: string; username?: string; password?: string },
+  ) =>
+    request<RemoteDatabase>(`/api/v1/admin/databases/${encodeURIComponent(databaseId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteRemoteDatabase: (databaseId: string) =>
+    request<void>(`/api/v1/admin/databases/${encodeURIComponent(databaseId)}`, {
+      method: 'DELETE',
+    }),
+
+  testRemoteDatabase: (databaseId: string) =>
+    request<RemoteDatabaseTestResult>(
+      `/api/v1/admin/databases/${encodeURIComponent(databaseId)}/test`,
+      { method: 'POST' },
+    ),
+
+  setRemoteDatabaseActivation: (databaseId: string, enabled: boolean) =>
+    request<RemoteDatabase>(
+      `/api/v1/admin/databases/${encodeURIComponent(databaseId)}/activation`,
+      { method: 'POST', body: JSON.stringify({ enabled }) },
+    ),
+
+  getDataSourceStatus: () =>
+    request<DataSourceStatus>('/api/v1/admin/databases/status'),
 };
 
 // ---- typed DTO aliases generated from the contract ----
@@ -142,3 +208,61 @@ export type Organization = components['schemas']['Organization'];
 export type OrganizationMember = components['schemas']['OrganizationMember'];
 export type Webhook = components['schemas']['Webhook'];
 export type InstalledItem = components['schemas']['InstalledItem'];
+
+// ---- admin console types (users / curation incl. Infinia Levels) ----
+export type AdminUser = {
+  userId: string;
+  email: string;
+  displayName: string;
+  roles: string[];
+  status: string;
+  beeLevel: number;
+  mfaEnabled: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+};
+export type UpdateAdminUser = {
+  beeLevel?: number;
+  status?: string;
+  roles?: string[];
+  displayName?: string;
+};
+export type AdminListing = {
+  listingId: string;
+  coordinate: string;
+  name: string;
+  type: string;
+  status: string;
+  visibility: string;
+  latestVersion: string | null;
+  featured: boolean;
+  minBeeLevel: number;
+  downloads: number;
+};
+export type RemoteDatabase = {
+  databaseId: string;
+  name: string;
+  jdbcUrl: string;
+  username: string;
+  enabled: boolean;
+  lastTestedAt: string | null;
+  lastTestOk: boolean | null;
+  lastTestError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type RemoteDatabaseTestResult = {
+  ok: boolean;
+  productName: string | null;
+  productVersion: string | null;
+  testedAt: string;
+  error: string | null;
+};
+export type DataSourceStatus = {
+  productName: string | null;
+  productVersion: string | null;
+  url: string | null;
+  username: string | null;
+  remoteOverrideActive: boolean;
+  overrideName: string | null;
+};

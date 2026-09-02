@@ -1,6 +1,7 @@
 package dev.infinia.store.app.web;
 
 import dev.infinia.store.app.config.StoreProperties;
+import dev.infinia.store.app.service.BeeLevelService;
 import dev.infinia.store.app.service.CatalogService;
 import dev.infinia.store.app.service.CurrentPrincipal;
 import dev.infinia.store.app.service.PublisherService;
@@ -35,6 +36,8 @@ public class DeliveryController {
     private final CatalogService catalog;
     private final PublisherService publisher;
     private final dev.infinia.store.domain.port.ReleaseRepository releases;
+    private final dev.infinia.store.domain.port.ListingRepository listings;
+    private final BeeLevelService beeLevels;
     private final TicketService tickets;
     private final BlobStorage blobs;
     private final StoreProperties properties;
@@ -42,12 +45,16 @@ public class DeliveryController {
 
     public DeliveryController(CatalogService catalog, PublisherService publisher,
             dev.infinia.store.domain.port.ReleaseRepository releases,
-            TicketService tickets, BlobStorage blobs, StoreProperties properties,
+            dev.infinia.store.domain.port.ListingRepository listings,
+            BeeLevelService beeLevels, TicketService tickets, BlobStorage blobs,
+            StoreProperties properties,
             dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts) {
         this.upstreamArtifacts = upstreamArtifacts;
         this.catalog = catalog;
         this.publisher = publisher;
         this.releases = releases;
+        this.listings = listings;
+        this.beeLevels = beeLevels;
         this.tickets = tickets;
         this.blobs = blobs;
         this.properties = properties;
@@ -63,6 +70,9 @@ public class DeliveryController {
             throw new DomainException(StoreErrorCode.INVALID_STATE_TRANSITION,
                     "Release is not installable (status " + release.status + ")");
         }
+        // Infinia Level gate (Infinia Level): the HMAC ticket is the download authorization,
+        // so it must never be minted for a viewer below the listing's level.
+        listings.findById(release.listingId).ifPresent(beeLevels::requireListingAccess);
         Release.ArtifactInfo artifact = catalog.pickArtifact(release, artifactId, os, arch);
         Instant expiresAt = Instant.now().plusSeconds(properties.downloadTicketTtlSeconds());
         String signature = tickets.sign("download", artifact.blobKey(), expiresAt);
@@ -163,6 +173,7 @@ public class DeliveryController {
             throw new DomainException(StoreErrorCode.INVALID_STATE_TRANSITION,
                     "Release is not installable (status " + release.status + ")");
         }
+        listings.findById(release.listingId).ifPresent(beeLevels::requireListingAccess);
         StringBuilder manifest = new StringBuilder();
         release.artifacts.stream()
                 .filter(a -> a.kind() == dev.infinia.store.contract.type.ArtifactKind.INSTALLER

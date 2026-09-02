@@ -75,6 +75,12 @@ public class ListingRepositoryAdapter implements ListingRepository {
             if (!"PUBLIC".equals(e.visibility) || !"ACTIVE".equals(e.status)) {
                 continue;
             }
+            // Bee-level gate (蜜蜂等级): gate 0 stays public for everyone;
+            // gated listings rank above the viewer's level are invisible —
+            // same rule as the detail and delivery surfaces.
+            if (e.minBeeLevel > 0 && e.minBeeLevel > query.viewerBeeLevel()) {
+                continue;
+            }
             if (query.category() != null && !query.category().isBlank()
                     && !query.category().equalsIgnoreCase(e.category)) {
                 continue;
@@ -207,6 +213,7 @@ public class ListingRepositoryAdapter implements ListingRepository {
         e.downloads = l.downloads;
         e.favoriteCount = l.favoriteCount;
         e.featured = l.featured;
+        e.minBeeLevel = l.minBeeLevel;
         e.createdAt = l.createdAt;
         e.updatedAt = l.updatedAt;
         e.localizations.clear();
@@ -237,6 +244,7 @@ public class ListingRepositoryAdapter implements ListingRepository {
         l.downloads = e.downloads;
         l.favoriteCount = e.favoriteCount;
         l.featured = e.featured != null && e.featured;
+        l.minBeeLevel = e.minBeeLevel;
         l.createdAt = e.createdAt;
         l.updatedAt = e.updatedAt;
         l.localizations = new ArrayList<>();

@@ -90,6 +90,8 @@ public class AccountService {
             throw new DomainException(StoreErrorCode.FORBIDDEN,
                     "This account is not active");
         }
+        user.lastLoginAt = Instant.now();
+        users.save(user);
         return user;
     }
 
@@ -165,6 +167,7 @@ public class AccountService {
 
     public AccountDtos.PublicUserDto toDto(StoreUser user) {
         return new AccountDtos.PublicUserDto(user.id.toString(), user.email, user.displayName,
-                user.roles.stream().map(Enum::name).toList(), user.createdAt.toString());
+                user.roles.stream().map(Enum::name).toList(), user.beeLevel,
+                user.createdAt.toString());
     }
 }

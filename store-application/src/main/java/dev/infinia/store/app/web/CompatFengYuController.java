@@ -51,18 +51,21 @@ public class CompatFengYuController {
     private final ListingRepository listings;
     private final IdentityRepositories.NamespaceRepository namespaces;
     private final CatalogService catalog;
+    private final dev.infinia.store.app.service.BeeLevelService beeLevels;
     private final dev.infinia.store.app.service.EcosystemExportService ecosystem;
     private final TicketService tickets;
     private final StoreProperties properties;
 
     public CompatFengYuController(ReleaseRepository releases, ListingRepository listings,
             IdentityRepositories.NamespaceRepository namespaces, CatalogService catalog,
+            dev.infinia.store.app.service.BeeLevelService beeLevels,
             dev.infinia.store.app.service.EcosystemExportService ecosystem,
             TicketService tickets, StoreProperties properties) {
         this.releases = releases;
         this.listings = listings;
         this.namespaces = namespaces;
         this.catalog = catalog;
+        this.beeLevels = beeLevels;
         this.ecosystem = ecosystem;
         this.tickets = tickets;
         this.properties = properties;
@@ -86,7 +89,9 @@ public class CompatFengYuController {
         List<FengYuCatalogEntryDto> entries = new ArrayList<>();
         for (Map.Entry<UUID, Release> e : latestByListing.entrySet()) {
             Listing listing = listingById.get(e.getKey());
-            if (listing == null || !listing.isPubliclyVisible()) {
+            if (listing == null || !listing.isPubliclyVisible()
+                    || (listing.minBeeLevel > 0
+                    && listing.minBeeLevel > beeLevels.viewerLevel())) {
                 continue;
             }
             Release release = e.getValue();
@@ -136,7 +141,9 @@ public class CompatFengYuController {
         List<FengYuSkillEntryDto> entries = new ArrayList<>();
         for (Map.Entry<UUID, Release> e : latestByListing.entrySet()) {
             Listing listing = listingById.get(e.getKey());
-            if (listing == null || !listing.isPubliclyVisible()) {
+            if (listing == null || !listing.isPubliclyVisible()
+                    || (listing.minBeeLevel > 0
+                    && listing.minBeeLevel > beeLevels.viewerLevel())) {
                 continue;
             }
             ArtifactInfo artifact = packageArtifact(e.getValue());

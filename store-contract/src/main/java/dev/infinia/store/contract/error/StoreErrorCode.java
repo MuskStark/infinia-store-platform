@@ -32,6 +32,7 @@ public enum StoreErrorCode {
     WRONG_PASSWORD("wrong_password"),
     UPSTREAM_DRIFTED("upstream_drifted"),
     REPORT_NOT_FOUND("report_not_found"),
+    BEE_LEVEL_REQUIRED("bee_level_required"),
     INTERNAL_ERROR("internal_error");
 
     public final String code;

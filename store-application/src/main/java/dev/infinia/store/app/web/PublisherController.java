@@ -66,7 +66,7 @@ public class PublisherController {
                         l.coordinate().toString(), l.type.name(), l.namespace, l.slug,
                         l.name("en"), l.summary("en"), l.category, l.tags, l.iconUrl, null,
                         l.defaultChannel.name().toLowerCase(), l.downloads, l.namespace,
-                        l.updatedAt.toString(), l.featured))
+                        l.updatedAt.toString(), l.featured, l.minBeeLevel))
                 .toList();
     }
 
@@ -79,6 +79,21 @@ public class PublisherController {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(DtoMapper.listingDetail(listing, List.of(), 0));
     }
+
+    /**
+     * Publisher-side bee-level gate (蜜蜂等级门槛): the plugin owner chooses which
+     * hive level can view and download their listing. 0 keeps it public; 1..4
+     * requires signed-in accounts at or above that level.
+     */
+    @PostMapping("/listings/{listingId}/min-bee-level")
+    public dev.infinia.store.contract.api.ListingDtos.ListingDetailDto minBeeLevel(
+            @PathVariable UUID listingId, @RequestBody MinBeeLevelBody body) {
+        Listing listing = publisher.updateMinBeeLevel(principal.requireUserId(), listingId,
+                body == null ? null : body.minBeeLevel());
+        return DtoMapper.listingDetail(listing, List.of(), 0);
+    }
+
+    record MinBeeLevelBody(Integer minBeeLevel) {}
 
     @PostMapping("/listings/{listingId}/releases")
     public ResponseEntity<PublisherDtos.PublisherReleaseDto> createRelease(

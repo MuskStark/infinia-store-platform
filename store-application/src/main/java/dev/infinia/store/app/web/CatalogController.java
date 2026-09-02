@@ -52,7 +52,9 @@ public class CatalogController {
         // no-cache (revalidate-always) rather than max-age: a stale browser copy
         // would hide freshly relisted listings for the whole TTL after admin
         // delist/relist cycles. ETag revalidation keeps unchanged responses 304.
+        // Vary: the bee-level gate makes identical URLs differ per Authorization.
         return ResponseEntity.ok().eTag(etag).header("Cache-Control", "no-cache")
+                .header("Vary", "Authorization")
                 .body(page);
     }
 }

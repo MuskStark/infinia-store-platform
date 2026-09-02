@@ -5,6 +5,7 @@ import dev.infinia.store.app.service.PlatformSigningService;
 import dev.infinia.store.contract.semver.SemVer;
 import dev.infinia.store.contract.type.Arch;
 import dev.infinia.store.contract.type.ArtifactKind;
+import dev.infinia.store.contract.type.BeeLevel;
 import dev.infinia.store.contract.type.Channel;
 import dev.infinia.store.contract.type.ListingType;
 import dev.infinia.store.contract.type.Platform;
@@ -105,10 +106,10 @@ public class SeedData {
                 UserRole.PLATFORM_ADMIN), now);
         user(REVIEWER_EMAIL, "Demo Reviewer", Set.of(UserRole.USER, UserRole.REVIEWER), now);
         StoreUser publisher = user(PUBLISHER_EMAIL, "Infinia Official",
-                Set.of(UserRole.USER, UserRole.PUBLISHER), now);
+                Set.of(UserRole.USER, UserRole.PUBLISHER), BeeLevel.GUARD.level, now);
         user(CI_EMAIL, "CI Service Account", Set.of(UserRole.USER, UserRole.PUBLISHER,
                 UserRole.REVIEWER), now);
-        user(USER_EMAIL, "Demo User", Set.of(UserRole.USER), now);
+        user(USER_EMAIL, "Demo User", Set.of(UserRole.USER), BeeLevel.WORKER.level, now);
 
         if (!demoContent) {
             // Accounts only — local/dev runs stay clean for real content
@@ -313,8 +314,13 @@ public class SeedData {
     }
 
     private StoreUser user(String email, String name, Set<UserRole> roles, Instant now) {
+        return user(email, name, roles, BeeLevel.LARVA.level, now);
+    }
+
+    private StoreUser user(String email, String name, Set<UserRole> roles, int beeLevel,
+            Instant now) {
         StoreUser user = new StoreUser(UuidV7.generate(), email, email, name, roles, "ACTIVE",
-                now);
+                beeLevel, now);
         users.save(user);
         credentials.save(new Credential(UuidV7.generate(), user.id,
                 Credential.CredentialType.PASSWORD, hasher.hash(DEMO_PASSWORD), now));

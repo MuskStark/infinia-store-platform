@@ -36,6 +36,12 @@ public class Listing {
     public long favoriteCount;
     /** Editorial featuring toggled by platform admins (design §12.4). */
     public boolean featured;
+    /**
+     * Minimum bee level (蜜蜂等级) required to view and download this listing;
+     * 0 means public (anonymous included). Enforced on every catalog, detail,
+     * resolution and delivery surface.
+     */
+    public int minBeeLevel;
     public Instant createdAt;
     public Instant updatedAt;
     public List<Localization> localizations = new ArrayList<>();

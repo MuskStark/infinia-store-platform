@@ -18,7 +18,29 @@ public final class AccountDtos {
             String email,
             String displayName,
             List<String> roles,
+            int beeLevel,
             String createdAt) {
+    }
+
+    /** Admin-console view of one account (design §12.4 用户管理). */
+    public record AdminUserDto(
+            String userId,
+            String email,
+            String displayName,
+            List<String> roles,
+            String status,
+            int beeLevel,
+            boolean mfaEnabled,
+            String createdAt,
+            String lastLoginAt) {
+    }
+
+    /** Partial admin update; omitted fields keep their current values. */
+    public record UpdateAdminUserRequest(
+            Integer beeLevel,
+            String status,
+            List<String> roles,
+            String displayName) {
     }
 
     public record UpdateProfileRequest(String displayName) {}

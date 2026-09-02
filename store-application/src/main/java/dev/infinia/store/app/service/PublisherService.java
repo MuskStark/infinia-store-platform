@@ -134,6 +134,7 @@ public class PublisherService {
                 : Channel.valueOf(request.defaultChannel().toUpperCase());
         listing.publisherUserId = publisherUserId;
         listing.organizationId = namespace.organizationId();
+        listing.minBeeLevel = normalizeMinBeeLevel(request.minBeeLevel());
         listing.createdAt = now;
         listing.updatedAt = now;
         listing.localizations = new ArrayList<>(List.of(new Listing.Localization(
@@ -146,6 +147,39 @@ public class PublisherService {
                 toJson(new StoreEventPayloads.ListingCreated(coordinate.toString(),
                         type.name(), request.name())));
         return listing;
+    }
+
+    /**
+     * Owner (or platform admin) adjustment of the listing's bee-level gate:
+     * 0 = public for everyone, 1..4 = signed-in bees at or above the level.
+     */
+    @Transactional
+    public Listing updateMinBeeLevel(UUID publisherUserId, UUID listingId, Integer minBeeLevel) {
+        Listing listing = listings.findById(listingId).orElseThrow(
+                () -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND, "Listing not found"));
+        if (!listing.publisherUserId.equals(publisherUserId)) {
+            throw DomainException.forbidden("You do not own this listing");
+        }
+        int normalized = normalizeMinBeeLevel(minBeeLevel);
+        int before = listing.minBeeLevel;
+        listing.minBeeLevel = normalized;
+        listing.updatedAt = Instant.now();
+        listings.save(listing);
+        audit.record("USER", publisherUserId.toString(), "listing.minBeeLevel", "LISTING",
+                listing.id.toString(), "L" + before, "L" + normalized, null);
+        return listing;
+    }
+
+    private static int normalizeMinBeeLevel(Integer requested) {
+        if (requested == null) {
+            return 0;
+        }
+        if (!dev.infinia.store.contract.type.BeeLevel.isValid(requested)) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "Minimum Infinia Level (minBeeLevel) must be 0 (public) through "
+                            + dev.infinia.store.contract.type.BeeLevel.MAX_LEVEL + " (QUEEN)");
+        }
+        return requested;
     }
 
     // ---- releases ----

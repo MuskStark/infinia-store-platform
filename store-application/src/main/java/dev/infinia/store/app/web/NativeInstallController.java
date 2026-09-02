@@ -1,6 +1,7 @@
 package dev.infinia.store.app.web;
 
 import dev.infinia.store.app.config.StoreProperties;
+import dev.infinia.store.app.service.BeeLevelService;
 import dev.infinia.store.app.service.CatalogService;
 import dev.infinia.store.app.service.TicketService;
 import dev.infinia.store.contract.type.ArtifactKind;
@@ -35,13 +36,15 @@ public class NativeInstallController {
 
     private final CatalogService catalog;
     private final ListingRepository listings;
+    private final BeeLevelService beeLevels;
     private final TicketService tickets;
     private final StoreProperties properties;
 
     public NativeInstallController(CatalogService catalog, ListingRepository listings,
-            TicketService tickets, StoreProperties properties) {
+            BeeLevelService beeLevels, TicketService tickets, StoreProperties properties) {
         this.catalog = catalog;
         this.listings = listings;
+        this.beeLevels = beeLevels;
         this.tickets = tickets;
         this.properties = properties;
     }
@@ -63,6 +66,8 @@ public class NativeInstallController {
         if (listing == null) {
             return ResponseEntity.notFound().build();
         }
+        // The manifest embeds a long-lived download ticket — Infinia Level gate first.
+        beeLevels.requireListingAccess(listing);
         Release.ArtifactInfo artifact = release.artifacts.stream()
                 .filter(a -> a.kind() == ArtifactKind.PACKAGE).findFirst()
                 .orElse(release.artifacts.isEmpty() ? null : release.artifacts.get(0));
@@ -134,7 +139,9 @@ public class NativeInstallController {
         for (Release release : catalog.latestVisibleByType(
                 dev.infinia.store.contract.type.ListingType.MCP)) {
             Listing listing = listings.findById(release.listingId).orElse(null);
-            if (listing == null || !listing.isPubliclyVisible()) {
+            if (listing == null || !listing.isPubliclyVisible()
+                    || (listing.minBeeLevel > 0
+                    && listing.minBeeLevel > beeLevels.viewerLevel())) {
                 continue;
             }
             Release.ArtifactInfo artifact = release.artifacts.stream()
@@ -172,7 +179,9 @@ public class NativeInstallController {
         for (Release release : catalog.latestVisibleByType(
                 dev.infinia.store.contract.type.ListingType.SKILL)) {
             Listing listing = listings.findById(release.listingId).orElse(null);
-            if (listing == null || !listing.isPubliclyVisible()) {
+            if (listing == null || !listing.isPubliclyVisible()
+                    || (listing.minBeeLevel > 0
+                    && listing.minBeeLevel > beeLevels.viewerLevel())) {
                 continue;
             }
             Map<String, Object> entry = new LinkedHashMap<>();

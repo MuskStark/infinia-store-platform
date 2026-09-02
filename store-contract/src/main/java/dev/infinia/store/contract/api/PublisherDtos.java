@@ -17,7 +17,8 @@ public final class PublisherDtos {
             String name,
             String summary,
             String descriptionMarkdown,
-            String locale) {
+            String locale,
+            Integer minBeeLevel) {
     }
 
     public record CreateReleaseRequest(

@@ -11,6 +11,7 @@ import {
 } from '../api/client';
 import { Badge, MagicCard, ProgressBar, ShimmerButton } from '@infinia/magic-ui-vue';
 import StateChip from '../components/StateChip.vue';
+import { beeMark } from '../bee-levels';
 import EmptyState from '../components/EmptyState.vue';
 import { usePublisherStore } from '../stores/publisher';
 import { useAuthStore } from '../stores/auth';
@@ -37,6 +38,7 @@ const listingForm = ref({
   name: '',
   summary: '',
   category: '',
+  minBeeLevel: 0,
 });
 const releaseForm = ref({ version: '', channel: 'stable', requiresHost: '' });
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -72,6 +74,24 @@ async function createListing() {
       name: listingForm.value.name,
     } as CatalogItem;
     await store.load();
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** Publisher-side Infinia Level gate adjustment (Infinia Level 门槛). */
+const gateListingId = ref('');
+const gateLevel = ref(0);
+
+async function applyGate() {
+  if (!gateListingId.value) return;
+  busy.value = true;
+  try {
+    await api.post(
+      `/api/v1/publisher/listings/${gateListingId.value}/min-bee-level`,
+      { minBeeLevel: gateLevel.value },
+    );
+    message.value = t('publisher.gateUpdated');
   } finally {
     busy.value = false;
   }
@@ -282,7 +302,46 @@ onMounted(() => {
         </select>
         <input v-model="listingForm.name" required :placeholder="t('publisher.name')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
         <input v-model="listingForm.summary" :placeholder="t('publisher.summary')" class="sm:col-span-2 rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
+        <label class="block text-sm sm:col-span-2">
+          {{ t('publisher.minBeeLevel') }}
+          <select
+            v-model="listingForm.minBeeLevel"
+            class="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+          >
+            <option value="0">{{ t('publisher.beeLevelPublic') }}</option>
+            <option v-for="level in [1, 2, 3, 4]" :key="level" :value="level">
+              {{ beeMark(level).emblem }} {{ t(`beeLevel.${level}`) }} · Lv{{ level }}+ ({{ t('publisher.beeLevelSignIn') }})
+            </option>
+          </select>
+          <span class="mt-1 block text-xs text-muted">{{ t('publisher.minBeeLevelHint') }}</span>
+        </label>
+        <ShimmerButton type="submit" :disabled="busy" class="shrink-0">{{ t('common.confirm') }}</ShimmerButton>
+      </form>
+    </MagicCard>
+
+    <MagicCard class="p-6">
+      <h2 class="mb-2 font-semibold">{{ t('publisher.setGate') }}</h2>
+      <p class="mb-3 text-sm text-muted">{{ t('publisher.setGateHint') }}</p>
+      <form class="grid gap-3 sm:grid-cols-3" @submit.prevent="applyGate">
+        <input
+          v-model="gateListingId"
+          required
+          placeholder="listing UUID"
+          class="rounded-xl border border-line px-3 py-2 font-mono text-sm dark:border-slate-800 dark:bg-slate-900"
+        />
+        <select
+          v-model="gateLevel"
+          class="rounded-xl border border-line bg-surface px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+        >
+          <option v-for="level in [0, 1, 2, 3, 4]" :key="level" :value="level">
+            {{ level === 0
+              ? t('publisher.beeLevelPublic')
+              : beeMark(level).emblem + ' ' + t(`beeLevel.${level}`) + ' · Lv' + level + '+' }}
+          </option>
+        </select>
+        <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">
+          {{ t('common.confirm') }}
+        </ShimmerButton>
       </form>
     </MagicCard>
 

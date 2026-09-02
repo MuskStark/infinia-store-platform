@@ -129,6 +129,7 @@ class LibraryController {
     private final LibraryService library;
     private final AccountService accounts;
     private final CurrentPrincipal principal;
+    private final dev.infinia.store.app.service.BeeLevelService beeLevels;
     private final dev.infinia.store.domain.port.ListingRepository listings;
     private final dev.infinia.store.domain.port.ReleaseRepository releases;
     private final dev.infinia.store.domain.port.LibraryRepositories.FavoriteRepository favorites;
@@ -137,6 +138,7 @@ class LibraryController {
 
     LibraryController(LibraryService library, AccountService accounts,
             CurrentPrincipal principal,
+            dev.infinia.store.app.service.BeeLevelService beeLevels,
             dev.infinia.store.domain.port.ListingRepository listings,
             dev.infinia.store.domain.port.ReleaseRepository releases,
             dev.infinia.store.domain.port.LibraryRepositories.FavoriteRepository favorites,
@@ -144,6 +146,7 @@ class LibraryController {
         this.library = library;
         this.accounts = accounts;
         this.principal = principal;
+        this.beeLevels = beeLevels;
         this.listings = listings;
         this.releases = releases;
         this.favorites = favorites;
@@ -189,6 +192,8 @@ class LibraryController {
     @PutMapping("/favorites/{listingId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void addFavorite(@PathVariable UUID listingId) {
+        // Favoriting a Infinia Level gated listing requires meeting the gate (Infinia Level).
+        listings.findById(listingId).ifPresent(beeLevels::requireListingAccess);
         library.addFavorite(principal.requireUserId(), listingId);
     }
 

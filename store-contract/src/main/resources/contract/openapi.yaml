@@ -784,6 +784,34 @@ paths:
         '200': { description: Yanked }
         '403': { $ref: '#/components/responses/ProblemForbidden' }
 
+  /publisher/listings/{listingId}/min-bee-level:
+    post:
+      operationId: setOwnListingMinBeeLevel
+      tags: [Publisher]
+      summary: Publisher adjustment of the Infinia Level gate on an owned listing
+      description: >-
+        0 keeps the listing public (anonymous included); 1..4 restricts view and
+        download to signed-in accounts at or above that hive level.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: listingId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [minBeeLevel]
+              properties:
+                minBeeLevel: { type: integer, minimum: 0, maximum: 4 }
+      responses:
+        '200':
+          description: Updated listing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListingDetail' }
+
   /reviews:
     get:
       operationId: listReviews
@@ -903,6 +931,200 @@ paths:
               required: [featured]
               properties:
                 featured: { type: boolean }
+      responses:
+        '200':
+          description: Updated listing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminListing' }
+
+  /admin/databases:
+    get:
+      operationId: listRemoteDatabases
+      tags: [Admin]
+      summary: Registered remote database endpoints — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Connections (credentials never returned)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RemoteDatabase' }
+    post:
+      operationId: createRemoteDatabase
+      tags: [Admin]
+      summary: Register a remote database endpoint — PLATFORM_ADMIN
+      description: >-
+        Only jdbc:postgresql:// and jdbc:h2: URLs are accepted (the shipped
+        drivers); H2 INIT/RUNSCRIPT parameters are rejected. The password is
+        AES-GCM sealed at rest and never returned by the API.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRemoteDatabaseRequest' }
+      responses:
+        '201':
+          description: Registered connection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteDatabase' }
+
+  /admin/databases/status:
+    get:
+      operationId: dataSourceStatus
+      tags: [Admin]
+      summary: What the running instance is connected to right now — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current data source (URL password-masked)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataSourceStatus' }
+
+  /admin/databases/{databaseId}:
+    put:
+      operationId: updateRemoteDatabase
+      tags: [Admin]
+      summary: Update a registered endpoint — PLATFORM_ADMIN
+      description: A blank/absent password keeps the stored credential.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: databaseId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateRemoteDatabaseRequest' }
+      responses:
+        '200':
+          description: Updated connection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteDatabase' }
+    delete:
+      operationId: deleteRemoteDatabase
+      tags: [Admin]
+      summary: Remove a registered endpoint — PLATFORM_ADMIN
+      description: Deleting the active connection also drops the data-source override.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: databaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Removed }
+
+  /admin/databases/{databaseId}/test:
+    post:
+      operationId: testRemoteDatabase
+      tags: [Admin]
+      summary: Live connectivity probe (real JDBC connection) — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: databaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Probe outcome incl. server product/version on success
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteDatabaseTestResult' }
+
+  /admin/databases/{databaseId}/activation:
+    post:
+      operationId: setRemoteDatabaseActivation
+      tags: [Admin]
+      summary: Activate as the store data source (applied on restart) — PLATFORM_ADMIN
+      description: >-
+        Activation requires a successful live probe, disables any previously
+        active connection and writes the data-source override file read at
+        startup. enabled=false deactivates the override globally.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: databaseId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Updated connection state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteDatabase' }
+
+  /admin/users:
+    get:
+      operationId: listAdminUsers
+      tags: [Admin]
+      summary: Every account with Infinia Level, status and roles — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Accounts, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminUser' }
+
+  /admin/users/{userId}:
+    put:
+      operationId: updateAdminUser
+      tags: [Admin]
+      summary: Adjust Infinia Level, status, roles or display name — PLATFORM_ADMIN
+      description: >-
+        Disabling an account revokes its live sessions immediately. Admins cannot
+        disable themselves or drop their own PLATFORM_ADMIN role. All changes are audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateAdminUserRequest' }
+      responses:
+        '200':
+          description: Updated account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+
+  /admin/listings/{listingId}/min-bee-level:
+    post:
+      operationId: setListingMinBeeLevel
+      tags: [Admin]
+      summary: Adjust the listing's Infinia Level gate (门槛) — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: listingId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [minBeeLevel]
+              properties:
+                minBeeLevel: { type: integer, minimum: 0, maximum: 4 }
       responses:
         '200':
           description: Updated listing
@@ -1252,6 +1474,7 @@ components:
         publisherName: { type: string }
         updatedAt: { type: string, format: date-time }
         featured: { type: boolean, description: Editorial featuring (admin) }
+        minBeeLevel: { type: integer, minimum: 0, maximum: 4, description: 'Infinia Level gate: 0 = public; 1..4 restricts view/download to accounts at or above that level' }
 
     CatalogPage:
       type: object
@@ -1338,6 +1561,7 @@ components:
         publisherName: { type: string }
         downloads: { type: integer, format: int64 }
         favorites: { type: integer, format: int64 }
+        minBeeLevel: { type: integer, minimum: 0, maximum: 4, description: 'Infinia Level gate: 0 = public; 1..4 restricts view/download to accounts at or above that level' }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         localizations: { type: array, items: { $ref: '#/components/schemas/Localization' } }
@@ -1486,7 +1710,84 @@ components:
         email: { type: string }
         displayName: { type: string }
         roles: { type: array, items: { type: string } }
+        beeLevel: { type: integer, minimum: 0, maximum: 4, description: 'Infinia Level position: 0 LARVA · 1 WORKER · 2 FORAGER · 3 GUARD · 4 QUEEN' }
         createdAt: { type: string, format: date-time }
+
+    RemoteDatabase:
+      type: object
+      description: A registered remote database endpoint (远程数据库配置) — the sealed password is never returned.
+      properties:
+        databaseId: { type: string }
+        name: { type: string }
+        jdbcUrl: { type: string, example: 'jdbc:postgresql://db.example.com:5432/store' }
+        username: { type: string }
+        enabled: { type: boolean, description: True when active as the data-source override }
+        lastTestedAt: { type: string, format: date-time, nullable: true }
+        lastTestOk: { type: boolean, nullable: true }
+        lastTestError: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    CreateRemoteDatabaseRequest:
+      type: object
+      required: [name, jdbcUrl, username, password]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        jdbcUrl: { type: string, maxLength: 500, example: 'jdbc:postgresql://db.example.com:5432/store' }
+        username: { type: string, minLength: 1, maxLength: 200 }
+        password: { type: string, maxLength: 500, writeOnly: true }
+
+    UpdateRemoteDatabaseRequest:
+      type: object
+      description: Partial update; a blank/absent password keeps the stored credential.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        jdbcUrl: { type: string, maxLength: 500 }
+        username: { type: string, minLength: 1, maxLength: 200 }
+        password: { type: string, maxLength: 500, writeOnly: true }
+
+    RemoteDatabaseTestResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        productName: { type: string, nullable: true, example: PostgreSQL }
+        productVersion: { type: string, nullable: true, example: '16.4' }
+        testedAt: { type: string, format: date-time }
+        error: { type: string, nullable: true }
+
+    DataSourceStatus:
+      type: object
+      description: The data source the running instance uses right now.
+      properties:
+        productName: { type: string, nullable: true }
+        productVersion: { type: string, nullable: true }
+        url: { type: string, nullable: true, description: Password-masked JDBC URL }
+        username: { type: string, nullable: true }
+        remoteOverrideActive: { type: boolean, description: True when a remote database activated in the console is in effect }
+        overrideName: { type: string, nullable: true }
+
+    AdminUser:
+      type: object
+      description: Admin-console view of one account (user management).
+      properties:
+        userId: { type: string }
+        email: { type: string }
+        displayName: { type: string }
+        roles: { type: array, items: { type: string } }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        beeLevel: { type: integer, minimum: 0, maximum: 4 }
+        mfaEnabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        lastLoginAt: { type: string, format: date-time, nullable: true }
+
+    UpdateAdminUserRequest:
+      type: object
+      description: Partial admin update; omitted fields keep their current values.
+      properties:
+        beeLevel: { type: integer, minimum: 0, maximum: 4 }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        roles: { type: array, items: { type: string }, description: Full replacement role list; USER is always kept }
+        displayName: { type: string, minLength: 1, maxLength: 64 }
 
     Session:
       type: object
@@ -1561,6 +1862,7 @@ components:
         summary: { type: string, maxLength: 500 }
         descriptionMarkdown: { type: string, maxLength: 50000 }
         locale: { type: string, default: en }
+        minBeeLevel: { type: integer, minimum: 0, maximum: 4, default: 0, description: 'Infinia Level gate the publisher sets: 0 = public; 1..4 = only signed-in accounts at or above that level may view and download' }
 
     CreateReleaseRequest:
       type: object
@@ -1776,6 +2078,7 @@ components:
         visibility: { type: string, enum: [PUBLIC, UNLISTED, PRIVATE] }
         latestVersion: { type: string, nullable: true }
         featured: { type: boolean }
+        minBeeLevel: { type: integer, minimum: 0, maximum: 4 }
         downloads: { type: integer, format: int64 }
 
     Upstream:

@@ -241,7 +241,7 @@ public class UpstreamSyncService {
                     List.of("upstream"), "stable", item.name(),
                     item.description().isBlank()
                             ? "Aggregated from " + source.name() : item.description(),
-                    null, "en"));
+                    null, "en", null));
         }
 
         Release release = allocateVersion(bot, listing, baseVersion(item), item.sourceUrl(),
