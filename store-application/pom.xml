@@ -78,6 +78,20 @@
     </dependencies>
 
     <build>
+        <!-- Store Web's Vite build output ships inside the Boot jar as static
+             resources, so one executable jar serves the SPA and the API from the
+             same origin (dist/ is gitignored; build it first with `yarn web:build`).
+             Maven silently skips the resource when dist/ is absent, keeping plain
+             backend builds working without a Node toolchain. -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/../store-web/dist</directory>
+                <targetPath>static</targetPath>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

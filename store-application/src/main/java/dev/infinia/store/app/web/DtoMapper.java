@@ -87,6 +87,7 @@ public final class DtoMapper {
                 a.kind().name(),
                 a.platform().name().toLowerCase(),
                 a.arch().name().toLowerCase(),
+                a.variant(),
                 a.filename(),
                 live ? 0 : a.size(),
                 live ? null : a.sha256(),
@@ -120,6 +121,7 @@ public final class DtoMapper {
                 release.channel.name().toLowerCase(),
                 release.createdAt.toString(),
                 release.publishedAt == null ? null : release.publishedAt.toString(),
+                release.artifacts.stream().map(DtoMapper::artifact).toList(),
                 findings);
     }
 }

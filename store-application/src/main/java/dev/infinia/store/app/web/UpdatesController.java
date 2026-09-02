@@ -28,13 +28,15 @@ public class UpdatesController {
     public DeliveryDtos.AppUpdateDto app(@RequestParam String current,
             @RequestParam(defaultValue = "stable") String channel,
             @RequestParam String os, @RequestParam String arch,
+            @RequestParam(required = false) String mode,
+            @RequestParam(required = false) String variant,
             @RequestParam String installId) {
         if (current == null || !dev.infinia.store.contract.semver.SemVer.isValid(current)) {
             throw new DomainException(StoreErrorCode.INVALID_SEMVER,
                     "current must be a valid SemVer");
         }
         CatalogService.UpdateFeed feed = catalog.appUpdate(current,
-                Channel.valueOf(channel.trim().toUpperCase()), os, arch, installId);
+                Channel.valueOf(channel.trim().toUpperCase()), os, arch, mode, variant, installId);
         if (feed.latestVersion() == null) {
             return new DeliveryDtos.AppUpdateDto(null, false, 100, null, java.util.List.of(), null, null,
                     null, null, null, channel);

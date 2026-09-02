@@ -10,6 +10,7 @@ import dev.infinia.store.contract.envelope.ReleaseEnvelope;
 import dev.infinia.store.contract.error.StoreErrorCode;
 import dev.infinia.store.contract.semver.SemVer;
 import dev.infinia.store.contract.type.Channel;
+import dev.infinia.store.contract.type.ArtifactKind;
 import dev.infinia.store.contract.type.ListingType;
 import dev.infinia.store.contract.type.ReleaseStatus;
 import dev.infinia.store.domain.DomainException;
@@ -38,14 +39,16 @@ public class CatalogService {
     private final StoreProperties properties;
     private final RolloutBucketer bucketer;
     private final ObjectMapper mapper;
+    private final TicketService tickets;
 
     public CatalogService(ListingRepository listings, ReleaseRepository releases,
-            StoreProperties properties, ObjectMapper mapper) {
+            StoreProperties properties, ObjectMapper mapper, TicketService tickets) {
         this.listings = listings;
         this.releases = releases;
         this.properties = properties;
         this.bucketer = new RolloutBucketer(properties.rolloutSecret());
         this.mapper = mapper;
+        this.tickets = tickets;
     }
 
     // ---- catalog ----
@@ -174,33 +177,36 @@ public class CatalogService {
     // ---- app update feed (design §8.4) ----
 
     public UpdateFeed appUpdate(String current, Channel channel, String os, String arch,
-            String installId) {
+            String mode, String variant, String installId) {
         SemVer currentVersion = SemVer.parse(current);
-        List<Listing> appListings = listings.search(new ListingQuery(ListingType.APP, null, null,
-                null, null, ListingQuery.ListingSort.DOWNLOADS, null, null, 50)).items();
+        ArtifactKind requestedMode = parseAppMode(mode);
+        dev.infinia.store.contract.type.Platform requestedPlatform =
+                CompatibilityEvaluator.parsePlatform(os);
+        dev.infinia.store.contract.type.Arch requestedArch =
+                CompatibilityEvaluator.parseArch(arch);
+        InfiniaCoordinate configured = InfiniaCoordinate.parse(properties.appCoordinate());
+        Listing appListing = listings.findByCoordinate(configured).orElse(null);
+        if (appListing == null || appListing.type != ListingType.APP
+                || !appListing.isPubliclyVisible()) {
+            return new UpdateFeed(null, null, null, 0, null, List.of(), null, null, null);
+        }
         Release best = null;
-        Listing bestListing = null;
-        for (Listing listing : appListings) {
-            for (Release release : releases.findVisibleByListingId(listing.id)) {
-                if (release.status != ReleaseStatus.PUBLISHED || release.channel != channel) {
-                    continue;
-                }
-                if (!CompatibilityEvaluator.hostCompatible(release, current)) {
-                    continue;
-                }
-                var artifact = CompatibilityEvaluator.bestArtifact(release,
-                        CompatibilityEvaluator.parsePlatform(os),
-                        CompatibilityEvaluator.parseArch(arch));
-                if (artifact.isEmpty()) {
-                    continue;
-                }
-                if (!bucketer.included(installId, release.rolloutPercent)) {
-                    continue;
-                }
-                if (best == null || release.version.compareTo(best.version) > 0) {
-                    best = release;
-                    bestListing = listing;
-                }
+        for (Release release : releases.findVisibleByListingId(appListing.id)) {
+            if (release.status != ReleaseStatus.PUBLISHED || release.channel != channel) {
+                continue;
+            }
+            if (!CompatibilityEvaluator.hostCompatible(release, current)) {
+                continue;
+            }
+            if (CompatibilityEvaluator.appArtifacts(release, requestedPlatform, requestedArch,
+                    requestedMode, variant).isEmpty()) {
+                continue;
+            }
+            if (!bucketer.included(installId, release.rolloutPercent)) {
+                continue;
+            }
+            if (best == null || release.version.compareTo(best.version) > 0) {
+                best = release;
             }
         }
         if (best == null || best.version.compareTo(currentVersion) <= 0) {
@@ -208,14 +214,31 @@ public class CatalogService {
         }
         List<dev.infinia.store.contract.api.DeliveryDtos.AppUpdateArtifactDto> artifacts =
                 new ArrayList<>();
-        for (Release.ArtifactInfo a : best.artifacts) {
+        Instant expiresAt = Instant.now().plusSeconds(properties.downloadTicketTtlSeconds());
+        for (Release.ArtifactInfo a : CompatibilityEvaluator.appArtifacts(best,
+                requestedPlatform, requestedArch, requestedMode, variant)) {
+            String ticketSignature = tickets.sign("download", a.blobKey(), expiresAt);
+            String relativeUrl = "/api/v1/blobs/" + a.blobKey() + "?"
+                    + TicketService.encodeTicketParams("download", a.blobKey(), expiresAt,
+                            ticketSignature);
             artifacts.add(new dev.infinia.store.contract.api.DeliveryDtos.AppUpdateArtifactDto(
-                    "/api/v1/blobs/" + a.blobKey(), a.sha256(),
+                    properties.baseUrl().replaceAll("/+$", "") + relativeUrl, a.filename(), a.sha256(),
                     a.signature(), a.keyId(), a.size(), a.platform().name().toLowerCase(),
-                    a.arch().name().toLowerCase(), a.kind().name().toLowerCase(), a.mimeType()));
+                    a.arch().name().toLowerCase(), a.kind().name().toLowerCase(), a.variant(),
+                    a.mimeType()));
         }
-        return new UpdateFeed(bestListing.coordinate().toString(), best.version.toString(),
+        return new UpdateFeed(appListing.coordinate().toString(), best.version.toString(),
                 best.channel, best.rolloutPercent, best, artifacts, null, null, null);
+    }
+
+    private static ArtifactKind parseAppMode(String mode) {
+        if (mode == null || mode.isBlank() || "any".equalsIgnoreCase(mode)) return null;
+        return switch (mode.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "installer", "installed", "install" -> ArtifactKind.INSTALLER;
+            case "portable" -> ArtifactKind.PORTABLE;
+            default -> throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "mode must be installer, portable or any");
+        };
     }
 
     /** Carrier for the update feed response; fields assembled in the controller. */
@@ -232,7 +255,8 @@ public class CatalogService {
             artifactRefs.add(new ArtifactRef(
                     "/api/v1/blobs/" + a.blobKey(), a.sha256(),
                     a.signature(), a.keyId(), a.size(), a.platform().name().toLowerCase(),
-                    a.arch().name().toLowerCase(), a.kind().name().toLowerCase(), a.mimeType()));
+                    a.arch().name().toLowerCase(), a.kind().name().toLowerCase(), a.variant(),
+                    a.mimeType()));
         }
         return new ReleaseEnvelope(ReleaseEnvelope.CURRENT_SCHEMA_VERSION,
                 listing.coordinate().withVersion(release.version).toString(),

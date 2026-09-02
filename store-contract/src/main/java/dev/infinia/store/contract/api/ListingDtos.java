@@ -70,6 +70,7 @@ public final class ListingDtos {
             String kind,
             String platform,
             String arch,
+            String variant,
             String filename,
             long size,
             String sha256,

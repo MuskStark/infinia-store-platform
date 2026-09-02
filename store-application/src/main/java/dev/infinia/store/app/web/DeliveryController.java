@@ -21,6 +21,7 @@ import java.io.InputStream;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.UUID;
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * Download tickets and blob transfer (design §10.2). Upload/download tickets are
@@ -155,14 +156,14 @@ public class DeliveryController {
             @RequestParam(required = false) String purpose,
             @RequestParam(required = false) Long exp,
             @RequestParam(required = false) String sig,
-            @RequestBody byte[] body) throws java.io.IOException {
+            HttpServletRequest request) throws java.io.IOException {
         if (!"upload".equals(purpose) || exp == null
                 || !tickets.verify("upload", uploadId.toString(),
                         Instant.ofEpochSecond(exp), sig)) {
             throw new DomainException(StoreErrorCode.TICKET_INVALID,
                     "Upload ticket is invalid or expired");
         }
-        publisher.completeUpload(uploadId, new java.io.ByteArrayInputStream(body));
+        publisher.completeUpload(uploadId, request.getInputStream());
         return ResponseEntity.noContent().build();
     }
 }

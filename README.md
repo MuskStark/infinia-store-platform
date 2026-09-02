@@ -33,18 +33,23 @@ store-platform/
 Key decisions are frozen in [docs/adr](docs/adr/ADR-001-modular-monolith.md); the full design
 lives in [docs/design/STORE_PLATFORM_DESIGN.md](docs/design/STORE_PLATFORM_DESIGN.md).
 
-## Quickstart (no Docker)
+## Quickstart (single jar)
+
+Build the SPA once, then package it with the backend into one executable Boot jar
+(the Vite output is embedded under `classpath:/static`, so API, OAuth server and
+web UI share a single origin and port):
 
 ```bash
-# Backend on :8080 — H2 database, seeded local accounts (local profile)
-./mvnw spring-boot:run -pl store-application -Dspring-boot.run.profiles=local
-
-# Frontend on :8089 — proxies /api and /oauth2 to :8080
 yarn install
-yarn web
+./build-jar.sh    # builds the SPA, embeds it, runs tests, verifies the jar
+# faster iteration: ./build-jar.sh --skip-tests, or --skip-web to reuse dist/
+
+java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar \
+  --spring.profiles.active=local
 ```
 
-Open http://localhost:8089. Seeded demo accounts (password `Password123!`):
+Open http://localhost:8080. The `local` profile runs on H2 stored under
+`~/.infinia-store` — no Docker needed. Seeded demo accounts (password `Password123!`):
 
 | Account | Roles |
 |---|---|
@@ -55,6 +60,20 @@ Open http://localhost:8089. Seeded demo accounts (password `Password123!`):
 
 The local profile seeds accounts only; its catalog starts empty. Integration tests explicitly
 enable their own demo fixtures.
+
+For deployments, point the platform at its public address so OAuth redirects and
+issued tokens match it (`store.base-url=https://store.example.com`) and provide the
+secrets listed under [Production-like stack](#production-like-stack-docker).
+
+### Split frontend development
+
+To work on the SPA with Vite hot reload, run the backend with the `dev` profile
+(keeps the OAuth redirect on the Vite origin) next to the dev server:
+
+```bash
+./mvnw spring-boot:run -pl store-application -Dspring-boot.run.profiles=dev
+yarn web    # :8089, proxies /api and /oauth2 to :8080
+```
 
 ### FengYu host sources
 
@@ -69,11 +88,43 @@ entries are intentionally excluded from that disk-backed Git export: synchroniza
 metadata only, and FengYu downloads cause a request-scoped fetch, security scan and compatible
 package build with `Cache-Control: no-store`.
 
+### Main-application (host) updates
+
+The store also distributes the FengYu host itself. APP listings carry the full release
+matrix — installed (`INSTALLER`: NSIS exe, dmg, deb) and portable (`PORTABLE`: zip,
+AppImage, portable web archive, fat JAR) distributions per platform/arch, plus build
+variants (`lite`, `jre`, `uos`, `web`, `jar`). Kind, platform, arch and variant are
+inferred from the release filename at upload time (see `PublisherService`).
+
+Publish a host release from its GitHub release assets:
+
+```bash
+STORE_BASE=https://store.example.com \
+STORE_CLI_CLIENT_SECRET=<secret> \
+  scripts/publish-app-release.sh 4.0.0 ./release-assets stable
+```
+
+The script authenticates with the store CLI client (CI service account), creates the
+`official/fengyu-host` APP listing on first use, uploads every asset through the presigned
+pipeline and submits for review. After reviewer approval, desktop hosts check for updates
+through the anonymous signed feed:
+
+```
+GET /api/v1/updates/app?current=4.0.0&channel=stable&os=macos&arch=arm64
+                        &mode=installer&variant=jre&installId=<opaque-id>
+```
+
+`mode` (`installer` | `portable` | `any`) and `variant` route the request to the matching
+distribution; rollout bucketing stays stable per `installId`. Every returned artifact URL
+is a short-lived HMAC ticket and the response carries the artifact SHA-256, the Ed25519
+platform signature and the `keyId` for client-side verification.
+
 ### Production-like stack (Docker)
 
 ```bash
 docker compose up -d          # PostgreSQL 17, Redis 7, MinIO
-./mvnw spring-boot:run -pl store-application
+./build-jar.sh
+java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar
 ```
 
 Secrets come from the environment (`STORE_TICKET_SECRET`, `STORE_ROLLOUT_SECRET`,

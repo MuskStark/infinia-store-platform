@@ -105,15 +105,19 @@ public class SecurityConfig {
     @Order(3)
     public SecurityFilterChain defaultChain(HttpSecurity http,
             StoreProperties properties) throws Exception {
-        // Actuator health, legacy login redirect, and the Store Web session-login bridge;
-        // everything else is handled above.
-        http.securityMatcher("/actuator/**", "/login", "/logout", "/error", "/web/**", "/",
-                        "/oauth2/session-login", "/oauth2/session-login/csrf")
+        // Catch-all chain: the two chains above own the OAuth 2.1 and API surfaces,
+        // so everything landing here is the embedded Store Web SPA (deep links,
+        // content-hashed assets), the actuator, the legacy login redirect and the
+        // Store Web session-login bridge. SPA views guard themselves client-side
+        // against the JWT-protected API; unknown paths forward to the SPA router.
+        http.securityMatcher("/**")
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/actuator/health/**", "/login", "/error", "/web/**", "/",
                                 "/oauth2/session-login", "/oauth2/session-login/csrf")
                         .permitAll()
-                        .anyRequest().authenticated())
+                        // Non-health actuator endpoints stay behind a session (unchanged).
+                        .requestMatchers("/actuator/**").authenticated()
+                        .anyRequest().permitAll())
                 // Store Web renders the credential UI. This internal POST endpoint only
                 // establishes the browser session needed to resume a saved OAuth request.
                 .formLogin(form -> form

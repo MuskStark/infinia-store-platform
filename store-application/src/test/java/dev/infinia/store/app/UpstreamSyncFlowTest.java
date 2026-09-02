@@ -160,8 +160,20 @@ class UpstreamSyncFlowTest {
         assertTrue(packed.containsKey("SKILL.md"), "upstream skill retained in package");
         assertTrue(packed.containsKey("scripts/helper.py"), "skill resources retained");
         assertEquals(1, payloadRequests.get());
-        assertEquals(tempBefore, upstreamTempDirectories(),
-                "request-scoped upstream workspace must be deleted after streaming");
+        // The workspace is deleted by PreparedArtifact.close() on the streaming
+        // thread right after the last byte — the client can observe completion
+        // while deleteTree() is still walking the cloned tree, so allow a brief
+        // grace period instead of requiring instant disappearance.
+        boolean workspaceGone = false;
+        for (int i = 0; i < 100 && !workspaceGone; i++) {
+            workspaceGone = tempBefore.equals(upstreamTempDirectories());
+            if (!workspaceGone) {
+                Thread.sleep(50);
+            }
+        }
+        assertTrue(workspaceGone,
+                "request-scoped upstream workspace must be deleted after streaming: "
+                        + upstreamTempDirectories());
         assertFalse(blobs.exists(virtualKey),
                 "downloaded/generated upstream package must not be retained on disk");
 

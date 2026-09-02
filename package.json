@@ -13,6 +13,7 @@
     "web": "yarn workspace @infinia/store-web dev",
     "web:build": "yarn workspace @infinia/store-web build",
     "web:test": "yarn workspace @infinia/store-web test",
-    "ui:test": "yarn workspace @infinia/magic-ui-vue test"
+    "ui:test": "yarn workspace @infinia/magic-ui-vue test",
+    "jar": "./build-jar.sh"
   }
 }

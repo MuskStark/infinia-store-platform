@@ -15,7 +15,7 @@ class CompatibilityEvaluatorTest {
 
     private Release.ArtifactInfo artifact(Platform p, Arch a) {
         return new Release.ArtifactInfo(UUID.randomUUID(), ArtifactKind.PACKAGE, p, a,
-                "pkg.zip", 100, "ab", null, null, "blobs/ab", "application/zip");
+                "default", "pkg.zip", 100, "ab", null, null, "blobs/ab", "application/zip");
     }
 
     @Test

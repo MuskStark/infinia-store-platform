@@ -10,5 +10,6 @@ public record ArtifactRef(
         String platform,
         String arch,
         String kind,
+        String variant,
         String mimeType) {
 }

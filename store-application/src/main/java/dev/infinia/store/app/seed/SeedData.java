@@ -137,13 +137,28 @@ public class SeedData {
         Listing listing = listing(publisher, ListingType.APP, "official", "fengyu-host",
                 "Infinia Host", "The local-first FengYu host application.",
                 "Productivity", List.of("host", "official"), Channel.STABLE, now);
+        // Mirrors the FengYu release matrix: installed + portable distributions
+        // for every platform, plus the jre / web / jar build variants.
         publish(listing, "4.1.0", Channel.STABLE, null, 100, now,
-                installerArtifact(listing, "4.1.0", Platform.MACOS, Arch.ARM64, "Infinia-4.1.0-arm64.dmg", now),
-                installerArtifact(listing, "4.1.0", Platform.WINDOWS, Arch.X64, "Infinia-4.1.0-setup.exe", now),
-                installerArtifact(listing, "4.1.0", Platform.LINUX, Arch.X64, "infinia-4.1.0.AppImage", now));
+                installerArtifact(listing, "4.1.0", Platform.WINDOWS, Arch.X64, "lite",
+                        "Infinia-4.1.0-win-x64-setup.exe", now),
+                portableArtifact(listing, "4.1.0", Platform.WINDOWS, Arch.X64, "lite",
+                        "Infinia-4.1.0-win-x64-portable.zip", now),
+                installerArtifact(listing, "4.1.0", Platform.MACOS, Arch.ARM64, "lite",
+                        "Infinia-4.1.0-mac-arm64.dmg", now),
+                installerArtifact(listing, "4.1.0", Platform.MACOS, Arch.ARM64, "jre",
+                        "Infinia-JRE-4.1.0-mac-arm64.dmg", now),
+                installerArtifact(listing, "4.1.0", Platform.LINUX, Arch.X64, "lite",
+                        "Infinia-4.1.0-linux-x64.deb", now),
+                portableArtifact(listing, "4.1.0", Platform.LINUX, Arch.X64, "lite",
+                        "Infinia-4.1.0-linux-x64.AppImage", now),
+                portableArtifact(listing, "4.1.0", Platform.UNIVERSAL, Arch.UNIVERSAL, "web",
+                        "Infinia-4.1.0-web.zip", now),
+                portableArtifact(listing, "4.1.0", Platform.UNIVERSAL, Arch.UNIVERSAL, "jar",
+                        "Infinia.jar", now));
         publish(listing, "4.2.0-beta.1", Channel.BETA, null, 25, now,
-                installerArtifact(listing, "4.2.0-beta.1", Platform.MACOS, Arch.ARM64,
-                        "Infinia-4.2.0-beta.1-arm64.dmg", now));
+                installerArtifact(listing, "4.2.0-beta.1", Platform.MACOS, Arch.ARM64, "lite",
+                        "Infinia-4.2.0-beta.1-mac-arm64.dmg", now));
     }
 
     private void seedPlugin(StoreUser publisher, Instant now) throws IOException {
@@ -370,29 +385,38 @@ public class SeedData {
     }
 
     private Release.ArtifactInfo installerArtifact(Listing listing, String version, Platform p,
-            Arch a, String filename, Instant now) throws IOException {
+            Arch a, String variant, String filename, Instant now) throws IOException {
         // Fake installer bytes — APP packages rely on code signing in the real pipeline.
-        byte[] content = ("infinia-installer:" + listing.slug + ":" + version + ":" + p + ":" + a)
-                .getBytes(StandardCharsets.UTF_8);
-        return blobArtifact(p, a, filename, content, ArtifactKind.INSTALLER, now);
+        byte[] content = ("infinia-installer:" + listing.slug + ":" + version + ":" + p + ":"
+                + a + ":" + variant).getBytes(StandardCharsets.UTF_8);
+        return blobArtifact(p, a, filename, content, ArtifactKind.INSTALLER, variant, now);
+    }
+
+    private Release.ArtifactInfo portableArtifact(Listing listing, String version, Platform p,
+            Arch a, String variant, String filename, Instant now) throws IOException {
+        byte[] content = ("infinia-portable:" + listing.slug + ":" + version + ":" + p + ":"
+                + a + ":" + variant).getBytes(StandardCharsets.UTF_8);
+        return blobArtifact(p, a, filename, content, ArtifactKind.PORTABLE, variant, now);
     }
 
     private Release.ArtifactInfo packageArtifact(Listing listing, String version, String filename,
             byte[] content, Instant now) {
         return blobArtifact(Platform.UNIVERSAL, Arch.UNIVERSAL, filename, content,
-                ArtifactKind.PACKAGE, now);
+                ArtifactKind.PACKAGE, "default", now);
     }
 
     private void attachPackage(Release release, Platform p, Arch a, String filename,
             byte[] content, Instant now) {
         release.artifacts = new ArrayList<>(release.artifacts);
-        release.artifacts.add(blobArtifact(p, a, filename, content, ArtifactKind.PACKAGE, now));
+        release.artifacts.add(blobArtifact(p, a, filename, content, ArtifactKind.PACKAGE,
+                "default", now));
     }
 
     private Release.ArtifactInfo blobArtifact(Platform p, Arch a, String filename, byte[] content,
-            ArtifactKind kind, Instant now) {
+            ArtifactKind kind, String variant, Instant now) {
         String blobKey = blobs.put(new ByteArrayInputStream(content), 100_000_000, null);
-        return new Release.ArtifactInfo(UuidV7.generate(), kind, p, a, filename, content.length,
+        return new Release.ArtifactInfo(UuidV7.generate(), kind, p, a, variant, filename,
+                content.length,
                 Ed25519Signer.sha256Hex(content), null, null, blobKey,
                 content.length > 0 && content[0] == '{' ? "application/json" : "application/zip");
     }
@@ -408,7 +432,9 @@ public class SeedData {
         for (int i = 0; i < release.artifacts.size(); i++) {
             Release.ArtifactInfo a = release.artifacts.get(i);
             release.artifacts.set(i, new Release.ArtifactInfo(a.id(), a.kind(), a.platform(),
-                    a.arch(), a.filename(), a.size(), a.sha256(), signature, keyId, a.blobKey(),
+                    a.arch(), a.variant(), a.filename(), a.size(), a.sha256(),
+                    signing.sign(blobs.open(a.blobKey())), keyId,
+                    a.blobKey(),
                     a.mimeType()));
         }
         releases.save(release);

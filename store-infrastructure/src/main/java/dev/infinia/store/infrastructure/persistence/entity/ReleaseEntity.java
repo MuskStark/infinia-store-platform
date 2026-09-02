@@ -56,7 +56,8 @@ public class ReleaseEntity {
     public List<PermissionEmb> permissions = new ArrayList<>();
 
     @Embeddable
-    public static record ArtifactEmb(String kind, String platform, String arch, String filename,
+    public static record ArtifactEmb(String kind, String platform, String arch, String variant,
+            String filename,
             @Column(name = "size_bytes") long size, String sha256, String signature, String keyId,
             @Column(name = "blob_key") String blobKey,
             @Column(name = "mime_type") String mimeType) {

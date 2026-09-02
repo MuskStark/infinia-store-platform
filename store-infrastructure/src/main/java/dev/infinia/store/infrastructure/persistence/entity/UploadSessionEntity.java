@@ -23,6 +23,7 @@ public class UploadSessionEntity {
     public String platform;
     @Column(name = "arch", nullable = false)
     public String arch;
+    public String variant;
     @Column(name = "declared_size", nullable = false)
     public long declaredSize;
     @Column(name = "status", nullable = false)

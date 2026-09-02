@@ -35,8 +35,13 @@ public class Release {
     public List<PermissionDecl> permissions = new ArrayList<>();
 
     public record ArtifactInfo(UUID id, ArtifactKind kind, Platform platform, Arch arch,
+            String variant,
             String filename, long size, String sha256, String signature, String keyId,
             String blobKey, String mimeType) {
+
+        public ArtifactInfo {
+            variant = variant == null || variant.isBlank() ? "default" : variant;
+        }
     }
 
     public record DependencyDecl(String coordinate, String range, boolean optional) {

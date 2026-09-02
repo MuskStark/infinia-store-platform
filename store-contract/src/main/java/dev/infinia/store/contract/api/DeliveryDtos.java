@@ -21,6 +21,7 @@ public final class DeliveryDtos {
 
     public record AppUpdateArtifactDto(
             String url,
+            String filename,
             String sha256,
             String signature,
             String keyId,
@@ -28,6 +29,7 @@ public final class DeliveryDtos {
             String platform,
             String arch,
             String kind,
+            String variant,
             String mimeType) {
     }
 

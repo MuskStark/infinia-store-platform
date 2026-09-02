@@ -121,6 +121,7 @@ public class PublisherController {
                         : Platform.valueOf(request.platform().trim().toUpperCase()),
                 request.arch() == null ? null
                         : Arch.valueOf(request.arch().trim().toUpperCase()),
+                request.variant(),
                 request.size() == null ? 0 : request.size());
         Instant expiresAt = session.expiresAt;
         String signature = tickets.sign("upload", session.id.toString(), expiresAt);
@@ -132,7 +133,7 @@ public class PublisherController {
         return ResponseEntity.status(HttpStatus.CREATED).body(new PublisherDtos.UploadSessionDto(
                 session.id.toString(), session.releaseId.toString(), session.filename,
                 session.kind.name(), session.platform.name().toLowerCase(),
-                session.arch.name().toLowerCase(), uploadUrl, "PUT", expiresAt.toString(),
+                session.arch.name().toLowerCase(), session.variant, uploadUrl, "PUT", expiresAt.toString(),
                 properties.maxUploadBytes()));
     }
 
@@ -165,5 +166,6 @@ public class PublisherController {
     }
 
     public record UploadRequest(String filename, String kind, String platform, String arch,
+            String variant,
             Long size) {}
 }

@@ -916,7 +916,7 @@ export interface components {
         /** @enum {string} */
         Arch: "x64" | "arm64" | "universal";
         /** @enum {string} */
-        ArtifactKind: "PACKAGE" | "INSTALLER" | "CHECKSUMS" | "SIGNATURE" | "SBOM";
+        ArtifactKind: "PACKAGE" | "INSTALLER" | "PORTABLE" | "CHECKSUMS" | "SIGNATURE" | "SBOM";
         Problem: {
             type?: string;
             title?: string;
@@ -970,6 +970,8 @@ export interface components {
             kind: components["schemas"]["ArtifactKind"];
             platform: components["schemas"]["Platform"];
             arch: components["schemas"]["Arch"];
+            /** @description APP build variant (lite */
+            variant?: string;
             filename: string;
             /** Format: int64 */
             size: number;
@@ -1112,6 +1114,7 @@ export interface components {
         AppUpdateArtifact: {
             /** Format: uri */
             url?: string;
+            filename?: string;
             sha256?: string;
             signature?: string;
             keyId?: string;
@@ -1119,7 +1122,9 @@ export interface components {
             size?: number;
             platform?: components["schemas"]["Platform"];
             arch?: components["schemas"]["Arch"];
-            kind?: string;
+            /** @enum {string} */
+            kind?: "installer" | "portable";
+            variant?: string;
             mimeType?: string;
         };
         AppUpdate: {
@@ -1250,6 +1255,7 @@ export interface components {
             kind?: components["schemas"]["ArtifactKind"];
             platform?: components["schemas"]["Platform"];
             arch?: components["schemas"]["Arch"];
+            variant?: string;
             /** Format: uri */
             uploadUrl: string;
             /** @enum {string} */
@@ -1282,6 +1288,7 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             publishedAt?: string | null;
+            artifacts?: components["schemas"]["Artifact"][];
             findings?: components["schemas"]["ScanFinding"][];
         };
         Review: {
@@ -1946,6 +1953,10 @@ export interface operations {
                 channel?: components["schemas"]["Channel"];
                 os: components["schemas"]["Platform"];
                 arch: components["schemas"]["Arch"];
+                /** @description Select installed or portable application distributions */
+                mode?: "installer" | "portable" | "any";
+                /** @description Build variant such as lite */
+                variant?: string;
                 /** @description Opaque random id used for stable rollout bucketing */
                 installId: string;
             };
@@ -2400,6 +2411,7 @@ export interface operations {
                     kind: components["schemas"]["ArtifactKind"];
                     platform?: components["schemas"]["Platform"];
                     arch?: components["schemas"]["Arch"];
+                    variant?: string;
                     /** Format: int64 */
                     size?: number;
                 };

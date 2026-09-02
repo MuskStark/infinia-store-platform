@@ -36,6 +36,7 @@ public class UploadSessionAdapter implements PublishingRepositories.UploadSessio
         e.kind = session.kind.name();
         e.platform = session.platform.name();
         e.arch = session.arch.name();
+        e.variant = session.variant;
         e.declaredSize = session.declaredSize;
         e.status = session.status;
         e.expiresAt = session.expiresAt;
@@ -58,6 +59,7 @@ public class UploadSessionAdapter implements PublishingRepositories.UploadSessio
         s.kind = ArtifactKind.valueOf(e.kind);
         s.platform = Platform.valueOf(e.platform);
         s.arch = Arch.valueOf(e.arch);
+        s.variant = e.variant;
         s.declaredSize = e.declaredSize;
         s.status = e.status;
         s.expiresAt = e.expiresAt;

@@ -206,6 +206,66 @@ async function confirmInstall() {
   }
 }
 
+/**
+ * APP listings distribute installed + portable binaries per platform; instead of
+ * the resolve→confirm install machine they download a concrete artifact, addressed
+ * by artifactId so installer and portable variants of one release stay distinct.
+ */
+const isAppListing = computed(() => detail.value?.type === 'APP');
+const artifactTickets = ref<Record<string, DownloadTicket | 'loading' | 'error'>>({});
+
+function detectOs(): string {
+  const platform = (navigator.platform || '').toLowerCase();
+  if (platform.includes('win')) return 'windows';
+  if (platform.includes('mac')) return 'macos';
+  if (platform.includes('linux')) return 'linux';
+  return 'universal';
+}
+
+function detectArch(): string {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('arm64') || ua.includes('aarch64')) return 'arm64';
+  if (ua.includes('x86_64') || ua.includes('amd64') || ua.includes('wow64')) return 'x64';
+  return 'universal';
+}
+
+/** Best binary for this browser: own platform first, universal fallback, installer preferred. */
+const recommendedArtifact = computed(() => {
+  const artifacts = latestRelease.value?.artifacts ?? [];
+  if (!artifacts.length) return null;
+  const os = detectOs();
+  const arch = detectArch();
+  const score = (a: (typeof artifacts)[number]) =>
+    (a.platform === os ? 0 : a.platform === 'universal' ? 1 : 9)
+    + (a.arch === arch ? 0 : a.arch === 'universal' ? 1 : 9)
+    + (a.kind === 'INSTALLER' ? 0 : 1)
+    + (a.variant === 'lite' ? 0 : a.variant === 'jre' ? 1 : 2);
+  return [...artifacts].sort((x, y) => score(x) - score(y))[0] ?? null;
+});
+
+async function downloadArtifact(artifact: { artifactId?: string | null; filename: string }) {
+  if (!latestRelease.value || !artifact.artifactId) return;
+  const key = artifact.artifactId;
+  if (artifactTickets.value[key] === 'loading') return;
+  artifactTickets.value[key] = 'loading';
+  try {
+    const t = await api.post<DownloadTicket>(
+      `/api/v1/releases/${latestRelease.value.releaseId}/download-ticket?artifactId=${key}`,
+    );
+    artifactTickets.value[key] = t;
+    // Ticket URLs are short-lived and server-relative: hand the bytes to the
+    // browser immediately via a synthetic anchor click.
+    const anchor = document.createElement('a');
+    anchor.href = t.url;
+    anchor.download = artifact.filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } catch {
+    artifactTickets.value[key] = 'error';
+  }
+}
+
 async function toggleFavorite() {
   if (!detail.value) return;
   // listingId is the coordinate-derived key; the API accepts the UUID from /me/library.
@@ -280,8 +340,20 @@ const installLabel = computed(() => {
           </div>
         </div>
         <div class="flex w-full flex-col gap-2 sm:w-56">
-          <ShimmerButton :disabled="installStage !== 'idle' && installStage !== 'failed'" @click="startInstall">
+          <ShimmerButton
+            v-if="!isAppListing"
+            :disabled="installStage !== 'idle' && installStage !== 'failed'"
+            @click="startInstall"
+          >
             {{ installLabel }}
+          </ShimmerButton>
+          <ShimmerButton
+            v-else-if="recommendedArtifact"
+            :disabled="artifactTickets[recommendedArtifact.artifactId ?? ''] === 'loading'"
+            @click="downloadArtifact(recommendedArtifact)"
+          >
+            {{ artifactTickets[recommendedArtifact.artifactId ?? ''] === 'loading'
+              ? t('listing.downloading') : t('common.download') }}
           </ShimmerButton>
           <ProgressBar v-if="installStage === 'downloading' || installStage === 'verifying'" />
           <button
@@ -617,11 +689,26 @@ const installLabel = computed(() => {
         >
           <div class="flex flex-wrap items-center gap-2">
             <Badge tone="muted">{{ artifact.kind }}</Badge>
+            <Badge v-if="artifact.variant && artifact.variant !== 'default'" tone="accent">
+              {{ artifact.variant }}
+            </Badge>
             <span class="font-mono text-xs">{{ artifact.filename }}</span>
             <span class="text-muted dark:text-slate-400">
               {{ artifact.platform }}/{{ artifact.arch }} · {{ isLiveUpstream && !artifact.size ? t('listing.generatedOnDemand') : formatSize(artifact.size) }}
             </span>
+            <button
+              v-if="artifact.artifactId"
+              class="ml-auto rounded-lg border border-line px-3 py-1 text-xs font-medium hover:bg-surface-2 disabled:opacity-50 dark:border-slate-800"
+              :disabled="artifactTickets[artifact.artifactId] === 'loading'"
+              @click="downloadArtifact(artifact)"
+            >
+              {{ artifactTickets[artifact.artifactId] === 'loading'
+                ? t('listing.downloading') : t('common.download') }}
+            </button>
           </div>
+          <p v-if="artifactTickets[artifact.artifactId ?? ''] === 'error'" class="text-xs text-red-500">
+            {{ t('listing.downloadFailed') }}
+          </p>
           <p class="break-all">
             <span class="text-muted dark:text-slate-400">{{ t('listing.sha256') }}:</span>
             <code>{{ artifact.sha256 || (isLiveUpstream ? t('listing.checksumAtDownload') : '—') }}</code>

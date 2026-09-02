@@ -412,6 +412,8 @@ paths:
         - { name: channel, in: query, schema: { $ref: '#/components/schemas/Channel' }, default: stable }
         - { name: os, in: query, required: true, schema: { $ref: '#/components/schemas/Platform' } }
         - { name: arch, in: query, required: true, schema: { $ref: '#/components/schemas/Arch' } }
+        - { name: mode, in: query, schema: { type: string, enum: [installer, portable, any] }, description: Select installed or portable application distributions }
+        - { name: variant, in: query, schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,31}$' }, description: Build variant such as lite, jre, uos or jar }
         - { name: installId, in: query, required: true, schema: { type: string }, description: Opaque random id used for stable rollout bucketing }
       responses:
         '200':
@@ -716,6 +718,7 @@ paths:
                 kind: { $ref: '#/components/schemas/ArtifactKind' }
                 platform: { $ref: '#/components/schemas/Platform' }
                 arch: { $ref: '#/components/schemas/Arch' }
+                variant: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,31}$' }
                 size: { type: integer, format: int64, minimum: 1 }
       responses:
         '201':
@@ -1197,7 +1200,7 @@ components:
       enum: [x64, arm64, universal]
     ArtifactKind:
       type: string
-      enum: [PACKAGE, INSTALLER, CHECKSUMS, SIGNATURE, SBOM]
+      enum: [PACKAGE, INSTALLER, PORTABLE, CHECKSUMS, SIGNATURE, SBOM]
 
     Problem:
       type: object
@@ -1257,6 +1260,7 @@ components:
         kind: { $ref: '#/components/schemas/ArtifactKind' }
         platform: { $ref: '#/components/schemas/Platform' }
         arch: { $ref: '#/components/schemas/Arch' }
+        variant: { type: string, description: APP build variant (lite, jre, uos, jar); default for non-APP artifacts }
         filename: { type: string }
         size: { type: integer, format: int64 }
         sha256: { type: string, nullable: true, description: Absent for live upstream delivery }
@@ -1408,13 +1412,15 @@ components:
       type: object
       properties:
         url: { type: string, format: uri }
+        filename: { type: string }
         sha256: { type: string }
         signature: { type: string }
         keyId: { type: string }
         size: { type: integer, format: int64 }
         platform: { $ref: '#/components/schemas/Platform' }
         arch: { $ref: '#/components/schemas/Arch' }
-        kind: { type: string }
+        kind: { type: string, enum: [installer, portable] }
+        variant: { type: string }
         mimeType: { type: string }
 
     AppUpdate:
@@ -1562,6 +1568,7 @@ components:
         kind: { $ref: '#/components/schemas/ArtifactKind' }
         platform: { $ref: '#/components/schemas/Platform' }
         arch: { $ref: '#/components/schemas/Arch' }
+        variant: { type: string }
         uploadUrl: { type: string, format: uri }
         method: { type: string, enum: [PUT] }
         expiresAt: { type: string, format: date-time }
@@ -1593,6 +1600,7 @@ components:
         channel: { $ref: '#/components/schemas/Channel' }
         createdAt: { type: string, format: date-time }
         publishedAt: { type: string, format: date-time, nullable: true }
+        artifacts: { type: array, items: { $ref: '#/components/schemas/Artifact' } }
         findings: { type: array, items: { $ref: '#/components/schemas/ScanFinding' } }
 
     Review:

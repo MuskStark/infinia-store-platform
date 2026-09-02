@@ -152,7 +152,7 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
         if (r.artifacts != null) {
             for (Release.ArtifactInfo a : r.artifacts) {
                 e.artifacts.add(new ReleaseEntity.ArtifactEmb(a.kind().name(),
-                        a.platform().name(), a.arch().name(), a.filename(), a.size(), a.sha256(),
+                        a.platform().name(), a.arch().name(), a.variant(), a.filename(), a.size(), a.sha256(),
                         a.signature(), a.keyId(), a.blobKey(), a.mimeType()));
             }
         }
@@ -188,9 +188,9 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
         r.rolloutPercent = e.rolloutPercent;
         r.artifacts = new ArrayList<>();
         for (ReleaseEntity.ArtifactEmb a : e.artifacts) {
-            r.artifacts.add(new Release.ArtifactInfo(null,
+            r.artifacts.add(new Release.ArtifactInfo(artifactId(e.id, a),
                     ArtifactKind.valueOf(a.kind()), Platform.valueOf(a.platform()),
-                    Arch.valueOf(a.arch()), a.filename(), a.size(), a.sha256(), a.signature(),
+                    Arch.valueOf(a.arch()), a.variant(), a.filename(), a.size(), a.sha256(), a.signature(),
                     a.keyId(), a.blobKey(), a.mimeType()));
         }
         r.dependencies = new ArrayList<>();
@@ -203,5 +203,17 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
                     p.reason()));
         }
         return r;
+    }
+
+    /**
+     * Element collections cannot carry a stable primary key, so artifact ids are
+     * derived deterministically from the release-scoped routing tuple. This keeps
+     * the ids advertised by listing details valid for artifactId-addressed
+     * download tickets across repository reloads.
+     */
+    static UUID artifactId(UUID releaseId, ReleaseEntity.ArtifactEmb a) {
+        String route = releaseId + ":" + a.kind() + ":" + a.platform() + ":" + a.arch() + ":"
+                + a.variant() + ":" + a.filename();
+        return UUID.nameUUIDFromBytes(route.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }

@@ -33,16 +33,17 @@ management:
         include: health,info,metrics,prometheus
 
 store:
+  app-coordinate: ${STORE_APP_COORDINATE:infinia://app/official/fengyu-host}
   base-url: http://localhost:8080
   blob-dir: data/blobs
   key-dir: data/keys
   ticket-secret: ${STORE_TICKET_SECRET:dev-only-ticket-secret-change-me}
   rollout-secret: ${STORE_ROLLOUT_SECRET:dev-only-rollout-secret-change-me}
-  max-upload-bytes: 104857600
+  max-upload-bytes: 1073741824
   download-ticket-ttl-seconds: 300
   upload-ticket-ttl-seconds: 900
-  allowed-origins: http://localhost:8089,http://localhost:4173
-  web-redirect-uri: http://localhost:8089/callback
+  # web-redirect-uri / allowed-origins are unset on purpose: the SPA ships inside
+  # the jar and shares this origin, so defaults derive from store.base-url.
   desktop-redirect-uris: http://127.0.0.1:24057/callback,http://localhost:24057/callback
   desktop-client-secret: ${STORE_DESKTOP_CLIENT_SECRET:dev-only-desktop-secret}
   cli-client-id: ${STORE_CLI_CLIENT_ID:store-cli}
@@ -78,6 +79,17 @@ store:
   blob-dir: ${user.home}/.infinia-store/blobs
   key-dir: ${user.home}/.infinia-store/keys
   export-dir: ${user.home}/.infinia-store/git-exports
+
+---
+# Split-origin development / test: Store Web runs as a separate Vite origin
+# (:8089 dev server, :4173 preview) proxying /api and /oauth2 to this backend.
+spring:
+  config:
+    activate:
+      on-profile: dev,test
+store:
+  allowed-origins: http://localhost:8089,http://localhost:4173
+  web-redirect-uri: http://localhost:8089/callback
 
 ---
 # Seeds local/test accounts; demo catalog fixtures remain opt-in.

@@ -39,6 +39,7 @@ public final class PublisherDtos {
             String kind,
             String platform,
             String arch,
+            String variant,
             String uploadUrl,
             String method,
             String expiresAt,
@@ -60,6 +61,7 @@ public final class PublisherDtos {
             String channel,
             String createdAt,
             String publishedAt,
+            List<ListingDtos.ArtifactDto> artifacts,
             List<ScanFindingDto> findings) {
     }
 

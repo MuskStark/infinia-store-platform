@@ -248,7 +248,7 @@ public class UpstreamSyncService {
                 source);
         publisher.attachVirtualArtifact(bot.id, release, new Release.ArtifactInfo(
                 UuidV7.generate(), ArtifactKind.PACKAGE, Platform.UNIVERSAL, Arch.UNIVERSAL,
-                artifactName, 0, contentSha, null, null,
+                "default", artifactName, 0, contentSha, null, null,
                 "upstream/" + virtualArtifactId, "application/octet-stream"));
         return approveMetadataOnly(source, reviewer, release);
     }

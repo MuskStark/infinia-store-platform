@@ -7,11 +7,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.ModelAndView;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.net.URI;
 import java.util.Map;
@@ -104,6 +108,31 @@ public class StoreProblemDetails {
         String hint = "Request body could not be read. For package uploads send "
                 + "Content-Type: application/octet-stream.";
         return problem(StoreErrorCode.VALIDATION_FAILED, hint, request);
+    }
+
+    /**
+     * Nothing matched the URL — no handler and no static resource. API-style
+     * requests get a proper 404 problem document instead of a misleading 500;
+     * browser navigations fall back to the embedded SPA so history-mode deep
+     * links such as /listing/acme/tool reach its router (which renders its own
+     * NotFound view for truly unknown paths).
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public Object noStaticResource(NoResourceFoundException e, HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        boolean htmlNavigation = HttpMethod.GET.matches(request.getMethod())
+                && !uri.startsWith("/api/") && !uri.startsWith("/oauth2/")
+                && !uri.startsWith("/actuator/")
+                && acceptsHtml(request);
+        if (htmlNavigation) {
+            return new ModelAndView("forward:/index.html", HttpStatus.OK);
+        }
+        return problem(StoreErrorCode.NOT_FOUND, "No such path: " + uri, request);
+    }
+
+    private static boolean acceptsHtml(HttpServletRequest request) {
+        String accept = request.getHeader(HttpHeaders.ACCEPT);
+        return accept != null && accept.contains("text/html");
     }
 
     @ExceptionHandler(Exception.class)

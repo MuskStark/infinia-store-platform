@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.PrivateKey;
@@ -71,6 +72,22 @@ public class PlatformSigningService {
 
     public String sign(String canonicalJson) {
         return Ed25519Signer.signBase64(privateKey, canonicalJson);
+    }
+
+    /** Signs artifact bytes without buffering large desktop distributions in memory. */
+    public String sign(InputStream content) {
+        try (content) {
+            java.security.Signature signature = java.security.Signature.getInstance("Ed25519");
+            signature.initSign(privateKey);
+            byte[] buffer = new byte[64 * 1024];
+            int count;
+            while ((count = content.read(buffer)) >= 0) {
+                signature.update(buffer, 0, count);
+            }
+            return java.util.Base64.getEncoder().encodeToString(signature.sign());
+        } catch (IOException | java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("Artifact signing failed", e);
+        }
     }
 
     public String currentKeyId() {

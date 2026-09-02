@@ -15,6 +15,7 @@ import dev.infinia.store.domain.model.Review;
 import dev.infinia.store.domain.port.ListingRepository;
 import dev.infinia.store.domain.port.PublishingRepositories;
 import dev.infinia.store.domain.port.ReleaseRepository;
+import dev.infinia.store.domain.port.BlobStorage;
 import dev.infinia.store.domain.service.ReleaseStateMachine;
 import dev.infinia.store.domain.service.UuidV7;
 import org.springframework.stereotype.Service;
@@ -41,11 +42,12 @@ public class ReviewService {
     private final CatalogService catalog;
     private final AuditService audit;
     private final ObjectMapper mapper;
+    private final BlobStorage blobs;
 
     public ReviewService(PublishingRepositories.ReviewRepository reviews,
             ReleaseRepository releases, ListingRepository listings,
             PublishingRepositories.OutboxRepository outbox, PlatformSigningService signing,
-            CatalogService catalog, AuditService audit, ObjectMapper mapper) {
+            CatalogService catalog, AuditService audit, ObjectMapper mapper, BlobStorage blobs) {
         this.reviews = reviews;
         this.releases = releases;
         this.listings = listings;
@@ -54,6 +56,7 @@ public class ReviewService {
         this.catalog = catalog;
         this.audit = audit;
         this.mapper = mapper;
+        this.blobs = blobs;
     }
 
     public List<Review> queue(String status) {
@@ -129,8 +132,8 @@ public class ReviewService {
         for (int i = 0; i < release.artifacts.size(); i++) {
             Release.ArtifactInfo a = release.artifacts.get(i);
             release.artifacts.set(i, new Release.ArtifactInfo(a.id(), a.kind(), a.platform(),
-                    a.arch(), a.filename(), a.size(), a.sha256(),
-                    a.signature() == null ? signature : a.signature(),
+                    a.arch(), a.variant(), a.filename(), a.size(), a.sha256(),
+                    a.signature() == null ? signArtifact(a, signature) : a.signature(),
                     a.keyId() == null ? keyId : a.keyId(), a.blobKey(), a.mimeType()));
         }
         review.status = "APPROVED";
@@ -181,8 +184,8 @@ public class ReviewService {
             Release.ArtifactInfo a = release.artifacts.get(i);
             if (a.signature() == null) {
                 release.artifacts.set(i, new Release.ArtifactInfo(a.id(), a.kind(),
-                        a.platform(), a.arch(), a.filename(), a.size(), a.sha256(),
-                        signing.sign(envelopeJson), signing.currentKeyId(), a.blobKey(),
+                        a.platform(), a.arch(), a.variant(), a.filename(), a.size(), a.sha256(),
+                        signArtifact(a, signing.sign(envelopeJson)), signing.currentKeyId(), a.blobKey(),
                         a.mimeType()));
             }
         }
@@ -196,6 +199,14 @@ public class ReviewService {
         audit.record("USER", adminUserId.toString(), "release.force-publish", "RELEASE",
                 release.id.toString(), "REJECTED", "PUBLISHED: " + reason, null);
         return release;
+    }
+
+    private String signArtifact(Release.ArtifactInfo artifact, String envelopeFallback) {
+        if (blobs == null || artifact.blobKey() == null
+                || artifact.blobKey().startsWith("upstream/")) {
+            return envelopeFallback;
+        }
+        return signing.sign(blobs.open(artifact.blobKey()));
     }
 
     // ---- security withdrawals (design §8.1) ----

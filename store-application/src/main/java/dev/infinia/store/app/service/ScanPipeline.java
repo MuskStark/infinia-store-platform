@@ -1,6 +1,7 @@
 package dev.infinia.store.app.service;
 
 import dev.infinia.store.contract.type.ArtifactKind;
+import dev.infinia.store.contract.type.ListingType;
 import dev.infinia.store.contract.type.ReleaseStatus;
 import dev.infinia.store.domain.model.Listing;
 import dev.infinia.store.domain.model.Release;
@@ -69,23 +70,19 @@ public class ScanPipeline {
             return;
         }
         Listing listing = listings.findById(release.listingId).orElse(null);
-        Release.ArtifactInfo artifact = release.artifacts.stream()
-                .filter(a -> a.kind() == ArtifactKind.PACKAGE)
-                .findFirst()
-                .orElse(null);
         ScanResult result;
-        if (artifact == null) {
-            result = new ScanResult();
-            result.error("scanner.no-package", "No PACKAGE artifact attached");
+        if (listing != null && listing.type == ListingType.APP) {
+            result = scanAppArtifacts(release);
         } else {
-            try (InputStream in = blobs.open(artifact.blobKey())) {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                in.transferTo(out);
-                result = scanner.scan(listing == null ? "PLUGIN" : listing.type.name(),
-                        release.version.toString(), out.toByteArray());
-            } catch (IOException e) {
+            Release.ArtifactInfo artifact = release.artifacts.stream()
+                    .filter(a -> a.kind() == ArtifactKind.PACKAGE)
+                    .findFirst()
+                    .orElse(null);
+            if (artifact == null) {
                 result = new ScanResult();
-                result.error("scanner.io", "Package could not be read: " + e.getMessage());
+                result.error("scanner.no-package", "No PACKAGE artifact attached");
+            } else {
+                result = scanPackage(listing, release, artifact);
             }
         }
         // Findings key on (rule, message); append the file so hits in different
@@ -121,5 +118,50 @@ public class ScanPipeline {
         reviews.save(review);
         log.info("Scan finished for release {}: blocking={}, findings={}", releaseId,
                 result.hasBlockingFindings(), result.findings.size());
+    }
+
+    private ScanResult scanPackage(Listing listing, Release release,
+            Release.ArtifactInfo artifact) {
+        try (InputStream in = blobs.open(artifact.blobKey())) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            in.transferTo(out);
+            return scanner.scan(listing == null ? "PLUGIN" : listing.type.name(),
+                    release.version.toString(), out.toByteArray());
+        } catch (IOException e) {
+            ScanResult result = new ScanResult();
+            result.error("scanner.io", "Package could not be read: " + e.getMessage());
+            return result;
+        }
+    }
+
+    /** APP binaries are opaque/code-signed; validate routing metadata without buffering them. */
+    private ScanResult scanAppArtifacts(Release release) {
+        ScanResult result = new ScanResult();
+        java.util.List<Release.ArtifactInfo> binaries = release.artifacts.stream()
+                .filter(a -> a.kind() == ArtifactKind.INSTALLER
+                        || a.kind() == ArtifactKind.PORTABLE)
+                .toList();
+        if (binaries.isEmpty()) {
+            result = new ScanResult();
+            result.error("scanner.no-app-binary", "No APP installer or portable artifact attached");
+            return result;
+        }
+        java.util.HashSet<String> routes = new java.util.HashSet<>();
+        for (Release.ArtifactInfo artifact : binaries) {
+            String route = artifact.platform() + "/" + artifact.arch() + "/"
+                    + artifact.kind() + "/" + artifact.variant();
+            if (!routes.add(route)) {
+                result.error("app.duplicate-route", "Duplicate APP artifact route " + route);
+            }
+            if (!blobs.exists(artifact.blobKey()) || artifact.size() <= 0
+                    || artifact.sha256() == null
+                    || !artifact.sha256().matches("[0-9a-fA-F]{64}")) {
+                result.error("app.binary-invalid", "Missing or invalid APP binary metadata: "
+                        + artifact.filename());
+            }
+            result.info("app.binary", "Opaque APP binary queued for platform code-sign review: "
+                    + artifact.filename());
+        }
+        return result;
     }
 }

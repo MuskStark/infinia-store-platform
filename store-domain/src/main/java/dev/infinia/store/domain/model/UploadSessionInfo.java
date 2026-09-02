@@ -18,6 +18,7 @@ public class UploadSessionInfo {
     public ArtifactKind kind;
     public Platform platform;
     public Arch arch;
+    public String variant;
     public long declaredSize;
     /** PENDING | COMPLETED | EXPIRED */
     public String status;

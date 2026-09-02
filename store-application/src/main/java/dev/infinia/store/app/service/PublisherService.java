@@ -32,7 +32,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
@@ -235,23 +234,53 @@ public class PublisherService {
     }
 
     public UploadSessionInfo createUploadSession(UUID publisherUserId, Release release,
-            String filename, ArtifactKind kind, Platform platform, Arch arch, long declaredSize) {
+            String filename, ArtifactKind kind, Platform platform, Arch arch, String variant,
+            long declaredSize) {
         requireListingOwner(publisherUserId, release);
+        if (filename == null || filename.isBlank()) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "filename is required");
+        }
         if (declaredSize > properties.maxUploadBytes()) {
             throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
                     "Declared size exceeds the upload limit");
         }
-        if (release.status != ReleaseStatus.DRAFT && release.status != ReleaseStatus.REJECTED
+        if (release.status != ReleaseStatus.DRAFT && release.status != ReleaseStatus.UPLOADING
+                && release.status != ReleaseStatus.REJECTED
                 && release.status != ReleaseStatus.CHANGES_REQUESTED) {
             ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.UPLOADING);
         }
         UploadSessionInfo session = new UploadSessionInfo();
+        Listing listing = listings.findById(release.listingId).orElseThrow(
+                () -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND,
+                        "Listing not found"));
         session.id = UuidV7.generate();
         session.releaseId = release.id;
         session.filename = filename;
-        session.kind = kind == null ? ArtifactKind.PACKAGE : kind;
-        session.platform = platform == null ? Platform.UNIVERSAL : platform;
-        session.arch = arch == null ? Arch.UNIVERSAL : arch;
+        session.kind = kind == null
+                ? (listing.type == ListingType.APP ? inferAppKind(filename) : ArtifactKind.PACKAGE)
+                : kind;
+        if (listing.type == ListingType.APP && session.kind == ArtifactKind.PACKAGE) {
+            // Older publisher clients omitted kind for APP uploads. Treat their
+            // primary binary as a portable distribution instead of creating an
+            // APP release that the update feed cannot route.
+            session.kind = ArtifactKind.PORTABLE;
+        }
+        if (listing.type == ListingType.APP && session.kind != ArtifactKind.INSTALLER
+                && session.kind != ArtifactKind.PORTABLE
+                && session.kind != ArtifactKind.CHECKSUMS
+                && session.kind != ArtifactKind.SIGNATURE
+                && session.kind != ArtifactKind.SBOM) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "APP artifacts must be INSTALLER, PORTABLE, CHECKSUMS, SIGNATURE or SBOM");
+        }
+        session.platform = platform == null
+                ? (listing.type == ListingType.APP ? inferPlatform(filename) : Platform.UNIVERSAL)
+                : platform;
+        session.arch = arch == null
+                ? (listing.type == ListingType.APP ? inferArch(filename) : Arch.UNIVERSAL)
+                : arch;
+        session.variant = normalizeVariant(variant, listing.type, filename);
         session.declaredSize = declaredSize;
         session.status = "PENDING";
         session.expiresAt = Instant.now().plusSeconds(properties.uploadTicketTtlSeconds());
@@ -276,10 +305,14 @@ public class PublisherService {
             throw new DomainException(StoreErrorCode.UPLOAD_NOT_COMPLETE,
                     "Upload session already used");
         }
-        byte[] bytes = readAll(body);
-        String blobKey = blobs.put(new java.io.ByteArrayInputStream(bytes),
-                properties.maxUploadBytes(), null);
-        String sha256 = dev.infinia.store.scanner.Ed25519Signer.sha256Hex(bytes);
+        String blobKey = blobs.put(body, properties.maxUploadBytes(), null);
+        long size = blobs.size(blobKey);
+        String sha256 = blobKey.substring(blobKey.lastIndexOf('/') + 1);
+        int digestPrefix = blobKey.indexOf("sha256/");
+        if (digestPrefix >= 0) {
+            sha256 = blobKey.substring(digestPrefix + "sha256/".length()).replace("/", "");
+        }
+        String mimeType = mimeType(session.filename);
 
         Release release = releases.findById(session.releaseId).orElseThrow(
                 () -> new DomainException(StoreErrorCode.RELEASE_NOT_FOUND, "Release missing"));
@@ -289,15 +322,14 @@ public class PublisherService {
         }
         release.artifacts = new ArrayList<>(release.artifacts);
         release.artifacts.add(new Release.ArtifactInfo(UuidV7.generate(), session.kind,
-                session.platform, session.arch, session.filename, bytes.length, sha256, null,
-                null, blobKey, session.mimeType));
+                session.platform, session.arch, session.variant, session.filename, size, sha256,
+                null, null, blobKey, mimeType));
         releases.save(release);
 
         session.status = "COMPLETED";
         session.blobKey = blobKey;
         session.sha256 = sha256;
-        session.mimeType = bytes.length > 0 && bytes[0] == '{' ? "application/json"
-                : "application/zip";
+        session.mimeType = mimeType;
         uploads.save(session);
         return session;
     }
@@ -311,6 +343,15 @@ public class PublisherService {
         if (sessions.stream().noneMatch(s -> "COMPLETED".equals(s.status))) {
             throw new DomainException(StoreErrorCode.UPLOAD_NOT_COMPLETE,
                     "Upload the package before submitting");
+        }
+        Listing listing = listings.findById(release.listingId).orElseThrow(
+                () -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND,
+                        "Listing not found"));
+        if (listing.type == ListingType.APP && release.artifacts.stream().noneMatch(
+                a -> a.kind() == ArtifactKind.INSTALLER
+                        || a.kind() == ArtifactKind.PORTABLE)) {
+            throw new DomainException(StoreErrorCode.UPLOAD_NOT_COMPLETE,
+                    "Upload at least one APP installer or portable artifact before submitting");
         }
         ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.SCANNING);
         release.status = ReleaseStatus.SCANNING;
@@ -357,18 +398,79 @@ public class PublisherService {
                 type, payloadJson, OutboxRecord.STATUS_PENDING, 0, Instant.now(), Instant.now()));
     }
 
+    private static ArtifactKind inferAppKind(String filename) {
+        String lower = filename.toLowerCase(java.util.Locale.ROOT);
+        return lower.endsWith(".exe") || lower.endsWith(".msi") || lower.endsWith(".dmg")
+                || lower.endsWith(".pkg") || lower.endsWith(".deb")
+                ? ArtifactKind.INSTALLER : ArtifactKind.PORTABLE;
+    }
+
+    private static Platform inferPlatform(String filename) {
+        String lower = filename.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("win32") || lower.contains("windows") || lower.contains("win-")
+                || lower.endsWith(".exe") || lower.endsWith(".msi")) {
+            return Platform.WINDOWS;
+        }
+        if (lower.contains("mac-") || lower.contains("macos") || lower.endsWith(".dmg")
+                || lower.endsWith(".pkg")) {
+            return Platform.MACOS;
+        }
+        if (lower.contains("linux") || lower.endsWith(".deb")
+                || lower.endsWith(".appimage")) {
+            return Platform.LINUX;
+        }
+        return Platform.UNIVERSAL;
+    }
+
+    /** Desktop distributions declare their architecture in the release filename. */
+    private static Arch inferArch(String filename) {
+        String lower = filename.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("arm64") || lower.contains("aarch64")) {
+            return Arch.ARM64;
+        }
+        if (lower.contains("x64") || lower.contains("x86_64") || lower.contains("amd64")) {
+            return Arch.X64;
+        }
+        return Arch.UNIVERSAL;
+    }
+
+    private static String normalizeVariant(String requested, ListingType type, String filename) {
+        String value = requested == null ? "" : requested.trim().toLowerCase(java.util.Locale.ROOT);
+        if (value.isBlank()) {
+            String lower = filename.toLowerCase(java.util.Locale.ROOT);
+            value = type != ListingType.APP ? "default"
+                    : lower.equals("infinia.jar") ? "jar"
+                    : lower.contains("uos") ? "uos"
+                    : lower.contains("jre") ? "jre"
+                    : lower.contains("-web.") ? "web" : "lite";
+        }
+        if (!value.matches("[a-z0-9][a-z0-9-]{0,31}")) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "variant must contain only lowercase letters, digits and hyphens");
+        }
+        return value;
+    }
+
+    private static String mimeType(String filename) {
+        String lower = filename.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".json")) return "application/json";
+        if (lower.endsWith(".txt") || lower.endsWith(".sig") || lower.endsWith(".yml")
+                || lower.endsWith(".yaml")) return "text/plain";
+        if (lower.endsWith(".zip") || lower.endsWith(".fyp") || lower.endsWith(".fys")) {
+            return "application/zip";
+        }
+        if (lower.endsWith(".jar")) return "application/java-archive";
+        if (lower.endsWith(".dmg")) return "application/x-apple-diskimage";
+        if (lower.endsWith(".deb")) return "application/vnd.debian.binary-package";
+        return "application/octet-stream";
+    }
+
     private String toJson(Object payload) {
         try {
             return mapper.writeValueAsString(payload);
         } catch (RuntimeException e) {
             throw new IllegalStateException(e);
         }
-    }
-
-    private static byte[] readAll(InputStream in) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        in.transferTo(out);
-        return out.toByteArray();
     }
 
 }

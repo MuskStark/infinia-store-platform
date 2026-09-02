@@ -127,6 +127,7 @@ export default {
     noChangelog: '此版本暂无更新说明。',
     rollout: '灰度 {percent}%',
     noArtifacts: '暂无安装包信息。',
+    downloadFailed: '下载失败——票据可能已过期，请重试。',
     signatureNote: '发布信封使用 Ed25519 平台签名，每次下载都会校验。',
     sha256: 'SHA-256',
     signature: '签名',
