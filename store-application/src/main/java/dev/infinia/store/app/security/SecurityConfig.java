@@ -59,7 +59,8 @@ public class SecurityConfig {
             "/api/v1/catalog", "/api/v1/listings/**", "/api/v1/resolutions",
             "/api/v1/updates/**", "/api/v1/auth/register", "/api/v1/auth/login",
             "/api/v1/blobs/**", "/api/v1/compat/**",
-            "/api/v1/releases/*/download-ticket", "/api/v1/releases/*/install-manifest"
+            "/api/v1/releases/*/download-ticket", "/api/v1/releases/*/install-manifest",
+            "/api/v1/releases/*/checksums.txt"
     };
 
     @Bean

@@ -266,6 +266,59 @@ class AppReleaseFlowTest {
                 new String(bytes.getBody(), StandardCharsets.UTF_8));
     }
 
+    /** The feed advertises the operator-configured support floor, not a code constant. */
+    @Test
+    void feedAdvertisesConfiguredMinimumSupportedVersion() {
+        ResponseEntity<Map> feed = http().getJson(
+                "/api/v1/updates/app?current=4.0.0&channel=stable&os=windows&arch=x64"
+                        + "&installId=floor-probe", Map.class, null);
+        assertEquals(200, feed.getStatusCode().value());
+        assertEquals("3.9.0", feed.getBody().get("minimumSupportedVersion"),
+                "minimumSupportedVersion must come from store.app-minimum-supported-version");
+        // Even below the floor the update stays non-mandatory (design §8.4).
+        assertEquals(false, feed.getBody().get("mandatory"));
+    }
+
+    /** Every published release serves a sha256sum-compatible checksums.txt
+     *  covering its binary artifacts (design §8.3). */
+    @Test
+    @SuppressWarnings("unchecked")
+    void checksumsManifestMatchesPublishedArtifacts() {
+        ResponseEntity<Map> detail = http().getJson("/api/v1/listings/official/fengyu-host",
+                Map.class, null);
+        Map<String, Object> release = ((List<Map<String, Object>>) detail.getBody()
+                .get("releases")).get(0);
+        String releaseId = (String) release.get("releaseId");
+        Map<String, String> expected = new java.util.LinkedHashMap<>();
+        for (Map<String, Object> a : (List<Map<String, Object>>) release.get("artifacts")) {
+            String kind = String.valueOf(a.get("kind"));
+            if ("INSTALLER".equals(kind) || "PORTABLE".equals(kind) || "PACKAGE".equals(kind)) {
+                expected.put((String) a.get("filename"), (String) a.get("sha256"));
+            }
+        }
+        assertFalse(expected.isEmpty(), "seeded host release carries binary artifacts");
+
+        ResponseEntity<String> manifest = http().get(
+                "/api/v1/releases/" + releaseId + "/checksums.txt", null);
+        assertEquals(200, manifest.getStatusCode().value());
+        assertTrue(manifest.getHeaders().getContentType().isCompatibleWith(
+                MediaType.TEXT_PLAIN), "text/plain content type");
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String line : manifest.getBody().split("\n")) {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("^([0-9a-f]{64})  (.+)$").matcher(line);
+            assertTrue(m.matches(), "sha256sum format expected: " + line);
+            String filename = m.group(2);
+            assertEquals(expected.get(filename), m.group(1), "digest matches " + filename);
+            seen.add(filename);
+        }
+        assertEquals(expected.keySet(), seen, "manifest covers every binary artifact");
+
+        assertEquals(404, http().get(
+                "/api/v1/releases/" + UUID.randomUUID() + "/checksums.txt", null)
+                .getStatusCode().value());
+    }
+
     private void awaitStatus(String token, String releaseId, String expected)
             throws InterruptedException {
         for (int i = 0; i < 150; i++) {

@@ -247,6 +247,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/releases/{releaseId}/checksums.txt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** sha256sum-style checksum manifest of a published release's binary artifacts (design §8.3) */
+        get: operations["releaseChecksums"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/updates/app": {
         parameters: {
             query?: never;
@@ -1943,6 +1960,30 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProblemNotFound"];
+        };
+    };
+    releaseChecksums: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One `<sha256>  <filename>` line per INSTALLER / PORTABLE / PACKAGE artifact, sorted by filename */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            404: components["responses"]["ProblemNotFound"];
+            409: components["responses"]["ProblemConflict"];
         };
     };
     appUpdateFeed: {

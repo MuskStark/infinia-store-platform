@@ -188,7 +188,7 @@ public class CatalogService {
         Listing appListing = listings.findByCoordinate(configured).orElse(null);
         if (appListing == null || appListing.type != ListingType.APP
                 || !appListing.isPubliclyVisible()) {
-            return new UpdateFeed(null, null, null, 0, null, List.of(), null, null, null);
+            return new UpdateFeed(null, null, null, 0, null, List.of());
         }
         Release best = null;
         for (Release release : releases.findVisibleByListingId(appListing.id)) {
@@ -210,7 +210,7 @@ public class CatalogService {
             }
         }
         if (best == null || best.version.compareTo(currentVersion) <= 0) {
-            return new UpdateFeed(null, null, null, 0, null, List.of(), null, null, null);
+            return new UpdateFeed(null, null, null, 0, null, List.of());
         }
         List<dev.infinia.store.contract.api.DeliveryDtos.AppUpdateArtifactDto> artifacts =
                 new ArrayList<>();
@@ -228,7 +228,7 @@ public class CatalogService {
                     a.mimeType()));
         }
         return new UpdateFeed(appListing.coordinate().toString(), best.version.toString(),
-                best.channel, best.rolloutPercent, best, artifacts, null, null, null);
+                best.channel, best.rolloutPercent, best, artifacts);
     }
 
     private static ArtifactKind parseAppMode(String mode) {
@@ -244,8 +244,7 @@ public class CatalogService {
     /** Carrier for the update feed response; fields assembled in the controller. */
     public record UpdateFeed(String listingCoordinate, String latestVersion, Channel channel,
             int rolloutPercent, Release release,
-            List<dev.infinia.store.contract.api.DeliveryDtos.AppUpdateArtifactDto> artifacts,
-            String platformSignature, String platformKeyId, String envelopeJson) {}
+            List<dev.infinia.store.contract.api.DeliveryDtos.AppUpdateArtifactDto> artifacts) {}
 
     // ---- envelope ----
 

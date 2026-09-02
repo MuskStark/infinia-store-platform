@@ -19,7 +19,8 @@ public record StoreProperties(
         String desktopClientSecret,
         String cliClientId,
         String cliClientSecret,
-        String appCoordinate) {
+        String appCoordinate,
+        String appMinimumSupportedVersion) {
 
     public StoreProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8080" : baseUrl;
@@ -60,6 +61,11 @@ public record StoreProperties(
                 ? "dev-only-cli-secret" : cliClientSecret;
         appCoordinate = appCoordinate == null || appCoordinate.isBlank()
                 ? "infinia://app/official/fengyu-host" : appCoordinate;
+        // Floor advertised on the update feed (design §8.4): hosts below this line
+        // are told to upgrade, but the feed itself stays mandatory=false.
+        if (appMinimumSupportedVersion == null || appMinimumSupportedVersion.isBlank()) {
+            appMinimumSupportedVersion = "4.0.0";
+        }
     }
 
     /** Product sign-in page derived from the configured Store Web callback origin. */

@@ -1,5 +1,6 @@
 package dev.infinia.store.app.web;
 
+import dev.infinia.store.app.config.StoreProperties;
 import dev.infinia.store.app.service.CatalogService;
 import dev.infinia.store.contract.api.DeliveryDtos;
 import dev.infinia.store.contract.type.Channel;
@@ -19,9 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class UpdatesController {
 
     private final CatalogService catalog;
+    private final StoreProperties properties;
 
-    public UpdatesController(CatalogService catalog) {
+    public UpdatesController(CatalogService catalog, StoreProperties properties) {
         this.catalog = catalog;
+        this.properties = properties;
     }
 
     @GetMapping("/app")
@@ -54,7 +57,7 @@ public class UpdatesController {
                 primary == null ? null : primary.keyId(),
                 feed.release() == null || feed.release().publishedAt == null ? null
                         : feed.release().publishedAt.toString(),
-                "4.0.0",
+                properties.appMinimumSupportedVersion(),
                 feed.channel() == null ? channel : feed.channel().name().toLowerCase());
     }
 }

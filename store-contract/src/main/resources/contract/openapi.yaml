@@ -400,6 +400,24 @@ paths:
               schema: { $ref: '#/components/schemas/DownloadTicket' }
         '404': { $ref: '#/components/responses/ProblemNotFound' }
 
+  /releases/{releaseId}/checksums.txt:
+    get:
+      operationId: releaseChecksums
+      tags: [Delivery]
+      summary: sha256sum-style checksum manifest of a published release's binary artifacts (design §8.3)
+      security:
+        - {}
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: 'One `<sha256>  <filename>` line per INSTALLER / PORTABLE / PACKAGE artifact, sorted by filename'
+          content:
+            text/plain:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/ProblemNotFound' }
+        '409': { $ref: '#/components/responses/ProblemConflict' }
+
   /updates/app:
     get:
       operationId: appUpdateFeed

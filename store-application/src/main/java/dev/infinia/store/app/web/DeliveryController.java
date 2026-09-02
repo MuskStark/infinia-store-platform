@@ -150,6 +150,34 @@ public class DeliveryController {
                 .body(body);
     }
 
+    /**
+     * Deterministic checksums.txt manifest for a release (design §8.3: APP releases
+     * must ship checksums alongside the signed binaries). Derived from the signed
+     * artifact metadata — one {@code sha256  filename} line per binary artifact in
+     * sha256sum format, so {@code sha256sum -c checksums.txt} works verbatim.
+     */
+    @GetMapping(value = "/releases/{releaseId}/checksums.txt", produces = "text/plain; charset=utf-8")
+    public ResponseEntity<String> checksums(@PathVariable UUID releaseId) {
+        Release release = catalog.releaseOrThrow(releaseId);
+        if (!release.installable()) {
+            throw new DomainException(StoreErrorCode.INVALID_STATE_TRANSITION,
+                    "Release is not installable (status " + release.status + ")");
+        }
+        StringBuilder manifest = new StringBuilder();
+        release.artifacts.stream()
+                .filter(a -> a.kind() == dev.infinia.store.contract.type.ArtifactKind.INSTALLER
+                        || a.kind() == dev.infinia.store.contract.type.ArtifactKind.PORTABLE
+                        || a.kind() == dev.infinia.store.contract.type.ArtifactKind.PACKAGE)
+                .filter(a -> a.sha256() != null && a.filename() != null)
+                .sorted(java.util.Comparator.comparing(Release.ArtifactInfo::filename))
+                .forEach(a -> manifest.append(a.sha256()).append("  ")
+                        .append(a.filename()).append('\n'));
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, "text/plain; charset=utf-8")
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache")
+                .body(manifest.toString());
+    }
+
     /** Presigned-URL equivalent for uploads (design §8.2 step 1). */
     @PutMapping("/blobs/uploads/{uploadId}")
     public ResponseEntity<Void> upload(@PathVariable UUID uploadId,

@@ -117,7 +117,11 @@ GET /api/v1/updates/app?current=4.0.0&channel=stable&os=macos&arch=arm64
 `mode` (`installer` | `portable` | `any`) and `variant` route the request to the matching
 distribution; rollout bucketing stays stable per `installId`. Every returned artifact URL
 is a short-lived HMAC ticket and the response carries the artifact SHA-256, the Ed25519
-platform signature and the `keyId` for client-side verification.
+platform signature and the `keyId` for client-side verification. The advertised
+`minimumSupportedVersion` floor is operator-configurable
+(`STORE_APP_MINIMUM_SUPPORTED_VERSION`), and every published release serves a
+sha256sum-compatible manifest at `GET /api/v1/releases/{releaseId}/checksums.txt`
+(design §8.3).
 
 ### Production-like stack (Docker)
 
