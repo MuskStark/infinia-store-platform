@@ -49,6 +49,14 @@ store:
   # fengyu-desktop is a PUBLIC OAuth client (RFC 8252 §8.5): PKCE only, no secret.
   cli-client-id: ${STORE_CLI_CLIENT_ID:store-cli}
   cli-client-secret: ${STORE_CLI_CLIENT_SECRET:dev-only-cli-secret}
+  # Default upstream sources seeded on first boot and indexed from then on
+  # (aggregation stays metadata-only; payloads materialize per download).
+  # Note: indexing needs the seeded ci/reviewer accounts, so a deployment with
+  # store.seed.enabled=false records a clear sync error until accounts exist.
+  upstream:
+    defaults:
+      enabled: ${STORE_UPSTREAM_DEFAULTS_ENABLED:true}
+      skillhub-url: ${STORE_UPSTREAM_SKILLHUB_URL:https://api.skillhub.cn/api/skills?pages=1}
 
 ---
 spring:

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### SKILLHUB_REGISTRY upstream adapter — WorkBuddy open skills via the SkillHub Open API
+
+- New upstream adapter type `SKILLHUB_REGISTRY` aggregates Tencent's open skill platform behind
+  WorkBuddy (`https://api.skillhub.cn`, ~136k skills). Discovery pages the `/api/skills`
+  catalog envelope — metadata-only as before, default window `pages=3` × `pageSize=100` with
+  `source` / `category` / `keyword` filters and the `pages` / `pageSize` knobs riding in the
+  registered URL's query string; downloads pin the synced version through
+  `/api/v1/download`, whose 302 to a signed Tencent COS address is followed manually so every
+  redirect hop re-passes the SSRF guard. Register with
+  `POST /api/v1/admin/upstreams {"marketplaceUrl":"https://api.skillhub.cn","adapterType":"SKILLHUB_REGISTRY",...}`;
+  AUTO detection also recognizes SkillHub URLs, and catalog drift (e.g. an upstream version
+  bump) keeps failing downloads with 409 `upstream_drifted` until a re-sync.
+- Verified by `skillhubRegistryAggregatesWorkBuddySkillsWithRedirectDownloadAndDriftGuard`
+  (stub registry with the 302 download hop) and a live smoke check against the real
+  `api.skillhub.cn` list/download endpoints and a payload zip (root `SKILL.md`, as the
+  adapter's shallowest-root location expects).
+- The upstream is now **seeded by default**: `UpstreamCatalogBootstrap` idempotently registers
+  `SkillHub (WorkBuddy)` (namespace `skillhub`, default window
+  `store.upstream.defaults.skillhub-url` = `https://api.skillhub.cn/api/skills?pages=1`, the
+  top 100 by downloads) on first boot and indexes it, so deployments aggregate WorkBuddy's
+  open skills without a manual registration. `store.upstream.defaults.enabled=false` opts out;
+  seeding runs after account seeding (`SeedData` now has an explicit listener order) and the
+  existing never-successfully-synced retry rule makes later boots re-index until it succeeds.
+  Covered by `UpstreamDefaultsBootstrapTest` (isolated H2 + local SkillHub stub).
+
 ### fengyu-desktop is now a public OAuth client (PKCE only)
 
 - The desktop host client registration drops its client secret

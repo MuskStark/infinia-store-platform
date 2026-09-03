@@ -64,6 +64,7 @@ Claude / Codex / MCP Registry / Git 仓库 / 其他目录
 | `CODEX_SKILL_REPOSITORY` | Git 仓库或目录中的 `SKILL.md`，可带 `agents/openai.yaml`、scripts、references、assets | 按路径或全仓库扫描；必须固定 ref，生产同步记录 commit | 一个目录一个 `SKILL` Listing |
 | `AGENT_SKILLS_REPOSITORY` | 遵循 Agent Skills 基础约定的任意 Git 仓库 | 作为通用 Skill 入口，允许未来接入更多 Agent | 一个目录一个 `SKILL` Listing |
 | `MCP_REGISTRY` | MCP Registry `server.json`，包含 `packages` / `remotes` | 先支持标准公开 Registry；保留私有 Registry 配置能力 | 一个 `MCP` Listing，多种部署变体 |
+| `SKILLHUB_REGISTRY` | SkillHub Open API（`/api/skills` 目录信封 + `/api/v1/download` 302 zip） | WorkBuddy 开源技能平台的官方技能目录；同步默认按下载量取前 N 页元数据，可在 URL 上携带 `source` / `category` / `keyword` 过滤与 `pages` / `pageSize` 商店侧旋钮 | 每个 slug 一个 `SKILL` Listing |
 | `MCP_REPOSITORY` | 仓库中的 MCP manifest、`.mcp.json`、`server.json` 或已登记模板 | 只接受显式映射，不盲扫任意 JSON | 一个或多个 `MCP` Listing |
 | `GENERIC_JSON_FEED` | 经审核的供应商 JSON feed | 仅允许管理员配置 JSON Schema 映射 | 受限的 `SKILL` / `MCP` Listing |
 
@@ -72,6 +73,10 @@ Claude marketplace 的来源字段需要完整支持 `github`、`url`、`git-sub
 Codex 适配器不假设存在一个长期稳定的“Codex marketplace JSON”协议。优先兼容其可移植的 Skill 目录结构：`SKILL.md`、YAML frontmatter 以及可选资源目录；未来如果 OpenAI 发布稳定目录 API，再新增独立 API 适配器，不改变 Git 仓库适配器。参考 [OpenAI/Codex build skills](https://developers.openai.com/codex/skills/) 和 [OpenAI Skills Catalog](https://github.com/openai/skills)。
 
 MCP 适配器以官方 Registry 的 `server.json` 为优先输入；Registry 只提供元数据，实际包可能位于 npm、PyPI、NuGet、Docker、MCPB 或远程服务，因此商店必须分别处理“元数据来源”和“实际安装来源”。参考 [MCP Registry](https://modelcontextprotocol.io/registry/about) 与 [supported package types](https://modelcontextprotocol.io/registry/package-types)。
+
+SkillHub 是腾讯面向 WorkBuddy 的开源技能平台（站点 skillhub.cn，API 基址 `https://api.skillhub.cn`），没有 Git 仓库形态的目录，只能走 HTTP API：目录接口 `/api/skills` 返回 `code/data` 信封，下载接口 `/api/v1/download` 以 302 跳转到带时效签名的对象存储地址。因此 `SKILLHUB_REGISTRY` 适配器：同步阶段只翻页读取目录信封（默认 `pages=3` × `pageSize=100`，按下载量排序，URL 可携带上游过滤参数）；下载阶段按同步记录的 slug 与版本号请求下载接口，重定向的每一跳都重新过 SSRF 校验，不缓存、不转发 `Location` 地址。上游目录条目变化（版本、描述等）会改变元数据摘要，按既有漂移策略要求重新同步。参考 [SkillHub Open API](https://github.com/Tencent/skillhub)。
+
+SkillHub 同时是商店的**默认上游**：`UpstreamCatalogBootstrap` 启动时按名字幂等播种 `upstream_source` 行（名称 `SkillHub (WorkBuddy)`，命名空间 `skillhub`，默认 URL `https://api.skillhub.cn/api/skills?pages=1`，即下载量 Top 100），随后的启动索引沿用“从未成功同步才索引”的既有规则。可用 `store.upstream.defaults.enabled=false` 关闭，或用 `store.upstream.defaults.skillhub-url` 指向镜像/调整窗口；同步依赖播种的 `ci@infinia.local` / `reviewer@infinia.local` 账号，未开 `store.seed.enabled` 的部署会记录清晰的同步错误并在每次启动重试，而不是静默跳过。
 
 ### 3.2 适配器接口
 

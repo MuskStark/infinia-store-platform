@@ -61,11 +61,12 @@ class UpstreamController {
                     "Upstream name already exists");
         }
         if (request.adapterType() != null && !request.adapterType().isBlank()
-                && !List.of("AUTO", "CLAUDE_MARKETPLACE", "SKILL_REPOSITORY", "MCP_REGISTRY")
-                        .contains(request.adapterType().trim().toUpperCase())) {
+                && !List.of("AUTO", "CLAUDE_MARKETPLACE", "SKILL_REPOSITORY", "MCP_REGISTRY",
+                        "SKILLHUB_REGISTRY").contains(request.adapterType().trim()
+                                .toUpperCase())) {
             throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
-                    "adapterType must be AUTO, CLAUDE_MARKETPLACE, SKILL_REPOSITORY"
-                            + " or MCP_REGISTRY");
+                    "adapterType must be AUTO, CLAUDE_MARKETPLACE, SKILL_REPOSITORY,"
+                            + " MCP_REGISTRY or SKILLHUB_REGISTRY");
         }
         UpstreamSource source = new UpstreamSource(UuidV7.generate(), request.name(),
                 request.marketplaceUrl(), request.targetNamespace(), true, null, null, null,

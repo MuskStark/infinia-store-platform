@@ -3,6 +3,7 @@ package dev.infinia.store.app.service;
 import dev.infinia.store.app.upstream.ClaudeMarketplaceAdapter;
 import dev.infinia.store.app.upstream.McpRegistryAdapter;
 import dev.infinia.store.app.upstream.RepoFetcher;
+import dev.infinia.store.app.upstream.SkillHubAdapter;
 import dev.infinia.store.app.upstream.SkillRepositoryAdapter;
 import dev.infinia.store.app.upstream.UpstreamAdapter;
 import dev.infinia.store.app.upstream.UpstreamAdapter.NormalizedItem;
@@ -90,7 +91,8 @@ public class UpstreamSyncService {
             RepoFetcher fetcher,
             dev.infinia.store.app.upstream.UpstreamPackageBuilder packageBuilder,
             ClaudeMarketplaceAdapter claude,
-            SkillRepositoryAdapter skillRepo, McpRegistryAdapter mcpRegistry) {
+            SkillRepositoryAdapter skillRepo, McpRegistryAdapter mcpRegistry,
+            SkillHubAdapter skillhub) {
         this.upstreams = upstreams;
         this.upstreamItems = upstreamItems;
         this.upstreamReleases = upstreamReleases;
@@ -105,7 +107,7 @@ public class UpstreamSyncService {
         this.audit = audit;
         this.fetcher = fetcher;
         this.packageBuilder = packageBuilder;
-        this.adapters = List.of(claude, skillRepo, mcpRegistry);
+        this.adapters = List.of(claude, skillRepo, mcpRegistry, skillhub);
     }
 
     public record SyncResult(String upstream, int imported, int skipped, int failed,
@@ -205,6 +207,9 @@ public class UpstreamSyncService {
             return adapters.stream().filter(a -> a.type().equals(requested)).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException(
                             "Unknown adapter type " + requested));
+        }
+        if (SkillHubAdapter.matches(source.marketplaceUrl())) {
+            return adapters.get(3); // SkillHub Open API envelope (WorkBuddy skills)
         }
         try {
             var node = fetcher.fetchJson(source.marketplaceUrl());

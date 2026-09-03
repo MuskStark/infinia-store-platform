@@ -193,6 +193,160 @@ class UpstreamAdaptersConformanceTest {
                 "SSRF attempt must fail loudly: " + created);
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void skillhubRegistryAggregatesWorkBuddySkillsWithRedirectDownloadAndDriftGuard()
+            throws Exception {
+        registry = startSkillHub("""
+                {"code":0,"message":"success","data":{"total":2,"skills":[
+                  {"slug":"wb-doc-writer","source":"official","name":"Doc Writer",
+                   "description":"Writes polished documents","description_zh":"写出精致文档",
+                   "version":"1.2.0","homepage":"http://127.0.0.1:0/wb-doc-writer",
+                   "tags":["latest"],"downloads":9001},
+                  {"slug":"wb-sheet-magic","source":"community","name":"Sheet Magic",
+                   "description":"Spreadsheet automation","description_zh":"表格自动化",
+                   "version":"0.9.0","homepage":"http://127.0.0.1:0/wb-sheet-magic",
+                   "tags":["latest"],"downloads":4321}]}}
+                """);
+        int skillhubPort = registry.getAddress().getPort();
+        String admin = AuthTestSupport.login(http(), null, "admin@infinia.local",
+                dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
+        String ns = "wb-" + UUID.randomUUID().toString().substring(0, 6);
+
+        // Registered with the bare API base URL — the adapter derives /api/skills.
+        Map created = (Map) http().exchangeJson(HttpMethod.POST, "/api/v1/admin/upstreams",
+                jsonAuth(admin),
+                Map.of("name", "skillhub-" + ns, "marketplaceUrl",
+                        "http://127.0.0.1:" + skillhubPort, "targetNamespace", ns,
+                        "adapterType", "SKILLHUB_REGISTRY"),
+                Map.class).getBody();
+        assertEquals(Boolean.TRUE, created.get("lastSyncOk"), "body: " + created);
+        assertEquals(0, skillhubPayloadRequests.get(),
+                "catalog indexing must not download any skill zip");
+
+        // Both WorkBuddy skills surface on the host catalog with upstream versions;
+        // the Chinese description wins per the adapter's locale preference.
+        List<Map<String, Object>> skills = (List<Map<String, Object>>) http()
+                .getJson("/api/v1/compat/fengyu/skills-catalog", List.class, null).getBody();
+        Map<String, Object> docWriter = skills.stream()
+                .filter(s -> (ns + ".wb-doc-writer").equals(s.get("id"))).findFirst()
+                .orElseThrow(() -> new AssertionError("skill missing: " + skills));
+        assertEquals("1.2.0", docWriter.get("version"));
+        assertEquals("写出精致文档", docWriter.get("description"));
+        assertTrue(String.valueOf(docWriter.get("downloadUrl")).contains(
+                "/api/v1/blobs/upstream/"), "virtual pass-through key in URL");
+        assertEquals(2, upstreamItems.findBySource(java.util.UUID.fromString(
+                        (String) created.get("upstreamId"))).size(),
+                "provenance rows recorded for both skills");
+
+        // Re-sync is idempotent via the exact metadata digest.
+        Map second = (Map) http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/upstreams/" + created.get("upstreamId") + "/sync",
+                jsonAuth(admin), null, Map.class).getBody();
+        assertEquals(0, ((Number) second.get("imported")).intValue(), "body: " + second);
+        assertEquals(2, ((Number) second.get("skipped")).intValue());
+
+        // The payload download follows the 302 to object storage, scans, and
+        // compatibility-packs on demand without persisting anything.
+        String dl = String.valueOf(docWriter.get("downloadUrl"));
+        var dlResp = http().getBytes(dl.replaceFirst("^http://[^/]+", ""));
+        assertEquals(200, dlResp.getStatusCode().value(),
+                "body: " + new String(dlResp.getBody(), StandardCharsets.UTF_8));
+        assertEquals(1, skillhubPayloadRequests.get(),
+                "download hits the redirecting endpoint exactly once");
+        Map<String, dev.infinia.store.scanner.SafeZip.ExtractedFile> packed =
+                dev.infinia.store.scanner.SafeZip.extract(
+                        new java.io.ByteArrayInputStream(dlResp.getBody()),
+                        dev.infinia.store.scanner.SafeZip.Limits.defaults());
+        assertTrue(packed.containsKey("manifest.json"), "FengYu manifest added");
+        assertTrue(packed.containsKey("SKILL.md"), "SKILL.md retained");
+        assertTrue(packed.containsKey("scripts/helper.py"), "skill resources retained");
+
+        // Upstream drift (version bump in the catalog): download must fail 409
+        // instead of serving a payload that no longer matches the synced digest.
+        registry.stop(0);
+        registry = startSkillHub(skillhubPort, """
+                {"code":0,"message":"success","data":{"total":1,"skills":[
+                  {"slug":"wb-doc-writer","source":"official","name":"Doc Writer",
+                   "description":"Writes polished documents","description_zh":"写出精致文档",
+                   "version":"1.3.0","homepage":"http://127.0.0.1:0/wb-doc-writer",
+                   "tags":["latest"],"downloads":9001}]}}
+                """);
+        var drifted = http().get(dl.replaceFirst("^http://[^/]+", ""), null);
+        assertEquals(409, drifted.getStatusCode().value(), "body: " + drifted.getBody());
+        assertTrue(String.valueOf(drifted.getBody()).contains("upstream_drifted"),
+                drifted.getBody());
+    }
+
+    private final java.util.concurrent.atomic.AtomicInteger skillhubPayloadRequests =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** SkillHub stand-in: catalog envelope + 302 download endpoint + zipped skills. */
+    private HttpServer startSkillHub(String catalog) throws IOException {
+        return startSkillHub(0, catalog);
+    }
+
+    private HttpServer startSkillHub(int port, String catalog) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
+        byte[] catalogBody = catalog.getBytes(StandardCharsets.UTF_8);
+        server.createContext("/api/skills", exchange -> {
+            String query = exchange.getRequestURI().getQuery();
+            boolean firstPage = query == null || !query.contains("page=2");
+            byte[] body = firstPage ? catalogBody
+                    : "{\"code\":0,\"data\":{\"total\":0,\"skills\":[]}}"
+                            .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            try (InputStream ignored = exchange.getRequestBody()) {
+                exchange.getResponseBody().write(body);
+            }
+            exchange.close();
+        });
+        server.createContext("/api/v1/download", exchange -> {
+            skillhubPayloadRequests.incrementAndGet();
+            String query = exchange.getRequestURI().getQuery();
+            String slug = java.util.Arrays.stream(query.split("&"))
+                    .filter(p -> p.startsWith("slug=")).findFirst().orElse("=");
+            slug = java.net.URLDecoder.decode(slug.substring(5), StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Location", "http://127.0.0.1:"
+                    + server.getAddress().getPort() + "/storage/" + slug + ".zip");
+            try (InputStream ignored = exchange.getRequestBody()) {
+                exchange.sendResponseHeaders(302, -1);
+            }
+            exchange.close();
+        });
+        server.createContext("/storage/", exchange -> {
+            String slug = exchange.getRequestURI().getPath()
+                    .substring("/storage/".length()).replace(".zip", "");
+            byte[] zip = skillZip(slug);
+            exchange.getResponseHeaders().set("Content-Type", "application/zip");
+            exchange.sendResponseHeaders(200, zip.length);
+            try (InputStream ignored = exchange.getRequestBody()) {
+                exchange.getResponseBody().write(zip);
+            }
+            exchange.close();
+        });
+        server.start();
+        return server;
+    }
+
+    private static byte[] skillZip(String slug) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(out)) {
+            java.util.zip.ZipEntry skillMd = new java.util.zip.ZipEntry(slug + "/SKILL.md");
+            zip.putNextEntry(skillMd);
+            zip.write(("---\nname: " + slug + "\ndescription: SkillHub skill " + slug
+                    + "\n---\n# " + slug + "\nUpstream body.").getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            java.util.zip.ZipEntry helper = new java.util.zip.ZipEntry(
+                    slug + "/scripts/helper.py");
+            zip.putNextEntry(helper);
+            zip.write("print('helper')".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        return out.toByteArray();
+    }
+
     private HttpServer startRegistry(String serverJson) throws IOException {
         return startRegistry(0, serverJson);
     }

@@ -2225,7 +2225,7 @@ components:
         name: { type: string }
         marketplaceUrl: { type: string, format: uri }
         targetNamespace: { type: string }
-        adapterType: { type: string, enum: [AUTO, CLAUDE_MARKETPLACE, SKILL_REPOSITORY, MCP_REGISTRY] }
+        adapterType: { type: string, enum: [AUTO, CLAUDE_MARKETPLACE, SKILL_REPOSITORY, MCP_REGISTRY, SKILLHUB_REGISTRY] }
         enabled: { type: boolean }
         lastSyncAt: { type: string, format: date-time, nullable: true }
         lastSyncOk: { type: boolean, nullable: true }
@@ -2238,7 +2238,7 @@ components:
         name: { type: string, maxLength: 100 }
         marketplaceUrl: { type: string, format: uri }
         targetNamespace: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }
-        adapterType: { type: string, enum: [AUTO, CLAUDE_MARKETPLACE, SKILL_REPOSITORY, MCP_REGISTRY] }
+        adapterType: { type: string, enum: [AUTO, CLAUDE_MARKETPLACE, SKILL_REPOSITORY, MCP_REGISTRY, SKILLHUB_REGISTRY] }
 
     UpstreamSyncResult:
       type: object

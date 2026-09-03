@@ -149,6 +149,45 @@ public class RepoFetcher {
     }
 
     /**
+     * Downloads to a file following up to five redirects manually — registries
+     * such as SkillHub answer 302 to signed object-storage URLs. Every hop is
+     * re-validated against the SSRF guard before it is requested.
+     */
+    public void fetchFileFollowingRedirects(String url, Path target, long maxBytes)
+            throws IOException, InterruptedException {
+        String current = url;
+        for (int hop = 0; hop < 5; hop++) {
+            SourceFetchGuard.validate(current);
+            HttpResponse<InputStream> response = http.send(
+                    HttpRequest.newBuilder(URI.create(current))
+                            .timeout(Duration.ofSeconds(60))
+                            .header("User-Agent", "Infinia-Store-Download")
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() / 100 == 3) {
+                String location = response.headers().firstValue("Location").orElse(null);
+                try (InputStream ignored = response.body()) {
+                    // Closing releases the connection before the next hop.
+                }
+                if (location == null || location.isBlank()) {
+                    throw new IOException("Redirect without Location from " + current);
+                }
+                current = URI.create(current).resolve(location).toString();
+                continue;
+            }
+            if (response.statusCode() / 100 != 2) {
+                try (InputStream ignored = response.body()) {
+                }
+                throw new IOException("GET " + current + " → HTTP "
+                        + response.statusCode());
+            }
+            streamToFile(response.body(), current, target, maxBytes);
+            return;
+        }
+        throw new IOException("Too many redirects for " + url);
+    }
+
+    /**
      * Resolves the immutable commit sha for a GitHub repo (optionally at a ref).
      * A 40-hex ref is already a commit; otherwise the commits API is consulted
      * once per repo per sync.
@@ -234,30 +273,36 @@ public class RepoFetcher {
                 continue;
             }
             Files.createDirectories(target.toAbsolutePath().normalize().getParent());
-            try (InputStream in = response.body();
-                    OutputStream out = Files.newOutputStream(target,
-                            StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
-                            StandardOpenOption.WRITE)) {
-                byte[] buffer = new byte[64 * 1024];
-                long total = 0;
-                int read;
-                while ((read = in.read(buffer)) >= 0) {
-                    if (read == 0) {
-                        continue;
-                    }
-                    total += read;
-                    if (total > maxBytes) {
-                        throw new IOException("Response exceeds budget: " + total + " bytes");
-                    }
-                    out.write(buffer, 0, read);
-                }
-                return;
-            } catch (IOException e) {
-                Files.deleteIfExists(target);
-                throw e;
-            }
+            streamToFile(response.body(), url, target, maxBytes);
+            return;
         }
         throw new IOException("GET " + url + " failed");
+    }
+
+    /** Copies one open response body to {@code target} under a hard size cap. */
+    private static void streamToFile(InputStream in, String url, Path target, long maxBytes)
+            throws IOException {
+        try (InputStream body = in;
+                OutputStream out = Files.newOutputStream(target,
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
+                        StandardOpenOption.WRITE)) {
+            byte[] buffer = new byte[64 * 1024];
+            long total = 0;
+            int read;
+            while ((read = body.read(buffer)) >= 0) {
+                if (read == 0) {
+                    continue;
+                }
+                total += read;
+                if (total > maxBytes) {
+                    throw new IOException("Response exceeds budget: " + total + " bytes");
+                }
+                out.write(buffer, 0, read);
+            }
+        } catch (IOException e) {
+            Files.deleteIfExists(target);
+            throw e;
+        }
     }
 
     private static boolean isTransient(int status) {

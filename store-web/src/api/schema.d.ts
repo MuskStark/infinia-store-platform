@@ -1844,7 +1844,7 @@ export interface components {
             marketplaceUrl?: string;
             targetNamespace?: string;
             /** @enum {string} */
-            adapterType?: "AUTO" | "CLAUDE_MARKETPLACE" | "SKILL_REPOSITORY" | "MCP_REGISTRY";
+            adapterType?: "AUTO" | "CLAUDE_MARKETPLACE" | "SKILL_REPOSITORY" | "MCP_REGISTRY" | "SKILLHUB_REGISTRY";
             enabled?: boolean;
             /** Format: date-time */
             lastSyncAt?: string | null;
@@ -1857,7 +1857,7 @@ export interface components {
             marketplaceUrl: string;
             targetNamespace: string;
             /** @enum {string} */
-            adapterType?: "AUTO" | "CLAUDE_MARKETPLACE" | "SKILL_REPOSITORY" | "MCP_REGISTRY";
+            adapterType?: "AUTO" | "CLAUDE_MARKETPLACE" | "SKILL_REPOSITORY" | "MCP_REGISTRY" | "SKILLHUB_REGISTRY";
         };
         UpstreamSyncResult: {
             upstream?: string;

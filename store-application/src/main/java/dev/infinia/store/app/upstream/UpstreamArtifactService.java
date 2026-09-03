@@ -131,6 +131,13 @@ public class UpstreamArtifactService {
     private UpstreamAdapter resolve(UpstreamSource source) {
         String requested = source.adapterType() == null || source.adapterType().isBlank()
                 ? UpstreamAdapter.AUTO : source.adapterType().trim().toUpperCase();
+        if (UpstreamAdapter.AUTO.equals(requested)
+                && SkillHubAdapter.matches(source.marketplaceUrl())) {
+            // AUTO sources keep their discovery-time shape at download time.
+            return adapters.stream()
+                    .filter(a -> a.type().equals(UpstreamAdapter.SKILLHUB_REGISTRY))
+                    .findFirst().orElse(adapters.get(0));
+        }
         return adapters.stream()
                 .filter(a -> a.type().equals(requested)
                         || (UpstreamAdapter.AUTO.equals(requested)
