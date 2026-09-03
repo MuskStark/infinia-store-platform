@@ -239,6 +239,9 @@ export type AdminListing = {
   minBeeLevel: number;
   downloads: number;
 };
+export type AdminAppUploadStart = components['schemas']['AdminAppUploadStart'];
+export type AdminAppUploadSession = components['schemas']['AdminAppUploadSession'];
+export type AdminAppRelease = components['schemas']['AdminAppRelease'];
 export type RemoteDatabase = {
   databaseId: string;
   name: string;

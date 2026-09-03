@@ -33,4 +33,7 @@ public interface ReleaseRepository {
     Optional<Release> findByArtifactBlobKey(String blobKey);
 
     void save(Release release);
+
+    /** Admin manual-upload cleanup: hard-removes the release row and its artifacts. */
+    void deleteById(UUID id);
 }

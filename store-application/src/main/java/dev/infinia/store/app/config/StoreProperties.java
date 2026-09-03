@@ -16,7 +16,6 @@ public record StoreProperties(
         java.util.List<String> allowedOrigins,
         String webRedirectUri,
         java.util.List<String> desktopRedirectUris,
-        String desktopClientSecret,
         String cliClientId,
         String cliClientSecret,
         String appCoordinate,
@@ -55,8 +54,6 @@ public record StoreProperties(
                 ? java.util.List.of("http://127.0.0.1:24057/callback",
                         "http://localhost:24057/callback")
                 : desktopRedirectUris;
-        desktopClientSecret = desktopClientSecret == null || desktopClientSecret.isBlank()
-                ? "dev-only-desktop-secret" : desktopClientSecret;
         cliClientId = cliClientId == null || cliClientId.isBlank() ? "store-cli" : cliClientId;
         cliClientSecret = cliClientSecret == null || cliClientSecret.isBlank()
                 ? "dev-only-cli-secret" : cliClientSecret;

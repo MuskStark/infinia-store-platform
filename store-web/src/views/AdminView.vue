@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type AdminListing, type AdminUser, type AuditEvent, type DataSourceStatus, type RemoteDatabase, type RemoteDatabaseTestResult, type Report } from '../api/client';
+import { api, type AdminAppRelease, type AdminAppUploadSession, type AdminListing, type AdminUser, type AuditEvent, type DataSourceStatus, type RemoteDatabase, type RemoteDatabaseTestResult, type Report } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
 import { beeMark } from '../bee-levels';
@@ -17,7 +17,7 @@ import ErrorState from '../components/ErrorState.vue';
  */
 const { t } = useI18n();
 
-const tab = ref<'users' | 'databases' | 'upstreams' | 'listings' | 'reports' | 'withdraw' | 'audit'>('users');
+const tab = ref<'users' | 'databases' | 'upstreams' | 'listings' | 'reports' | 'appRelease' | 'withdraw' | 'audit'>('users');
 
 // ---- remote databases (远程数据库配置) ----
 const databases = ref<RemoteDatabase[]>([]);
@@ -324,6 +324,7 @@ onMounted(() => {
   void loadDatabases();
   void loadListings();
   void loadUpstreams();
+  void loadAppReleases();
 });
 
 async function resolve(report: Report, resolution: 'ACTIONED' | 'DISMISSED') {
@@ -339,6 +340,94 @@ async function withdraw(kind: 'yank' | 'quarantine') {
   await api.post(`/api/v1/admin/releases/${releaseId.value}/${kind}`, { reason: reason.value });
   reason.value = '';
 }
+
+// ---- manual host-app update upload (手动上传主程序更新包) ----
+const appReleases = ref<AdminAppRelease[]>([]);
+const appFileInput = ref<HTMLInputElement | null>(null);
+const appFile = ref<File | null>(null);
+const appChangelog = ref('');
+const appUploading = ref(false);
+const appMessage = ref('');
+const appError = ref<string | null>(null);
+
+/**
+ * Mirrors the server's inference (AdminAppReleaseController): the filename is
+ * the single source of truth — version + channel are read straight from it, so
+ * the admin only picks a file.
+ */
+const appDetected = computed(() => {
+  if (!appFile.value) return null;
+  const m = appFile.value.name.match(/(\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|nightly)(?:\.\d+)*)?)/);
+  if (!m) return null;
+  const lower = m[1].toLowerCase();
+  const dash = lower.indexOf('-');
+  const label = dash < 0 ? '' : lower.slice(dash + 1);
+  const channel = label.startsWith('alpha') ? 'alpha'
+    : label.startsWith('nightly') ? 'nightly'
+    : label.startsWith('beta') || label.startsWith('rc') ? 'beta'
+    : 'stable';
+  return { version: m[1], channel };
+});
+
+function onAppFileChange() {
+  appFile.value = appFileInput.value?.files?.[0] ?? null;
+  appError.value = null;
+  if (appFile.value && !appDetected.value) {
+    appError.value = t('admin.appVersionNotDetected');
+  }
+}
+
+async function loadAppReleases() {
+  try {
+    appReleases.value = await api.get<AdminAppRelease[]>('/api/v1/admin/app-releases');
+  } catch {
+    appReleases.value = [];
+  }
+}
+
+/**
+ * Intranet manual update (the store replaces the FY-Proxy distribution center):
+ * start (version/channel inferred from the filename server-side) → presigned
+ * PUT of the package bytes → publish immediately.
+ */
+async function uploadAppPackage() {
+  const file = appFile.value;
+  if (!file) return;
+  appUploading.value = true;
+  appMessage.value = '';
+  appError.value = null;
+  try {
+    const session = await api.post<AdminAppUploadSession>('/api/v1/admin/app-releases', {
+      changelog: appChangelog.value || undefined,
+      filename: file.name,
+      size: file.size,
+    });
+    await api.putRaw(session.uploadUrl, await file.arrayBuffer());
+    appMessage.value = t('admin.appUploaded');
+    const published = await api.post<AdminAppRelease>(
+      `/api/v1/admin/app-releases/${session.releaseId}/publish`);
+    appMessage.value = t('admin.appPublished', { version: published.version });
+    appChangelog.value = '';
+    appFile.value = null;
+    if (appFileInput.value) appFileInput.value.value = '';
+    await loadAppReleases();
+  } catch (e) {
+    appError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    appUploading.value = false;
+  }
+}
+
+async function deleteAppRelease(rel: AdminAppRelease) {
+  if (!window.confirm(t('admin.appDeleteConfirm', { version: rel.version }))) return;
+  appError.value = null;
+  try {
+    await api.delete(`/api/v1/admin/app-releases/${rel.releaseId}`);
+    await loadAppReleases();
+  } catch (e) {
+    appError.value = e instanceof Error ? e.message : String(e);
+  }
+}
 </script>
 
 <template>
@@ -350,7 +439,7 @@ async function withdraw(kind: 'yank' | 'quarantine') {
     <template v-else>
       <nav class="flex flex-wrap gap-1 border-b border-line dark:border-slate-800" role="tablist">
         <button
-          v-for="key in ['users', 'databases', 'upstreams', 'listings', 'reports', 'withdraw', 'audit'] as const"
+          v-for="key in ['users', 'databases', 'upstreams', 'listings', 'reports', 'appRelease', 'withdraw', 'audit'] as const"
           :key="key"
           role="tab"
           :aria-selected="tab === key"
@@ -838,6 +927,84 @@ async function withdraw(kind: 'yank' | 'quarantine') {
             </div>
           </div>
         </MagicCard>
+      </section>
+
+      <section v-if="tab === 'appRelease'" class="space-y-4">
+        <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.appReleaseHint') }}</p>
+        <MagicCard class="p-6">
+          <h3 class="mb-3 font-semibold">{{ t('admin.appReleaseUpload') }}</h3>
+          <form class="flex flex-col gap-3" @submit.prevent="uploadAppPackage">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <!-- Visible picker button: the bare file input renders without a
+                   clickable button in several browsers. -->
+              <input
+                ref="appFileInput"
+                type="file"
+                accept=".zip,.exe,.msi,.dmg,.pkg,.deb,.AppImage,.jar,.tar.gz"
+                class="hidden"
+                @change="onAppFileChange"
+              />
+              <button
+                type="button"
+                class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
+                @click="appFileInput?.click()"
+              >
+                {{ t('admin.appChooseFile') }}
+              </button>
+              <span class="min-w-0 flex-1 truncate text-sm" :class="appFile ? '' : 'text-muted dark:text-slate-400'">
+                {{ appFile ? appFile.name : t('admin.appNoFile') }}
+              </span>
+              <span v-if="appDetected" class="shrink-0">
+                <Badge tone="accent">v{{ appDetected.version }}</Badge>
+                <Badge tone="muted" class="ml-1">{{ appDetected.channel }}</Badge>
+              </span>
+            </div>
+            <label class="block w-full text-sm">
+              {{ t('admin.appChangelog') }}
+              <textarea
+                v-model="appChangelog"
+                rows="2"
+                class="mt-1 w-full rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+              />
+            </label>
+            <button
+              :disabled="appUploading || !appFile || !appDetected"
+              class="self-start whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {{ appUploading ? t('admin.appUploading') : t('admin.appUploadAndPublish') }}
+            </button>
+          </form>
+          <p v-if="appMessage" class="mt-2 text-sm text-green-600 dark:text-green-400">{{ appMessage }}</p>
+          <p v-if="appError" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ appError }}</p>
+        </MagicCard>
+
+        <h3 class="font-semibold">{{ t('admin.appReleaseHistory') }}</h3>
+        <EmptyState v-if="!appReleases.length" :title="t('admin.appReleaseEmpty')" />
+        <ul v-else class="space-y-1 text-sm">
+          <li
+            v-for="rel in appReleases"
+            :key="rel.releaseId"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 dark:border-slate-800"
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-semibold">v{{ rel.version }}</span>
+              <Badge tone="muted">{{ rel.channel }}</Badge>
+              <Badge tone="accent">{{ rel.status }}</Badge>
+              <span class="text-xs text-muted">
+                {{ (rel.artifacts ?? []).map((a) => a.filename).join(', ') }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-muted">{{ rel.publishedAt ?? rel.releaseId }}</span>
+              <button
+                class="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-red-600 dark:border-slate-800 dark:text-red-400"
+                @click="deleteAppRelease(rel)"
+              >
+                {{ t('admin.appDelete') }}
+              </button>
+            </div>
+          </li>
+        </ul>
       </section>
 
       <section v-if="tab === 'withdraw'" class="space-y-4">

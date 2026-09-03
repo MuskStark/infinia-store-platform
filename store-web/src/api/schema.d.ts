@@ -699,6 +699,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/app-releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The conventional host listing's releases, newest first — PLATFORM_ADMIN
+         * @description Manual-update bookkeeping for the intranet admin console (the store
+         *     replaces the FY-Proxy distribution center).
+         */
+        get: operations["listAdminAppReleases"];
+        put?: never;
+        /**
+         * Start a manual host-app update upload — PLATFORM_ADMIN
+         * @description Ensures the conventional APP listing (store.app-coordinate), drafts the
+         *     release and returns the presigned PUT URL for the package bytes (same
+         *     ticketed pipeline as the publisher portal). Version and channel are
+         *     inferred from the package filename when omitted.
+         */
+        post: operations["startAdminAppUpload"];
+        /**
+         * Delete a manually uploaded release — PLATFORM_ADMIN
+         * @description Hard-removes the release row (any status; removal supersedes a yank).
+         *     The app update feed and the compat mirror stop serving it immediately.
+         */
+        delete: operations["deleteAdminAppRelease"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/app-releases/{releaseId}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish a manually uploaded release immediately — PLATFORM_ADMIN
+         * @description The platform admin is the review decision: the envelope and every
+         *     artifact are platform-signed like an approval, with a distinct audit
+         *     trail (release.admin-publish).
+         */
+        post: operations["publishAdminAppUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/app-releases/{releaseId}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete alias (POST form) — PLATFORM_ADMIN
+         * @deprecated
+         */
+        post: operations["deleteAdminAppUploadViaPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/listings": {
         parameters: {
             query?: never;
@@ -1708,6 +1783,59 @@ export interface components {
             minBeeLevel?: number;
             /** Format: int64 */
             downloads?: number;
+        };
+        AdminAppUploadStart: {
+            /** @description SemVer of the update package — inferred from the filename when omitted */
+            version?: string;
+            /**
+             * @description Inferred from the version's pre-release suffix when omitted
+             * @enum {string}
+             */
+            channel?: "stable" | "beta" | "alpha" | "nightly";
+            /** @description Optional release notes */
+            changelog?: string;
+            /** @description Package filename — version/channel/kind/platform/arch/variant are inferred from it */
+            filename: string;
+            /**
+             * Format: int64
+             * @description Declared byte size
+             */
+            size?: number;
+        };
+        AdminAppUploadSession: {
+            listingId?: string;
+            releaseId: string;
+            /** @description The (possibly inferred) release version */
+            version: string;
+            /** @description The (possibly inferred) release channel */
+            channel?: string;
+            /** @description Server-relative presigned PUT URL */
+            uploadUrl: string;
+            /** @enum {string} */
+            method: "PUT";
+            kind?: string;
+            platform?: string;
+            arch?: string;
+            variant?: string;
+            expiresAt?: string;
+        };
+        AdminAppArtifact: {
+            filename?: string;
+            kind?: string;
+            platform?: string;
+            arch?: string;
+            variant?: string;
+            /** Format: int64 */
+            size?: number;
+            sha256?: string;
+        };
+        AdminAppRelease: {
+            releaseId?: string;
+            version?: string;
+            channel?: string;
+            status?: string;
+            publishedAt?: string | null;
+            artifacts?: components["schemas"]["AdminAppArtifact"][];
         };
         Upstream: {
             upstreamId?: string;
@@ -2910,6 +3038,119 @@ export interface operations {
         responses: {
             /** @description Quarantined */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listAdminAppReleases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Releases (drafts included); empty when nothing was uploaded yet */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAppRelease"][];
+                };
+            };
+        };
+    };
+    startAdminAppUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminAppUploadStart"];
+            };
+        };
+        responses: {
+            /** @description Upload session created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAppUploadSession"];
+                };
+            };
+        };
+    };
+    deleteAdminAppRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown release */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    publishAdminAppUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published release */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAppRelease"];
+                };
+            };
+        };
+    };
+    deleteAdminAppUploadViaPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };

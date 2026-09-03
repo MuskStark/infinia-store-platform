@@ -187,7 +187,20 @@ public class PublisherService {
     @Transactional
     public Release createDraftRelease(UUID publisherUserId, Listing listing,
             PublisherDtos.CreateReleaseRequest request) {
-        requireListingOwnerByListingId(publisherUserId, listing.id);
+        return createDraftRelease(publisherUserId, false, listing, request);
+    }
+
+    /**
+     * Platform admins curate the whole catalog and may draft releases on listings
+     * they do not own (design §7.4) — the intranet admin manual-upload flow needs
+     * this for the conventional host listing owned by the CI account.
+     */
+    @Transactional
+    public Release createDraftRelease(UUID publisherUserId, boolean platformAdmin,
+            Listing listing, PublisherDtos.CreateReleaseRequest request) {
+        if (!platformAdmin) {
+            requireListingOwnerByListingId(publisherUserId, listing.id);
+        }
         SemVer version;
         try {
             version = SemVer.parse(request.version());
@@ -270,7 +283,17 @@ public class PublisherService {
     public UploadSessionInfo createUploadSession(UUID publisherUserId, Release release,
             String filename, ArtifactKind kind, Platform platform, Arch arch, String variant,
             long declaredSize) {
-        requireListingOwner(publisherUserId, release);
+        return createUploadSession(publisherUserId, false, release, filename, kind, platform,
+                arch, variant, declaredSize);
+    }
+
+    /** Admin variant: skips the listing-ownership check (see createDraftRelease). */
+    public UploadSessionInfo createUploadSession(UUID publisherUserId, boolean platformAdmin,
+            Release release, String filename, ArtifactKind kind, Platform platform, Arch arch,
+            String variant, long declaredSize) {
+        if (!platformAdmin) {
+            requireListingOwner(publisherUserId, release);
+        }
         if (filename == null || filename.isBlank()) {
             throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
                     "filename is required");

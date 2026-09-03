@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### fengyu-desktop is now a public OAuth client (PKCE only)
+
+- The desktop host client registration drops its client secret
+  (`STORE_DESKTOP_CLIENT_SECRET` is gone from `store.*` properties): a secret baked into the
+  distributed FengYu build is public knowledge, not a credential (RFC 8252 §8.5). Sign-in is
+  the standard authorization-code + PKCE loopback flow with no shared secret; FengYu
+  deployments that still pair with a confidential registration keep working via
+  `FENGYU_STORE_CLIENT_SECRET` on the host side.
+- Consequences of the SAS 7 public-client gates (verified by `AuthAndAccountFlowTest` and a
+  live two-process run): the refresh-token grant is never issued
+  (`OAuth2RefreshTokenGenerator` hard-gates public clients), so the 30-minute access token
+  expires into a browser re-login / anonymous degradation, and the `/oauth2/revoke`
+  endpoint rejects public clients (401 — it authenticates via `code_verifier`, which a
+  revocation request cannot carry). Host sign-out stays local-first: the binding and OS
+  keychain entry are removed client-side, and server-side tokens expire naturally. Long-lived
+  sessions remain a store-side mechanism (per-install credentials or a BFF), not a shipped
+  secret.
+
+### Admin manual upload of host-app update packages (the store replaces the FY-Proxy distribution center)
+
+- New PLATFORM_ADMIN surface `/api/v1/admin/app-releases`: `POST` starts a manual upload
+  (ensures the conventional `store.app-coordinate` listing — reserving its namespace on first
+  use — drafts the release and returns the same presigned PUT URL the publisher pipeline uses),
+  `DELETE /{releaseId}` hard-removes a release of any status (the app update feed and the
+  FengYu compat mirror stop serving it immediately), and `GET` lists the uploads for the
+  console. `POST /{releaseId}/publish` publishes instantly — the platform admin is the review
+  decision, with envelope + artifact platform signing and a distinct `release.admin-publish`
+  audit event.
+- Version and channel are inferred from the package filename when omitted
+  (`Infinia-<semver>-win32-x64-portable.zip`; a pre-release suffix names the channel, e.g.
+  `-beta.1` → beta). `PublisherService.createDraftRelease`/`createUploadSession` gained a
+  `platformAdmin` bypass so admins can operate the CI-owned host listing.
+- Admin console gains an **Update packages** tab: visible file picker (version/channel read
+  from the filename and shown as badges before upload), upload-and-publish in one click, and
+  per-release delete with confirmation. zh-CN/en copy included.
+- `AppReleaseFlowTest` covers the full loop: 403 for non-admins, filename inference, instant
+  publish, mirror serving with mandatory sha256 digest, and deletion.
+
 ## 0.1.0 (2026-08-26)
 
 Initial implementation of the Infinia Store Platform (design §1–§17, Phase 1–3 scope).

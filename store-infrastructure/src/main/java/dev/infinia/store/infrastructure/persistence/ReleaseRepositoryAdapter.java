@@ -115,6 +115,12 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
         jpa.save(entity);
     }
 
+    @Override
+    @Transactional
+    public void deleteById(UUID id) {
+        jpa.deleteById(id);
+    }
+
     private static List<Release> sortedByVersionDesc(List<ReleaseEntity> entities) {
         List<Release> result = new ArrayList<>();
         for (ReleaseEntity e : entities) {

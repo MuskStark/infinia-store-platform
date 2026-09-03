@@ -91,23 +91,35 @@ class AuthAndAccountFlowTest {
     }
 
     @Test
-    void fengYuDesktopPkceGrantCanRefreshAndCallMe() {
+    void fengYuDesktopPublicPkceGrantCallsMeButGetsNoRefreshToken() {
         AuthTestSupport.OAuthGrant grant = AuthTestSupport.desktopLogin(http(),
                 "user@infinia.local", dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
-        assertNotNull(grant.refreshToken(),
-                "desktop authorization with offline_access must issue a refresh token");
+        // SAS 7 hard-gates refresh tokens away from public clients
+        // (OAuth2RefreshTokenGenerator.isPublicClientForAuthorizationCodeGrant): the
+        // desktop client signs in with PKCE only and re-authenticates in the browser
+        // when the 30-minute access token expires. Long-lived sessions are the
+        // store-side per-install credential / BFF mechanism, not a shipped secret.
+        assertNull(grant.refreshToken(),
+                "a public client must not receive a refresh token");
 
         ResponseEntity<Map> me = http().getJson("/api/v1/me", Map.class,
                 Http.bearer(grant.accessToken()));
         assertEquals(200, me.getStatusCode().value());
         assertEquals("user@infinia.local", me.getBody().get("email"));
+    }
 
-        AuthTestSupport.OAuthGrant refreshed = AuthTestSupport.refreshDesktop(http(),
-                grant.refreshToken());
-        ResponseEntity<Map> refreshedMe = http().getJson("/api/v1/me", Map.class,
-                Http.bearer(refreshed.accessToken()));
-        assertEquals(200, refreshedMe.getStatusCode().value());
-        assertEquals(me.getBody().get("userId"), refreshedMe.getBody().get("userId"));
+    @Test
+    void fengYuDesktopRefreshGrantIsRejectedWithoutSecret() {
+        AuthTestSupport.OAuthGrant grant = AuthTestSupport.desktopLogin(http(),
+                "user@infinia.local", dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
+
+        java.util.Map<String, String> form = new java.util.LinkedHashMap<>();
+        form.put("grant_type", "refresh_token");
+        form.put("refresh_token", java.util.UUID.randomUUID().toString());
+        form.put("client_id", "fengyu-desktop");
+        ResponseEntity<String> token = http().postForm("/oauth2/token", form, null);
+        assertTrue(!token.getStatusCode().is2xxSuccessful(),
+                "the refresh grant must not succeed for the public desktop client");
     }
 
     @Test

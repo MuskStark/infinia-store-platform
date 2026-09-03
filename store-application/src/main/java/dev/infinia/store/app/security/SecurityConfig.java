@@ -172,16 +172,15 @@ public class SecurityConfig {
                 .build();
 
         // FengYu desktop host: authorization code + PKCE via system browser with a
-        // loopback redirect (RFC 8252). Confidential (client_secret_post) because
-        // Spring Authorization Server 7 does not authenticate public clients on the
-        // refresh-token grant — long-lived desktop sessions need refresh tokens
-        // (design §7.2). PKCE stays required on top of the shared secret.
+        // loopback redirect (RFC 8252). Public (no shared secret): a secret baked
+        // into the distributed desktop build is public knowledge, not a credential
+        // (RFC 8252 §8.5). PKCE stays mandatory — the refresh-token grant remains
+        // registered for the public client because the original code grant always
+        // carries a PKCE verifier (design §7.2).
         RegisteredClient.Builder desktop = RegisteredClient.withId(UUID.randomUUID().toString())
                 .clientId("fengyu-desktop")
-                .clientSecret("{bcrypt}" + new BCryptPasswordEncoder()
-                        .encode(properties.desktopClientSecret()))
                 .clientAuthenticationMethod(
-                        org.springframework.security.oauth2.core.ClientAuthenticationMethod.CLIENT_SECRET_POST)
+                        org.springframework.security.oauth2.core.ClientAuthenticationMethod.NONE)
                 .authorizationGrantType(
                         org.springframework.security.oauth2.core.AuthorizationGrantType.AUTHORIZATION_CODE)
                 .authorizationGrantType(

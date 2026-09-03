@@ -872,6 +872,94 @@ paths:
       responses:
         '200': { description: Quarantined }
 
+  /admin/app-releases:
+    get:
+      operationId: listAdminAppReleases
+      tags: [Admin]
+      summary: The conventional host listing's releases, newest first — PLATFORM_ADMIN
+      description: |
+        Manual-update bookkeeping for the intranet admin console (the store
+        replaces the FY-Proxy distribution center).
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Releases (drafts included); empty when nothing was uploaded yet
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminAppRelease' }
+    post:
+      operationId: startAdminAppUpload
+      tags: [Admin]
+      summary: Start a manual host-app update upload — PLATFORM_ADMIN
+      description: |
+        Ensures the conventional APP listing (store.app-coordinate), drafts the
+        release and returns the presigned PUT URL for the package bytes (same
+        ticketed pipeline as the publisher portal). Version and channel are
+        inferred from the package filename when omitted.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminAppUploadStart' }
+      responses:
+        '201':
+          description: Upload session created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminAppUploadSession' }
+    delete:
+      operationId: deleteAdminAppRelease
+      tags: [Admin]
+      summary: Delete a manually uploaded release — PLATFORM_ADMIN
+      description: |
+        Hard-removes the release row (any status; removal supersedes a yank).
+        The app update feed and the compat mirror stop serving it immediately.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '404': { description: Unknown release }
+
+  /admin/app-releases/{releaseId}/publish:
+    post:
+      operationId: publishAdminAppUpload
+      tags: [Admin]
+      summary: Publish a manually uploaded release immediately — PLATFORM_ADMIN
+      description: |
+        The platform admin is the review decision: the envelope and every
+        artifact are platform-signed like an approval, with a distinct audit
+        trail (release.admin-publish).
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Published release
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminAppRelease' }
+
+  /admin/app-releases/{releaseId}/delete:
+    post:
+      operationId: deleteAdminAppUploadViaPost
+      tags: [Admin]
+      summary: Delete alias (POST form) — PLATFORM_ADMIN
+      deprecated: true
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+
   /admin/listings:
     get:
       operationId: listAllListings
@@ -2080,6 +2168,55 @@ components:
         featured: { type: boolean }
         minBeeLevel: { type: integer, minimum: 0, maximum: 4 }
         downloads: { type: integer, format: int64 }
+
+    AdminAppUploadStart:
+      type: object
+      required: [filename]
+      properties:
+        version: { type: string, description: SemVer of the update package — inferred from the filename when omitted }
+        channel: { type: string, enum: [stable, beta, alpha, nightly], description: Inferred from the version's pre-release suffix when omitted }
+        changelog: { type: string, description: Optional release notes }
+        filename: { type: string, description: Package filename — version/channel/kind/platform/arch/variant are inferred from it }
+        size: { type: integer, format: int64, description: Declared byte size }
+
+    AdminAppUploadSession:
+      type: object
+      required: [releaseId, version, uploadUrl, method]
+      properties:
+        listingId: { type: string }
+        releaseId: { type: string }
+        version: { type: string, description: The (possibly inferred) release version }
+        channel: { type: string, description: The (possibly inferred) release channel }
+        uploadUrl: { type: string, description: Server-relative presigned PUT URL }
+        method: { type: string, enum: [PUT] }
+        kind: { type: string }
+        platform: { type: string }
+        arch: { type: string }
+        variant: { type: string }
+        expiresAt: { type: string }
+
+    AdminAppArtifact:
+      type: object
+      properties:
+        filename: { type: string }
+        kind: { type: string }
+        platform: { type: string }
+        arch: { type: string }
+        variant: { type: string }
+        size: { type: integer, format: int64 }
+        sha256: { type: string }
+
+    AdminAppRelease:
+      type: object
+      properties:
+        releaseId: { type: string }
+        version: { type: string }
+        channel: { type: string }
+        status: { type: string }
+        publishedAt: { type: string, nullable: true }
+        artifacts:
+          type: array
+          items: { $ref: '#/components/schemas/AdminAppArtifact' }
 
     Upstream:
       type: object

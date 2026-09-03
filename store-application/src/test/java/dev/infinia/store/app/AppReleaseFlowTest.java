@@ -331,4 +331,161 @@ class AppReleaseFlowTest {
         }
         fail("release never reached " + expected);
     }
+
+    /**
+     * Intranet admin manual upload (the store replaces the FY-Proxy distribution
+     * center): the platform admin starts an upload on the seeded CI-owned host
+     * listing (ownership bypass), PUTs the package through the ticketed
+     * pipeline, publishes instantly without a review round-trip, and the compat
+     * mirror immediately serves the release to the desktop updater.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void adminManualUploadPublishesInstantlyAndFeedsTheCompatMirror() throws Exception {
+        String adminToken = AuthTestSupport.login(http(), null, "admin@infinia.local",
+                dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
+        String userToken = AuthTestSupport.login(http(), null, "user@infinia.local",
+                dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
+
+        byte[] zip = "admin-manual-upload-portable-zip".getBytes(StandardCharsets.UTF_8);
+        Map<String, Object> startBody = Map.of("version", "9.9.9", "channel", "stable",
+                "filename", "Infinia-9.9.9-win32-x64-portable.zip", "size", zip.length);
+
+        // A plain user must not reach the admin surface.
+        assertEquals(403, http().exchangeJson(HttpMethod.POST, "/api/v1/admin/app-releases",
+                jsonAuth(userToken), startBody, Map.class).getStatusCode().value());
+
+        ResponseEntity<Map> start = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/app-releases", jsonAuth(adminToken), startBody, Map.class);
+        assertEquals(201, start.getStatusCode().value());
+        Map<String, Object> started = start.getBody();
+        assertEquals("PORTABLE", started.get("kind"));
+        assertEquals("windows", started.get("platform"));
+        String releaseId = (String) started.get("releaseId");
+
+        // Anonymous ticketed PUT carries the package bytes.
+        HttpHeaders putHeaders = new HttpHeaders();
+        putHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        assertEquals(204, http().exchange(HttpMethod.PUT, (String) started.get("uploadUrl"),
+                putHeaders, zip).getStatusCode().value());
+
+        // Publish immediately — the platform admin is the review decision.
+        ResponseEntity<Map> published = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/app-releases/" + releaseId + "/publish", jsonAuth(adminToken),
+                null, Map.class);
+        assertEquals(200, published.getStatusCode().value());
+        assertEquals("PUBLISHED", published.getBody().get("status"));
+        List<Map<String, Object>> artifacts = (List<Map<String, Object>>) published.getBody()
+                .get("artifacts");
+        assertEquals(1, artifacts.size());
+        assertTrue(((String) artifacts.get(0).get("sha256")).matches("[0-9a-f]{64}"));
+
+        // The compat mirror immediately serves it to the FengYu desktop updater.
+        ResponseEntity<Map> mirror = http().getJson(
+                "/api/v1/compat/fengyu/fengyu-releases/api/releases/latest"
+                        + "?channel=windows-portable", Map.class, null);
+        assertEquals(200, mirror.getStatusCode().value());
+        assertEquals("v9.9.9", mirror.getBody().get("tag_name"));
+        Map<String, Object> asset = ((List<Map<String, Object>>) mirror.getBody().get("assets"))
+                .get(0);
+        assertEquals("Infinia-9.9.9-win32-x64-portable.zip", asset.get("name"));
+        assertTrue(((String) asset.get("digest")).matches("sha256:[0-9a-f]{64}"),
+                "mandatory digest for the updater");
+        // The mirrored ticketed URL actually serves the uploaded bytes (the
+        // absolute origin carries the configured base-url, so rebase on the
+        // test server before fetching).
+        String downloadUrl = (String) asset.get("browser_download_url");
+        ResponseEntity<byte[]> served = http().getBytes(
+                downloadUrl.substring(downloadUrl.indexOf("/api/v1/blobs/")));
+        assertEquals(200, served.getStatusCode().value());
+        assertArrayEquals(zip, served.getBody());
+
+        // Restore the seeded catalog state for the other tests in this class
+        // (they assert the seeded 4.1.0 matrix is the latest stable release).
+        assertEquals(200, http().exchange(HttpMethod.POST,
+                "/api/v1/admin/releases/" + releaseId + "/yank", jsonAuth(adminToken),
+                Map.of("reason", "test cleanup")).getStatusCode().value());
+    }
+
+    /**
+     * The package filename is the single source of truth: version and channel
+     * are inferred when omitted ({@code -beta.1} → the beta channel), a
+     * pre-release never shadows the stable line in the desktop mirror, and
+     * deleting a published manual release removes it from the mirror instantly.
+     * Self-contained: the stable release it publishes is deleted again at the
+     * end, and the leftover beta draft is deleted too.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void adminUploadInfersVersionAndChannelAndDeleteRemovesFromTheMirror() {
+        String adminToken = AuthTestSupport.login(http(), null, "admin@infinia.local",
+                dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
+
+        // No version/channel passed — both come from the filename.
+        byte[] zip = "beta-zip-bytes".getBytes(StandardCharsets.UTF_8);
+        ResponseEntity<Map> start = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/app-releases", jsonAuth(adminToken),
+                Map.of("filename", "Infinia-6.0.0-beta.1-win32-x64-portable.zip",
+                        "size", zip.length),
+                Map.class);
+        assertEquals(201, start.getStatusCode().value());
+        assertEquals("6.0.0-beta.1", start.getBody().get("version"));
+        assertEquals("beta", start.getBody().get("channel"));
+        String betaReleaseId = (String) start.getBody().get("releaseId");
+
+        HttpHeaders putHeaders = new HttpHeaders();
+        putHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        assertEquals(204, http().exchange(HttpMethod.PUT, (String) start.getBody().get("uploadUrl"),
+                putHeaders, zip).getStatusCode().value());
+        assertEquals(200, http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/app-releases/" + betaReleaseId + "/publish", jsonAuth(adminToken),
+                null, Map.class).getStatusCode().value());
+
+        // A pre-release never shadows the stable line in the desktop mirror.
+        ResponseEntity<Map> mirror = http().getJson(
+                "/api/v1/compat/fengyu/fengyu-releases/api/releases/latest"
+                        + "?channel=windows-portable", Map.class, null);
+        assertNotEquals("v6.0.0-beta.1", mirror.getBody().get("tag_name"));
+
+        // Deleting works on any status, 404s afterwards, and the release is gone
+        // from the admin list.
+        assertEquals(204, http().exchange(HttpMethod.DELETE,
+                "/api/v1/admin/app-releases/" + betaReleaseId, jsonAuth(adminToken),
+                null).getStatusCode().value());
+        assertEquals(404, http().exchange(HttpMethod.DELETE,
+                "/api/v1/admin/app-releases/" + betaReleaseId, jsonAuth(adminToken),
+                null).getStatusCode().value());
+        List<Map<String, Object>> listed = http().getJson("/api/v1/admin/app-releases",
+                List.class, Http.bearer(adminToken)).getBody();
+        assertTrue(listed.stream().noneMatch(r -> betaReleaseId.equals(r.get("releaseId"))));
+
+        // The same flow with an inferred STABLE version: it becomes the mirror's
+        // latest, and DELETE removes it from the feed immediately.
+        byte[] stable = "stable-zip-bytes".getBytes(StandardCharsets.UTF_8);
+        ResponseEntity<Map> stableStart = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/app-releases", jsonAuth(adminToken),
+                Map.of("filename", "Infinia-6.0.0-win32-x64-portable.zip", "size", stable.length),
+                Map.class);
+        assertEquals(201, stableStart.getStatusCode().value());
+        assertEquals("6.0.0", stableStart.getBody().get("version"));
+        assertEquals("stable", stableStart.getBody().get("channel"));
+        String stableId = (String) stableStart.getBody().get("releaseId");
+        assertEquals(204, http().exchange(HttpMethod.PUT,
+                (String) stableStart.getBody().get("uploadUrl"), putHeaders,
+                stable).getStatusCode().value());
+        assertEquals(200, http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/app-releases/" + stableId + "/publish", jsonAuth(adminToken),
+                null, Map.class).getStatusCode().value());
+        mirror = http().getJson("/api/v1/compat/fengyu/fengyu-releases/api/releases/latest"
+                + "?channel=windows-portable", Map.class, null);
+        assertEquals("v6.0.0", mirror.getBody().get("tag_name"));
+
+        assertEquals(204, http().exchange(HttpMethod.DELETE,
+                "/api/v1/admin/app-releases/" + stableId, jsonAuth(adminToken),
+                null).getStatusCode().value());
+        mirror = http().getJson("/api/v1/compat/fengyu/fengyu-releases/api/releases/latest"
+                + "?channel=windows-portable", Map.class, null);
+        assertNotEquals("v6.0.0", mirror.getBody().get("tag_name"),
+                "the deleted release leaves the mirror immediately");
+    }
 }

@@ -33,22 +33,8 @@ public final class AuthTestSupport {
 
     public static OAuthGrant desktopLogin(Http rest, String email, String password) {
         return loginGrant(rest, email, password, "fengyu-desktop",
-                "dev-only-desktop-secret", "http://127.0.0.1:24057/callback",
+                null, "http://127.0.0.1:24057/callback",
                 "openid profile offline_access");
-    }
-
-    public static OAuthGrant refreshDesktop(Http rest, String refreshToken) {
-        java.util.Map<String, String> form = new java.util.LinkedHashMap<>();
-        form.put("grant_type", "refresh_token");
-        form.put("refresh_token", refreshToken);
-        form.put("client_id", "fengyu-desktop");
-        form.put("client_secret", "dev-only-desktop-secret");
-        ResponseEntity<String> token = rest.postForm("/oauth2/token", form, null);
-        if (!token.getStatusCode().is2xxSuccessful()) {
-            throw new IllegalStateException("Refresh failed: " + token.getStatusCode()
-                    + " " + token.getBody());
-        }
-        return tokenGrant(token.getBody());
     }
 
     private static OAuthGrant loginGrant(Http rest, String email, String password,
@@ -116,8 +102,8 @@ public final class AuthTestSupport {
                     + " (login status " + login.getStatusCode() + ")");
         }
 
-        // Token exchange with PKCE verifier; desktop additionally authenticates
-        // as the confidential host client so the refresh grant can be used.
+        // Token exchange with PKCE verifier; fengyu-desktop is a public client —
+        // no secret, PKCE alone authorizes the code exchange (RFC 8252).
         java.util.Map<String, String> tokenForm = new java.util.LinkedHashMap<>();
         tokenForm.put("grant_type", "authorization_code");
         tokenForm.put("code", code);

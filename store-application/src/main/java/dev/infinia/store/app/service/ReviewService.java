@@ -178,6 +178,50 @@ public class ReviewService {
         release.status = ReleaseStatus.PUBLISHED;
         release.publishedAt = Instant.now();
         releases.save(release);
+        signArtifactsAndEmitPublished(listing, release);
+        audit.record("USER", adminUserId.toString(), "release.force-publish", "RELEASE",
+                release.id.toString(), "REJECTED", "PUBLISHED: " + reason, null);
+        return release;
+    }
+
+    /**
+     * Admin manual upload for intranet deployments (the store replaces the FY-Proxy
+     * distribution center): publishes a freshly uploaded release directly — the
+     * platform admin IS the review decision — signing the envelope and every
+     * artifact exactly like an approval. Audited distinctly so the exception
+     * trail stays visible.
+     */
+    @Transactional
+    public Release publishAdminUpload(UUID adminUserId, Release release) {
+        if (release.status == ReleaseStatus.PUBLISHED) {
+            return release; // idempotent
+        }
+        if (release.status != ReleaseStatus.DRAFT && release.status != ReleaseStatus.UPLOADING) {
+            throw new DomainException(StoreErrorCode.INVALID_STATE_TRANSITION,
+                    "Only freshly uploaded releases can be admin-published (current: "
+                            + release.status + ")");
+        }
+        boolean installable = release.artifacts.stream().anyMatch(a ->
+                a.kind() == dev.infinia.store.contract.type.ArtifactKind.INSTALLER
+                        || a.kind() == dev.infinia.store.contract.type.ArtifactKind.PORTABLE);
+        if (!installable) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "An app release needs at least one INSTALLER or PORTABLE artifact");
+        }
+        Listing listing = listings.findById(release.listingId)
+                .orElseThrow(() -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND,
+                        "Listing not found"));
+        release.status = ReleaseStatus.PUBLISHED;
+        release.publishedAt = Instant.now();
+        releases.save(release);
+        signArtifactsAndEmitPublished(listing, release);
+        audit.record("USER", adminUserId.toString(), "release.admin-publish", "RELEASE",
+                release.id.toString(), release.status.name(), "intranet manual upload", null);
+        return release;
+    }
+
+    /** Platform-signs the envelope + unsigned artifacts, then emits RELEASE_PUBLISHED. */
+    private void signArtifactsAndEmitPublished(Listing listing, Release release) {
         String envelopeJson = catalog.canonicalJson(catalog.buildEnvelope(listing, release));
         release.artifacts = new ArrayList<>(release.artifacts);
         for (int i = 0; i < release.artifacts.size(); i++) {
@@ -196,9 +240,6 @@ public class ReviewService {
                         release.id.toString(), release.version.toString(),
                         release.channel.name().toLowerCase(), release.publishedAt.toString(),
                         envelopeJson)));
-        audit.record("USER", adminUserId.toString(), "release.force-publish", "RELEASE",
-                release.id.toString(), "REJECTED", "PUBLISHED: " + reason, null);
-        return release;
     }
 
     private String signArtifact(Release.ArtifactInfo artifact, String envelopeFallback) {
@@ -207,6 +248,23 @@ public class ReviewService {
             return envelopeFallback;
         }
         return signing.sign(blobs.open(artifact.blobKey()));
+    }
+
+    /**
+     * Admin cleanup for manually uploaded host update packages: hard-removes the
+     * release row so it disappears from the app update feed and the compat
+     * mirror immediately. Published releases do NOT need a yank first — removal
+     * is the stronger form of the same action. Audited as release.delete.
+     */
+    @Transactional
+    public void deleteRelease(UUID adminUserId, UUID releaseId, String reason) {
+        Release release = releases.findById(releaseId).orElseThrow(
+                () -> new DomainException(StoreErrorCode.RELEASE_NOT_FOUND,
+                        "Release not found"));
+        releases.deleteById(releaseId);
+        audit.record("USER", adminUserId.toString(), "release.delete", "RELEASE",
+                releaseId.toString(), release.status.name(),
+                reason == null || reason.isBlank() ? "admin manual upload cleanup" : reason, null);
     }
 
     // ---- security withdrawals (design §8.1) ----
