@@ -7,6 +7,7 @@ import StateChip from '../components/StateChip.vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
 import ErrorState from '../components/ErrorState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
+import { formatDate, formatNumber } from '../utils/format';
 import { useAuthStore } from '../stores/auth';
 
 /**
@@ -61,11 +62,18 @@ const localization = computed(() => {
   );
 });
 const displayName = computed(() => localization.value?.name ?? detail.value?.slug ?? '');
-const overviewText = computed(
-  () => localization.value?.descriptionMarkdown?.trim()
+// Plain-text overview: a leading "# Title" markdown heading would render its
+// raw "#" here, so drop it when it merely repeats the product name.
+const overviewText = computed(() => {
+  const raw = localization.value?.descriptionMarkdown?.trim()
     || localization.value?.summary?.trim()
-    || t('listing.descriptionUnavailable'),
-);
+    || t('listing.descriptionUnavailable');
+  const heading = raw.match(/^#\s+(.+?)\s*(?:\n|$)/);
+  if (heading && heading[1].trim().toLowerCase() === displayName.value.trim().toLowerCase()) {
+    return raw.slice(heading[0].length).trim() || raw;
+  }
+  return raw;
+});
 const sourceUrl = computed(() => upstream.value?.sourceUrl ?? latestRelease.value?.sourceUrl);
 
 function displayVersion(version?: string | null): string {
@@ -80,12 +88,6 @@ function displayVersion(version?: string | null): string {
 function shortSha(value?: string | null): string {
   if (!value) return '—';
   return value.length > 16 ? `${value.slice(0, 12)}…` : value;
-}
-
-function formatDate(iso?: string | null): string {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString();
 }
 
 function formatSize(bytes?: number): string {
@@ -356,8 +358,8 @@ const installLabel = computed(() => {
           </p>
           <p class="mt-2 text-sm text-muted dark:text-slate-500">
             {{ t('listing.publisher') }}: <strong>{{ detail.publisherName }}</strong>
-            · {{ detail.downloads?.toLocaleString() ?? 0 }} {{ t('discover.statsDownloads') }}
-            · {{ detail.favorites?.toLocaleString() ?? 0 }} {{ t('listing.favoritesCount') }}
+            · {{ formatNumber(detail.downloads ?? 0) }} {{ t('discover.statsDownloads') }}
+            · {{ formatNumber(detail.favorites ?? 0) }} {{ t('listing.favoritesCount') }}
             · {{ t('listing.updated') }}: {{ formatDate(detail.updatedAt) }}
           </p>
           <div

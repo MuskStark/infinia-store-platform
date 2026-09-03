@@ -8,6 +8,7 @@ import { BEE_LEVELS, beeMark } from '../bee-levels';
 import EmptyState from '../components/EmptyState.vue';
 import ErrorState from '../components/ErrorState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
+import { formatDate, formatDateTime } from '../utils/format';
 import { useAuthStore } from '../stores/auth';
 
 /**
@@ -141,12 +142,6 @@ async function changePassword() {
 function listingRoute(coordinate: string) {
   const parts = coordinate.replace('infinia://', '').split('/');
   return parts.length >= 3 ? `/listing/${parts[1]}/${parts[2]}` : '/browse';
-}
-
-function formatDateTime(iso?: string | null): string {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
 }
 </script>
 
@@ -286,7 +281,7 @@ function formatDateTime(iso?: string | null): string {
               >
                 {{ favorite.name ?? favorite.listingCoordinate }}
               </RouterLink>
-              <span class="shrink-0 text-xs text-muted">{{ favorite.addedAt?.slice(0, 10) }}</span>
+              <span class="shrink-0 text-xs text-muted">{{ formatDate(favorite.addedAt) }}</span>
             </li>
           </ul>
         </MagicCard>

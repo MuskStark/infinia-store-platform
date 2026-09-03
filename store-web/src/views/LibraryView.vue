@@ -6,6 +6,7 @@ import { useLibraryStore } from '../stores/library';
 import { Badge, BlurFade } from '@infinia/magic-ui-vue';
 import EmptyState from '../components/EmptyState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
+import { formatDate, formatDateTime } from '../utils/format';
 
 const { t } = useI18n();
 const library = useLibraryStore();
@@ -26,18 +27,6 @@ function favoriteRoute(favorite: { listingCoordinate?: string; name?: string }) 
 
 function itemRoute(item: InstalledItem) {
   return favoriteRoute({ listingCoordinate: item.coordinate });
-}
-
-function formatDate(iso?: string | null): string {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString();
-}
-
-function formatDateTime(iso?: string | null): string {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
 }
 </script>
 

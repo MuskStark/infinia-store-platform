@@ -135,7 +135,7 @@ async function register() {
   <div class="mx-auto w-full max-w-md py-10">
     <MagicCard class="p-8">
       <div class="mb-6 flex items-center gap-3">
-        <span class="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-accent to-accent2 text-lg font-bold text-white">∞</span>
+        <img src="/infinia-logo.svg" alt="" class="h-10 w-10" />
         <h1 class="text-xl font-bold">
           {{ mode === 'signin' ? t('auth.signInTitle') : t('auth.registerTitle') }}
         </h1>

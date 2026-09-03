@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { api, type Review } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import EmptyState from '../components/EmptyState.vue';
+import StateChip from '../components/StateChip.vue';
 
 /** Review queue for REVIEWER/PLATFORM_ADMIN roles (design §7.3, §8). */
 const { t } = useI18n();
@@ -42,7 +43,7 @@ async function decide(review: Review, decision: 'APPROVE' | 'REJECT' | 'REQUEST_
           <h2 class="font-semibold">{{ review.listingName }} · v{{ review.version }}</h2>
           <code class="text-xs text-muted">{{ review.listingCoordinate }}</code>
         </div>
-        <Badge tone="accent">{{ review.status }}</Badge>
+        <StateChip :status="review.status" />
       </div>
 
       <div v-if="review.findings?.length" class="mt-4">

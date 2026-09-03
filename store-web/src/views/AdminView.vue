@@ -8,6 +8,9 @@ import { beeMark } from '../bee-levels';
 import EmptyState from '../components/EmptyState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
 import ErrorState from '../components/ErrorState.vue';
+import StateChip from '../components/StateChip.vue';
+import SelectMenu from '../components/SelectMenu.vue';
+import { formatDate, formatDateTime } from '../utils/format';
 
 /**
  * Platform admin console (design §12.4 管理): user management (Infinia Level),
@@ -17,7 +20,22 @@ import ErrorState from '../components/ErrorState.vue';
  */
 const { t } = useI18n();
 
-const tab = ref<'users' | 'databases' | 'upstreams' | 'listings' | 'reports' | 'appRelease' | 'withdraw' | 'audit'>('users');
+type AdminTab = 'users' | 'databases' | 'upstreams' | 'listings' | 'reports' | 'appRelease' | 'withdraw' | 'audit';
+const tab = ref<AdminTab>('users');
+
+/**
+ * Grouped navigation (design §12.4 管理): eight flat tabs read as one noisy
+ * row, so the console is organized into four labeled sections — people,
+ * catalog supply, trust & safety, infrastructure.
+ */
+const navGroups = computed(() =>
+  [
+    { labelKey: 'admin.group.users', items: ['users'] },
+    { labelKey: 'admin.group.content', items: ['listings', 'upstreams', 'appRelease'] },
+    { labelKey: 'admin.group.trust', items: ['reports', 'withdraw', 'audit'] },
+    { labelKey: 'admin.group.system', items: ['databases'] },
+  ] as { labelKey: string; items: AdminTab[] }[],
+);
 
 // ---- remote databases (远程数据库配置) ----
 const databases = ref<RemoteDatabase[]>([]);
@@ -170,12 +188,6 @@ async function toggleUserStatus(user: AdminUser) {
   } finally {
     savingUserId.value = null;
   }
-}
-
-function formatDateTime(iso?: string | null): string {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
 }
 
 // ---- upstream aggregation (aggregation plan §3/§8) ----
@@ -437,21 +449,37 @@ async function deleteAppRelease(rel: AdminAppRelease) {
     <LoadingGrid v-else-if="loading" />
 
     <template v-else>
-      <nav class="flex flex-wrap gap-1 border-b border-line dark:border-slate-800" role="tablist">
-        <button
-          v-for="key in ['users', 'databases', 'upstreams', 'listings', 'reports', 'appRelease', 'withdraw', 'audit'] as const"
-          :key="key"
-          role="tab"
-          :aria-selected="tab === key"
-          class="rounded-t-xl px-4 py-2 text-sm"
-          :class="tab === key ? 'border-b-2 border-accent font-semibold' : 'text-muted'"
-          @click="tab = key"
+      <div class="grid gap-8 lg:grid-cols-[13rem_minmax(0,1fr)]">
+        <!-- Grouped section nav: stacked sidebar on desktop, wrapping clusters on mobile. -->
+        <nav
+          class="flex flex-row flex-wrap gap-x-8 gap-y-5 self-start lg:sticky lg:top-20 lg:flex-col lg:gap-6"
+          role="tablist"
+          :aria-label="t('admin.title')"
         >
-          {{ t(`admin.${key}`) }}
-        </button>
-      </nav>
+          <div v-for="group in navGroups" :key="group.labelKey" class="min-w-0">
+            <p class="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted dark:text-slate-500">
+              {{ t(group.labelKey) }}
+            </p>
+            <div class="flex flex-wrap gap-1 lg:flex-col lg:items-stretch">
+              <button
+                v-for="key in group.items"
+                :key="key"
+                role="tab"
+                :aria-selected="tab === key"
+                class="rounded-lg px-3 py-1.5 text-left text-sm transition-colors"
+                :class="tab === key
+                  ? 'bg-accent/10 font-semibold text-accent dark:bg-accent/20'
+                  : 'text-muted hover:bg-surface-muted hover:text-ink dark:hover:bg-slate-800 dark:hover:text-slate-200'"
+                @click="tab = key"
+              >
+                {{ t(`admin.${key}`) }}
+              </button>
+            </div>
+          </div>
+        </nav>
 
-      <section v-if="tab === 'users'" class="space-y-3">
+        <div class="min-w-0">
+          <section v-if="tab === 'users'" class="space-y-3">
         <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.usersHint') }}</p>
         <p
           v-if="usersError"
@@ -497,20 +525,22 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                   </span>
                 </td>
                 <td class="p-2">
-                  <div class="flex items-center gap-2">
-                    <BeeLevelBadge :level="row.beeLevel" />
-                    <select
-                      :value="row.beeLevel"
-                      :disabled="savingUserId === row.userId"
-                      :aria-label="t('admin.setBeeLevel')"
-                      class="rounded-lg border border-line bg-surface px-2 py-1 text-xs dark:border-slate-800 dark:bg-slate-900"
-                      @change="setUserBeeLevel(row, Number(($event.target as HTMLSelectElement).value))"
-                    >
-                      <option v-for="level in BEE_LEVELS" :key="level" :value="level">
-                        {{ beeLevelLabel(level) }}
-                      </option>
-                    </select>
-                  </div>
+                  <!-- The badge itself is the trigger: click to change the level
+                       in place, no duplicate dropdown beside it. -->
+                  <SelectMenu
+                    :model-value="row.beeLevel"
+                    :options="BEE_LEVELS.map((level) => ({ value: level, label: beeLevelLabel(level) }))"
+                    :aria-label="t('admin.setBeeLevel')"
+                    :disabled="savingUserId === row.userId"
+                    @update:model-value="setUserBeeLevel(row, Number($event))"
+                  >
+                    <template #trigger>
+                      <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                        <BeeLevelBadge :level="row.beeLevel" />
+                        <span class="text-xs text-muted" aria-hidden="true">▾</span>
+                      </span>
+                    </template>
+                  </SelectMenu>
                 </td>
                 <td class="p-2">
                   <button
@@ -746,6 +776,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 <option value="CLAUDE_MARKETPLACE">CLAUDE_MARKETPLACE</option>
                 <option value="SKILL_REPOSITORY">SKILL_REPOSITORY</option>
                 <option value="MCP_REGISTRY">MCP_REGISTRY</option>
+                <option value="SKILLHUB_REGISTRY">SKILLHUB_REGISTRY</option>
               </select>
             </label>
             <div class="sm:col-span-2">
@@ -791,7 +822,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
             </div>
             <div class="flex items-center gap-2">
               <span v-if="row.lastSyncAt" class="text-xs text-muted">
-                {{ new Date(row.lastSyncAt).toLocaleString() }}
+                {{ formatDateTime(row.lastSyncAt) }}
               </span>
               <button
                 :disabled="syncingId === row.upstreamId"
@@ -870,18 +901,22 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                   </button>
                 </td>
                 <td class="p-2">
-                  <select
-                    :value="row.minBeeLevel"
+                  <SelectMenu
+                    :model-value="row.minBeeLevel"
+                    :options="BEE_LEVELS.map((level) => ({ value: level, label: level === 0 ? t('admin.beeLevelPublic') : beeLevelLabel(level, '+') }))"
                     :aria-label="t('admin.minBeeLevel')"
-                    class="rounded-lg border border-line bg-surface px-2 py-1 text-xs dark:border-slate-800 dark:bg-slate-900"
-                    @change="setListingLevel(row, Number(($event.target as HTMLSelectElement).value))"
+                    @update:model-value="setListingLevel(row, Number($event))"
                   >
-                    <option v-for="level in BEE_LEVELS" :key="level" :value="level">
-                      {{ level === 0
-                        ? t('admin.beeLevelPublic')
-                        : beeLevelLabel(level, '+') }}
-                    </option>
-                  </select>
+                    <template #trigger>
+                      <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                        <Badge v-if="row.minBeeLevel === 0" tone="muted">{{ t('admin.beeLevelPublic') }}</Badge>
+                        <Badge v-else :tone="beeMark(row.minBeeLevel).tone">
+                          {{ beeMark(row.minBeeLevel).emblem }} {{ t(`beeLevel.${row.minBeeLevel}`) }} · Lv{{ row.minBeeLevel }}+
+                        </Badge>
+                        <span class="text-xs text-muted" aria-hidden="true">▾</span>
+                      </span>
+                    </template>
+                  </SelectMenu>
                 </td>
               </tr>
             </tbody>
@@ -903,7 +938,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
             </div>
           </div>
           <p v-if="report.details" class="mt-3 text-sm">{{ report.details }}</p>
-          <p class="mt-2 text-xs text-muted">{{ t('admin.reportedAt') }}: {{ report.createdAt }}</p>
+          <p class="mt-2 text-xs text-muted">{{ t('admin.reportedAt') }}: {{ formatDateTime(report.createdAt) }}</p>
           <div class="mt-4 flex flex-col gap-2 sm:flex-row">
             <textarea
               v-model="notes[report.reportId ?? '']"
@@ -988,14 +1023,14 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           >
             <div class="flex flex-wrap items-center gap-2">
               <span class="font-semibold">v{{ rel.version }}</span>
-              <Badge tone="muted">{{ rel.channel }}</Badge>
-              <Badge tone="accent">{{ rel.status }}</Badge>
+              <Badge tone="muted">{{ t(`channel.${rel.channel}`) }}</Badge>
+              <StateChip :status="rel.status" />
               <span class="text-xs text-muted">
                 {{ (rel.artifacts ?? []).map((a) => a.filename).join(', ') }}
               </span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-xs text-muted">{{ rel.publishedAt ?? rel.releaseId }}</span>
+              <span class="text-xs text-muted">{{ formatDateTime(rel.publishedAt) }}</span>
               <button
                 class="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-red-600 dark:border-slate-800 dark:text-red-400"
                 @click="deleteAppRelease(rel)"
@@ -1045,7 +1080,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
             :key="event.eventId"
             class="rounded-lg border border-line px-3 py-2 dark:border-slate-800"
           >
-            <span class="text-muted">{{ event.occurredAt }}</span>
+            <span class="text-muted">{{ formatDateTime(event.occurredAt) }}</span>
             · <span class="font-semibold">{{ event.action }}</span>
             · {{ event.resourceType }}/<code>{{ event.resourceId }}</code>
             · <span class="text-muted">{{ event.actorType }}:{{ event.actorId }}</span>
@@ -1053,6 +1088,8 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           </li>
         </ul>
       </section>
+        </div>
+      </div>
     </template>
   </div>
 </template>

@@ -70,6 +70,19 @@ export default {
     nightly: 'Nightly',
     private: 'Private',
   },
+  state: {
+    DRAFT: 'Draft',
+    SCANNING: 'Scanning',
+    UPLOADING: 'Uploading',
+    IN_REVIEW: 'In review',
+    APPROVED: 'Approved',
+    CHANGES_REQUESTED: 'Changes requested',
+    REJECTED: 'Rejected',
+    PUBLISHED: 'Published',
+    DEPRECATED: 'Deprecated',
+    QUARANTINED: 'Quarantined',
+    YANKED: 'Yanked',
+  },
   discover: {
     heroTitle: 'Extend your Infinia',
     heroSubtitle:
@@ -330,6 +343,12 @@ export default {
     audit: 'Audit trail',
   },
   admin: {
+    group: {
+      users: 'Users',
+      content: 'Content & ecosystem',
+      trust: 'Security & trust',
+      system: 'System',
+    },
     users: 'Users',
     usersHint: 'Every account on the platform: adjust Infinia Levels (🐝 the store user ladder), enable or disable accounts. Disabling revokes live sessions immediately; all changes are audited.',
     userSearch: 'Search email or display name',

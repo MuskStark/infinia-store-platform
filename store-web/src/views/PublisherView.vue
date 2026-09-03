@@ -13,6 +13,7 @@ import { Badge, MagicCard, ProgressBar, ShimmerButton } from '@infinia/magic-ui-
 import StateChip from '../components/StateChip.vue';
 import { beeMark } from '../bee-levels';
 import EmptyState from '../components/EmptyState.vue';
+import { formatDate } from '../utils/format';
 import { usePublisherStore } from '../stores/publisher';
 import { useAuthStore } from '../stores/auth';
 
@@ -42,6 +43,7 @@ const listingForm = ref({
 });
 const releaseForm = ref({ version: '', channel: 'stable', requiresHost: '' });
 const fileInput = ref<HTMLInputElement | null>(null);
+const packageName = ref('');
 const selectedListing = ref<CatalogItem | null>(null);
 const selectedListingId = ref<string | null>(null);
 const currentRelease = ref<PublisherRelease | null>(null);
@@ -121,6 +123,10 @@ async function createRelease() {
   }
 }
 
+function onPackageChange() {
+  packageName.value = fileInput.value?.files?.[0]?.name ?? '';
+}
+
 async function uploadAndSubmit() {
   const file = fileInput.value?.files?.[0];
   const release = currentRelease.value;
@@ -162,6 +168,7 @@ async function selectListing(listing: CatalogItem) {
   selectedListingId.value = null;
   currentRelease.value = null;
   message.value = '';
+  packageName.value = '';
   // Resolve the listing UUID, then load its releases (incl. DRAFTs) so an
   // interrupted draft can be resumed — the upload area keys off currentRelease.
   try {
@@ -186,6 +193,7 @@ async function selectListing(listing: CatalogItem) {
 async function pickRelease(release: PublisherRelease) {
   currentRelease.value = release;
   message.value = '';
+  packageName.value = '';
 }
 
 async function refreshSelectedListingReleases() {
@@ -258,7 +266,9 @@ onMounted(() => {
       <form class="grid gap-3 sm:grid-cols-3" @submit.prevent="createOrg">
         <input v-model="orgForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" :placeholder="t('publisher.orgSlug')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
         <input v-model="orgForm.name" :placeholder="t('publisher.orgName')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
+        <!-- justify-self-start: hug the label like every other form button instead
+             of stretching across the whole grid column. -->
+        <ShimmerButton type="submit" :disabled="busy" class="self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
       </form>
     </MagicCard>
 
@@ -315,7 +325,7 @@ onMounted(() => {
           </select>
           <span class="mt-1 block text-xs text-muted">{{ t('publisher.minBeeLevelHint') }}</span>
         </label>
-        <ShimmerButton type="submit" :disabled="busy" class="shrink-0">{{ t('common.confirm') }}</ShimmerButton>
+        <ShimmerButton type="submit" :disabled="busy" class="self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
       </form>
     </MagicCard>
 
@@ -339,7 +349,7 @@ onMounted(() => {
               : beeMark(level).emblem + ' ' + t(`beeLevel.${level}`) + ' · Lv' + level + '+' }}
           </option>
         </select>
-        <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">
+        <ShimmerButton type="submit" :disabled="busy" class="self-start justify-self-start whitespace-nowrap">
           {{ t('common.confirm') }}
         </ShimmerButton>
       </form>
@@ -359,10 +369,10 @@ onMounted(() => {
           @click="release.status === 'DRAFT' && pickRelease(release)"
         >
           <code class="font-semibold">v{{ release.version }}</code>
-          <Badge tone="muted">{{ release.channel }}</Badge>
+          <Badge tone="muted">{{ t(`channel.${release.channel}`) }}</Badge>
           <StateChip :status="release.status" />
           <span class="ml-auto text-xs text-muted dark:text-slate-400">
-            {{ release.status === 'DRAFT' ? t('publisher.clickToResume') : release.createdAt?.slice(0, 10) }}
+            {{ release.status === 'DRAFT' ? t('publisher.clickToResume') : formatDate(release.createdAt) }}
           </span>
         </li>
       </ul>
@@ -377,7 +387,7 @@ onMounted(() => {
           <option value="beta">{{ t('channel.beta') }}</option>
         </select>
         <input v-model="releaseForm.requiresHost" placeholder=">=4.0.0 <5.0.0" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
+        <ShimmerButton type="submit" :disabled="busy" class="self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
       </form>
 
       <div v-if="currentRelease" class="mt-6 space-y-4">
@@ -387,11 +397,22 @@ onMounted(() => {
         </div>
         <ProgressBar v-if="currentRelease.status === 'SCANNING'" />
         <div v-if="currentRelease.status === 'DRAFT'" class="space-y-2">
-          <label class="text-sm">
-            {{ t('publisher.uploadPackage') }}
-            <input ref="fileInput" type="file" class="mt-1 block w-full text-sm" />
-          </label>
-          <ShimmerButton :disabled="busy" @click="uploadAndSubmit">
+          <!-- Same hidden-input + styled picker pattern as the admin app-release
+               upload, so both package uploaders render identically. -->
+          <input ref="fileInput" type="file" class="hidden" @change="onPackageChange" />
+          <div class="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
+              @click="fileInput?.click()"
+            >
+              {{ t('publisher.uploadPackage') }}
+            </button>
+            <span class="min-w-0 flex-1 truncate text-sm" :class="packageName ? '' : 'text-muted dark:text-slate-400'">
+              {{ packageName || '—' }}
+            </span>
+          </div>
+          <ShimmerButton :disabled="busy || !packageName" @click="uploadAndSubmit">
             {{ t('publisher.submit') }}
           </ShimmerButton>
         </div>

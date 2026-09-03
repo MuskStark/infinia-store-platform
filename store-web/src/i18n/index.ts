@@ -9,11 +9,14 @@ export const DEFAULT_LOCALE: Locale = 'en';
 const STORAGE_KEY = 'infinia.store.locale';
 
 function detectLocale(): Locale {
-  const stored = localStorage.getItem(STORAGE_KEY);
+  // Guarded: utils and tests import this module outside the browser too, where
+  // localStorage/navigator may not exist and module init must not throw.
+  const stored =
+    typeof localStorage === 'undefined' ? null : localStorage.getItem(STORAGE_KEY);
   if (stored && (SUPPORTED_LOCALES as readonly string[]).includes(stored)) {
     return stored as Locale;
   }
-  for (const candidate of navigator.languages ?? []) {
+  for (const candidate of navigator?.languages ?? []) {
     if (candidate.toLowerCase().startsWith('zh')) {
       return 'zh-CN';
     }

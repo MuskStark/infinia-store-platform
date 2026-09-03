@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MagicCard, Badge } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from './BeeLevelBadge.vue';
+import { formatNumber } from '../utils/format';
 import type { CatalogItem } from '../api/client';
 
 const props = defineProps<{ item: CatalogItem; featured?: boolean }>();
@@ -56,7 +57,7 @@ const typeLabel = computed(() => t(`type.${props.item.type}`));
           <div class="flex items-center justify-between text-xs text-muted dark:text-slate-400">
             <span>{{ item.namespace }}</span>
             <span class="flex items-center gap-2">
-              <span v-if="item.downloads != null">↓ {{ item.downloads.toLocaleString() }}</span>
+              <span v-if="item.downloads != null">↓ {{ formatNumber(item.downloads) }}</span>
               <span v-if="item.latestVersion">v{{ item.latestVersion }}</span>
             </span>
           </div>

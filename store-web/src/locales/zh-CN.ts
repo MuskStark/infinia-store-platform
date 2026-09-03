@@ -69,7 +69,19 @@ export default {
     nightly: '每日构建',
     private: '私有',
   },
-  discover: {
+  state: {
+    DRAFT: '草稿',
+    SCANNING: '扫描中',
+    UPLOADING: '上传中',
+    IN_REVIEW: '审核中',
+    APPROVED: '已通过',
+    CHANGES_REQUESTED: '需修改',
+    REJECTED: '已驳回',
+    PUBLISHED: '已发布',
+    DEPRECATED: '已弃用',
+    QUARANTINED: '已隔离',
+    YANKED: '已下架',
+  },  discover: {
     heroTitle: '扩展你的 Infinia',
     heroSubtitle: '主程序、插件、技能、MCP 服务器与 Flow —— 全部签名、审核、可回滚。',
     featured: '精选',
@@ -328,6 +340,12 @@ export default {
     audit: '审计记录',
   },
   admin: {
+    group: {
+      users: '用户',
+      content: '内容与生态',
+      trust: '安全与合规',
+      system: '系统',
+    },
     users: '用户',
     usersHint: '平台上的全部账户：调整 Infinia Level（🐝 商店用户等级）、启用或禁用账户。禁用会立即吊销在线会话；所有变更均记入审计日志。',
     userSearch: '搜索邮箱或显示名称',

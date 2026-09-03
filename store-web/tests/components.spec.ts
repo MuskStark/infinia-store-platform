@@ -53,10 +53,15 @@ describe('ListingCard', () => {
 });
 
 describe('StateChip', () => {
-  it('never encodes state by color alone — the label is always the status text', async () => {
+  it('never encodes state by color alone — the label is always the localized status', async () => {
     const wrapper = mount(StateChip, { props: { status: 'PUBLISHED' }, global: { plugins: [i18n] } });
-    expect(wrapper.text()).toBe('PUBLISHED');
+    expect(wrapper.text()).toBe('Published');
     await wrapper.setProps({ status: 'QUARANTINED' });
-    expect(wrapper.text()).toBe('QUARANTINED');
+    expect(wrapper.text()).toBe('Quarantined');
+  });
+
+  it('falls back to the raw status for unknown backend states', () => {
+    const wrapper = mount(StateChip, { props: { status: 'SOME_NEW_STATE' }, global: { plugins: [i18n] } });
+    expect(wrapper.text()).toBe('SOME_NEW_STATE');
   });
 });

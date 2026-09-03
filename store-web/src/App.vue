@@ -91,43 +91,45 @@ const initial = computed(() =>
     <header class="sticky top-0 z-40 border-b border-line bg-surface/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
       <div class="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
         <RouterLink :to="{ name: 'discover' }" class="flex shrink-0 items-center gap-2 font-bold">
-          <span class="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent2 text-white">
-            ∞
-          </span>
+          <!-- Official Infinia mark, shared with the FengYu host frontend. -->
+          <img src="/infinia-logo.svg" alt="" class="h-8 w-8" />
           <span class="hidden sm:inline">Infinia Store</span>
         </RouterLink>
 
         <nav class="flex min-w-0 items-center gap-0.5 overflow-x-auto text-sm" aria-label="primary">
-          <RouterLink class="whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted" :to="{ name: 'discover' }">
+          <!-- inline-flex + items-center: the global 44px touch-target rule
+               stretches these boxes taller than their text, so the label must
+               center inside the box to sit level with the brand logo. -->
+          <RouterLink class="inline-flex items-center whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted" :to="{ name: 'discover' }">
             {{ t('nav.discover') }}
           </RouterLink>
-          <RouterLink class="whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted" :to="{ name: 'browse' }">
+          <RouterLink class="inline-flex items-center whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted" :to="{ name: 'browse' }">
             {{ t('nav.browse') }}
           </RouterLink>
           <RouterLink
             v-if="auth.isAuthenticated"
-            class="whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted"
+            class="inline-flex items-center whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'library' }"
           >
             {{ t('nav.library') }}
           </RouterLink>
           <RouterLink
             v-if="isPublisher"
-            class="whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted"
+            class="inline-flex items-center whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'publisher' }"
           >
             {{ t('nav.publisher') }}
           </RouterLink>
           <RouterLink
             v-if="isStaff"
-            class="whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted"
+            class="inline-flex items-center whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'review' }"
           >
             {{ t('nav.review') }}
           </RouterLink>
           <RouterLink
             v-if="isAdmin"
-            class="whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-slate-100 hover:text-accent dark:hover:bg-slate-800"
+            class="inline-flex items-center whitespace-nowrap rounded-lg px-2.5 py-2 hover:bg-surface-muted"
             :to="{ name: 'admin' }"
           >
             {{ t('nav.admin') }}
@@ -150,14 +152,14 @@ const initial = computed(() =>
 
         <div class="flex shrink-0 items-center gap-1">
           <button
-            class="rounded-lg px-2.5 py-2 text-sm hover:bg-surface-muted"
+            class="inline-flex items-center rounded-lg px-2.5 py-2 text-sm hover:bg-surface-muted"
             :aria-label="t('common.language')"
             @click="switchLocale"
           >
             {{ locale === 'en' ? '中' : 'EN' }}
           </button>
           <button
-            class="rounded-lg px-2.5 py-2 text-sm hover:bg-surface-muted"
+            class="inline-flex items-center rounded-lg px-2.5 py-2 text-sm hover:bg-surface-muted"
             :aria-label="t('common.theme')"
             @click="toggleTheme"
           >
@@ -167,7 +169,7 @@ const initial = computed(() =>
           <!-- Anonymous: sign-in CTA. Signed-in: the account popover. -->
           <button
             v-if="!auth.isAuthenticated"
-            class="rounded-xl bg-gradient-to-r from-accent to-accent2 px-4 py-2 text-sm font-semibold text-white"
+            class="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-accent to-accent2 px-4 py-2 text-sm font-semibold text-white"
             @click="router.push({ name: 'signin' })"
           >
             {{ t('nav.signIn') }}
