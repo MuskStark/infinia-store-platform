@@ -123,6 +123,25 @@ class AuthAndAccountFlowTest {
     }
 
     @Test
+    void authorizeRedirectsToASameOriginSignIn() {
+        // Regression for the intranet self-hosted split: the sign-in entry point
+        // must follow the request's own origin (the saved-request session cookie
+        // is host-scoped), never a configured store.base-url origin — otherwise
+        // login succeeds, the saved OAuth request is unreachable, and the desktop
+        // app's callback never fires (the user just lands in the store web UI).
+        ResponseEntity<String> authorize = http().exchange(HttpMethod.GET,
+                "/oauth2/authorize?response_type=code&client_id=fengyu-desktop"
+                        + "&scope=openid&redirect_uri=http://127.0.0.1:24057/callback"
+                        + "&state=x&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+                        + "&code_challenge_method=S256",
+                Http.acceptHtml(), null);
+        assertEquals(302, authorize.getStatusCode().value());
+        String location = authorize.getHeaders().getFirst(HttpHeaders.LOCATION);
+        assertTrue(location.startsWith(http().base + "/signin?oauth=1"),
+                "sign-in stays on the request origin: " + location);
+    }
+
+    @Test
     void unauthenticatedMeReturns401Problem() {
         ResponseEntity<Map> response = http().getJson("/api/v1/me", Map.class, null);
         assertEquals(401, response.getStatusCode().value());

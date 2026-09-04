@@ -65,6 +65,11 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresRole: ['REVIEWER', 'PLATFORM_ADMIN'] },
     },
     {
+      path: '/status',
+      name: 'status',
+      component: () => import('../views/StatusView.vue'),
+    },
+    {
       path: '/signin',
       name: 'signin',
       component: () => import('../views/SignInView.vue'),

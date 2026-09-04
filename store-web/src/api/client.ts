@@ -172,6 +172,13 @@ export const api = {
 
   getDataSourceStatus: () =>
     request<DataSourceStatus>('/api/v1/admin/databases/status'),
+
+  // ── Public service status (服务监控页) ──
+
+  getServiceStatus: () => request<ServiceStatus>('/api/v1/status'),
+
+  getServiceIncidents: () =>
+    request<ServiceIncident[]>('/api/v1/status/incidents'),
 };
 
 // ---- typed DTO aliases generated from the contract ----
@@ -269,3 +276,11 @@ export type DataSourceStatus = {
   remoteOverrideActive: boolean;
   overrideName: string | null;
 };
+
+// ---- public service status page (service monitoring) ----
+export type StatusIndicator =
+  components['schemas']['StatusIndicator'];
+export type ServiceStatus = components['schemas']['StatusPage'];
+export type StatusComponentInfo = components['schemas']['StatusComponent'];
+export type StatusDayUptime = components['schemas']['StatusDay'];
+export type ServiceIncident = components['schemas']['Incident'];

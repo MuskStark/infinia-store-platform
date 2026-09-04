@@ -45,7 +45,24 @@ public class LocalTokenService {
         Instant now = Instant.now();
         sessions.save(new IdentityRepositories.UserSessionRecord(sessionId, user.id, clientId,
                 "PASSWORD", null, now, null, false, null));
+        return sign(user, sessionId, now);
+    }
 
+    /**
+     * Mints the next access token of an EXISTING session (design §7.2 desktop
+     * refresh): the sid claim stays the session's, so a ledger revocation kills
+     * refreshed access tokens exactly like the original one. No new ledger row.
+     */
+    public String mintForSession(StoreUser user, UUID sessionId) {
+        return sign(user, sessionId, Instant.now());
+    }
+
+    /** Access-token lifetime in seconds, for clients echoing expires_in. */
+    public long accessTtlSeconds() {
+        return ACCESS_TTL.toSeconds();
+    }
+
+    private String sign(StoreUser user, UUID sessionId, Instant now) {
         JWSHeader header = new JWSHeader.Builder(JWSAlgorithm.RS256)
                 .type(JOSEObjectType.JWT)
                 .keyID("store-jwt-1")

@@ -36,6 +36,7 @@ tags:
   - name: Admin
   - name: Compatibility
   - name: Blobs
+  - name: Status
 
 paths:
   /catalog:
@@ -1484,6 +1485,36 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/AuditEvent' }
 
+  /status:
+    get:
+      operationId: getServiceStatus
+      tags: [Status]
+      summary: Public service status with per-component 90-day uptime history (anonymous access)
+      security:
+        - {}
+      responses:
+        '200':
+          description: Status page snapshot; probes run live and are sampled into the history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusPage' }
+
+  /status/incidents:
+    get:
+      operationId: listServiceIncidents
+      tags: [Status]
+      summary: Past incidents, newest first (anonymous access)
+      security:
+        - {}
+      responses:
+        '200':
+          description: Incident feed
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Incident' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2267,3 +2298,51 @@ components:
         sha256: { type: string }
         signature: { type: string, nullable: true }
         keyId: { type: string, nullable: true }
+
+    StatusIndicator:
+      type: string
+      description: Overall and per-component health ladder; history days without samples report no_data.
+      enum: [operational, degraded, partial_outage, major_outage, no_data]
+
+    StatusPage:
+      type: object
+      required: [indicator, components, checkedAt]
+      properties:
+        indicator: { $ref: '#/components/schemas/StatusIndicator' }
+        components:
+          type: array
+          items: { $ref: '#/components/schemas/StatusComponent' }
+        checkedAt: { type: string, format: date-time }
+
+    StatusComponent:
+      type: object
+      required: [key, indicator, history]
+      properties:
+        key: { type: string, example: database }
+        indicator: { $ref: '#/components/schemas/StatusIndicator' }
+        uptime90d: { type: number, format: double, nullable: true, description: Uptime percentage over the history window, e.g. 99.98 }
+        history:
+          type: array
+          description: Exactly 90 entries, oldest first, ending today (UTC).
+          items: { $ref: '#/components/schemas/StatusDay' }
+
+    StatusDay:
+      type: object
+      required: [date, indicator]
+      properties:
+        date: { type: string, format: date }
+        indicator: { $ref: '#/components/schemas/StatusIndicator' }
+        uptimePercent: { type: number, format: double, nullable: true }
+
+    Incident:
+      type: object
+      required: [incidentId, component, title, impact, status, startedAt]
+      properties:
+        incidentId: { type: string, format: uuid }
+        component: { type: string }
+        title: { type: string }
+        impact: { type: string, enum: [outage, degraded] }
+        status: { type: string, enum: [investigating, resolved] }
+        startedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time, nullable: true }
+        updatedAt: { type: string, format: date-time }

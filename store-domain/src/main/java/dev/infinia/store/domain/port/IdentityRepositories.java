@@ -100,6 +100,30 @@ public final class IdentityRepositories {
         void markRevoked(UUID id);
     }
 
+    /**
+     * One row per issued desktop refresh credential (design §7.2). Only the
+     * SHA-256 hash of the token is ever persisted; a row survives its own
+     * consumption so replaying it can be detected and the family revoked.
+     */
+    public record RefreshTokenRecord(String tokenHash, UUID sessionId, UUID userId,
+            String clientId, Instant createdAt, Instant expiresAt, Instant absoluteDeadline,
+            Instant consumedAt, boolean revoked) {
+    }
+
+    public interface RefreshTokenRepository {
+        void save(RefreshTokenRecord token);
+
+        Optional<RefreshTokenRecord> findByTokenHash(String tokenHash);
+
+        List<RefreshTokenRecord> findBySessionId(UUID sessionId);
+
+        /** Single-use consume of an unconsumed row; 0 means the caller lost the race. */
+        int consume(String tokenHash, Instant now);
+
+        /** Revokes every token of the session family. */
+        int revokeFamily(UUID sessionId);
+    }
+
     /** True when the subject owns the namespace directly or through an organization role. */
     public static boolean ownsNamespace(NamespaceRepository namespaces, OrganizationRepository orgs,
             Namespace namespace, UUID userId) {

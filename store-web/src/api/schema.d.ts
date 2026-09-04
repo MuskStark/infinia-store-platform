@@ -1168,6 +1168,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Public service status with per-component 90-day uptime history (anonymous access) */
+        get: operations["getServiceStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/status/incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Past incidents, newest first (anonymous access) */
+        get: operations["listServiceIncidents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1884,6 +1918,52 @@ export interface components {
             sha256?: string;
             signature?: string | null;
             keyId?: string | null;
+        };
+        /**
+         * @description Overall and per-component health ladder; history days without samples report no_data.
+         * @enum {string}
+         */
+        StatusIndicator: "operational" | "degraded" | "partial_outage" | "major_outage" | "no_data";
+        StatusPage: {
+            indicator: components["schemas"]["StatusIndicator"];
+            components: components["schemas"]["StatusComponent"][];
+            /** Format: date-time */
+            checkedAt: string;
+        };
+        StatusComponent: {
+            /** @example database */
+            key: string;
+            indicator: components["schemas"]["StatusIndicator"];
+            /**
+             * Format: double
+             * @description Uptime percentage over the history window
+             */
+            uptime90d?: number | null;
+            /** @description Exactly 90 entries, oldest first, ending today (UTC). */
+            history: components["schemas"]["StatusDay"][];
+        };
+        StatusDay: {
+            /** Format: date */
+            date: string;
+            indicator: components["schemas"]["StatusIndicator"];
+            /** Format: double */
+            uptimePercent?: number | null;
+        };
+        Incident: {
+            /** Format: uuid */
+            incidentId: string;
+            component: string;
+            title: string;
+            /** @enum {string} */
+            impact: "outage" | "degraded";
+            /** @enum {string} */
+            status: "investigating" | "resolved";
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            resolvedAt?: string | null;
+            /** Format: date-time */
+            updatedAt?: string;
         };
     };
     responses: {
@@ -3808,6 +3888,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditEvent"][];
+                };
+            };
+        };
+    };
+    getServiceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Status page snapshot; probes run live and are sampled into the history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusPage"];
+                };
+            };
+        };
+    };
+    listServiceIncidents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Incident feed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Incident"][];
                 };
             };
         };

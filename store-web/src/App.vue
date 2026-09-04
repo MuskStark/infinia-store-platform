@@ -255,6 +255,13 @@ const initial = computed(() =>
 
     <footer class="border-t border-line py-6 text-center text-xs text-muted dark:border-slate-800">
       {{ t('common.footerTagline') }}
+      <span aria-hidden="true">·</span>
+      <RouterLink
+        class="ml-1 underline decoration-line underline-offset-2 hover:text-ink hover:decoration-accent"
+        :to="{ name: 'status' }"
+      >
+        {{ t('nav.status') }}
+      </RouterLink>
     </footer>
   </div>
 </template>

@@ -15,7 +15,7 @@ import java.util.UUID;
 public class CurrentPrincipal {
 
     public record Principal(UUID userId, String email, List<String> roles, String clientId,
-            boolean servicePrincipal) {
+            UUID sessionId, boolean servicePrincipal) {
 
         public boolean hasRole(String role) {
             return roles != null && roles.contains(role);
@@ -41,10 +41,12 @@ public class CurrentPrincipal {
         String uid = jwt.getClaimAsString("uid");
         List<String> roles = jwt.getClaimAsStringList("roles");
         boolean service = uid == null;
+        String sid = jwt.getClaimAsString("sid");
         return new Principal(uid == null ? null : UUID.fromString(uid),
                 jwt.getClaimAsString("email"), roles == null ? List.of() : roles,
                 jwt.getClaimAsString("azp") != null ? jwt.getClaimAsString("azp")
                         : jwt.getClaimAsString("client_id"),
+                sid == null ? null : UUID.fromString(sid),
                 service);
     }
 

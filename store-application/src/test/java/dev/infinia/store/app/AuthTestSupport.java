@@ -53,10 +53,15 @@ public final class AuthTestSupport {
                 Http.acceptHtml(), null);
 
         String signInLocation = authorize.getHeaders().getFirst(HttpHeaders.LOCATION);
+        // The sign-in redirect must stay on the SAME ORIGIN the authorize request
+        // used: the saved-request session cookie is host-scoped, and a configured
+        // store.base-url origin splits the flow across two cookie jars (the
+        // desktop sign-in then never receives its callback).
         if (signInLocation == null
-                || !signInLocation.startsWith("http://localhost:8089/signin?oauth=1")) {
-            throw new IllegalStateException("OAuth did not redirect to Store Web sign-in: "
-                    + signInLocation);
+                || !signInLocation.endsWith("/signin?oauth=1")
+                || !signInLocation.startsWith(rest.base + "/signin")) {
+            throw new IllegalStateException("OAuth did not redirect to a same-origin "
+                    + "Store Web sign-in (" + rest.base + "): " + signInLocation);
         }
 
         String sessionCookie = cookie(authorize);

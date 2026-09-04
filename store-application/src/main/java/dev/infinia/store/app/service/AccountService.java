@@ -29,16 +29,20 @@ public class AccountService {
     private final IdentityRepositories.CredentialRepository credentials;
     private final IdentityRepositories.SessionRepository sessions;
     private final IdentityRepositories.DeviceRepository devices;
+    private final IdentityRepositories.RefreshTokenRepository refreshTokens;
     private final PasswordHasher hasher;
 
     public AccountService(IdentityRepositories.UserRepository users,
             IdentityRepositories.CredentialRepository credentials,
             IdentityRepositories.SessionRepository sessions,
-            IdentityRepositories.DeviceRepository devices, PasswordHasher hasher) {
+            IdentityRepositories.DeviceRepository devices,
+            IdentityRepositories.RefreshTokenRepository refreshTokens,
+            PasswordHasher hasher) {
         this.users = users;
         this.credentials = credentials;
         this.sessions = sessions;
         this.devices = devices;
+        this.refreshTokens = refreshTokens;
         this.hasher = hasher;
     }
 
@@ -135,6 +139,17 @@ public class AccountService {
         return sessions.findByUserId(userId);
     }
 
+    /** A session owned by the user, for binding desktop refresh credentials. */
+    public IdentityRepositories.UserSessionRecord sessionForUser(UUID userId, UUID sessionId) {
+        IdentityRepositories.UserSessionRecord record = sessions.findById(sessionId)
+                .orElseThrow(() -> new DomainException(StoreErrorCode.NOT_FOUND,
+                        "Session not found"));
+        if (!record.userId().equals(userId)) {
+            throw DomainException.forbidden("Cannot access another user's session");
+        }
+        return record;
+    }
+
     public void revokeSession(UUID userId, UUID sessionId) {
         IdentityRepositories.UserSessionRecord record = sessions.findById(sessionId)
                 .orElseThrow(() -> new DomainException(StoreErrorCode.NOT_FOUND,
@@ -143,6 +158,9 @@ public class AccountService {
             throw DomainException.forbidden("Cannot revoke another user's session");
         }
         sessions.markRevoked(sessionId);
+        // A revoked session must also kill its desktop refresh family — the
+        // ledger row blocks access tokens, the family blocks renewal.
+        refreshTokens.revokeFamily(sessionId);
     }
 
     public List<dev.infinia.store.domain.model.Device> devices(UUID userId) {

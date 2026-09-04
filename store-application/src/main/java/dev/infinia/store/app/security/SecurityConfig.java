@@ -29,7 +29,6 @@ import org.springframework.security.oauth2.server.authorization.settings.TokenSe
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
@@ -55,12 +54,17 @@ import java.util.UUID;
 public class SecurityConfig {
 
     // Public API paths that never require authentication (design §3.1 anonymous browsing).
+    // /api/v1/auth/refresh and /revoke are public because the presented desktop
+    // credential itself is the only authenticator — no client secret pairing.
     private static final String[] PUBLIC_API = {
             "/api/v1/catalog", "/api/v1/listings/**", "/api/v1/resolutions",
             "/api/v1/updates/**", "/api/v1/auth/register", "/api/v1/auth/login",
+            "/api/v1/auth/refresh", "/api/v1/auth/revoke",
             "/api/v1/blobs/**", "/api/v1/compat/**",
             "/api/v1/releases/*/download-ticket", "/api/v1/releases/*/install-manifest",
-            "/api/v1/releases/*/checksums.txt"
+            "/api/v1/releases/*/checksums.txt",
+            // Service status must stay reachable exactly when things are broken.
+            "/api/v1/status", "/api/v1/status/incidents"
     };
 
     @Bean
@@ -73,8 +77,16 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/oauth2/token", "/oauth2/revoke"))
                 .exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
-                        new LoginUrlAuthenticationEntryPoint(
-                                properties.webSignInUri() + "?oauth=1"),
+                        // Same-origin sign-in: the browser must land on /signin of the
+                        // host it used for /oauth2/authorize, because the saved-request
+                        // session cookie is host-scoped. Redirecting to a configured
+                        // store.base-url origin splits the flow across two cookie jars
+                        // when the channel host differs (e.g. localhost vs a LAN IP):
+                        // login succeeds, there is no saved request to resume, and the
+                        // desktop app's callback never fires — the user just lands in
+                        // the store's own web UI.
+                        (request, response, authException) -> response.sendRedirect(
+                                request.getContextPath() + "/signin?oauth=1"),
                         new MediaTypeRequestMatcher(MediaType.TEXT_HTML)))
                 .oauth2ResourceServer(rs -> rs.jwt(Customizer.withDefaults()))
                 .with(authorizationServer, configurer -> configurer
@@ -126,8 +138,11 @@ public class SecurityConfig {
                         // GET /login is a deprecated redirect to Store Web, never a form.
                         .loginPage("/login")
                         .loginProcessingUrl("/oauth2/session-login")
+                        // Same-origin as the authorize request, matching the entry
+                        // point above: a configured base-url origin would split the
+                        // saved-request session across two host-scoped cookie jars.
                         .failureHandler((request, response, failure) -> response.sendRedirect(
-                                properties.webSignInUri() + "?oauth=1&error=1")));
+                                request.getContextPath() + "/signin?oauth=1&error=1")));
         return http.build();
     }
 
