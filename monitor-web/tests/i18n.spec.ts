@@ -22,7 +22,7 @@ describe('locale structural parity', () => {
   it('covers every monitored component in both locales', () => {
     const components = [
       'api', 'web', 'auth', 'delivery', 'database', 'blob', 'scanner', 'upstream',
-      'host-disk', 'host-memory', 'runtime-jvm', 'db-pool', 'http-quality', 'external',
+      'host-load', 'db-pool', 'http-quality', 'external',
     ];
     for (const key of components) {
       expect((en.status.component as Record<string, string>)[key]).toBeTruthy();

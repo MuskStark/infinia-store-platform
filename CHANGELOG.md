@@ -23,12 +23,15 @@
   width and the remaining height of the viewport, with no internal scroll containers
   (verified cell-by-cell at 1280×900 and 375×812). Served embedded from the monitor jar
   (`build-monitor-jar.sh`), same single-origin pattern as the store.
-- The store's own status page grew five comprehensive in-process probes — host storage
+- The store's own status page grew comprehensive in-process probes — host storage
   capacity, host memory (Linux reads /proc/meminfo `MemAvailable`; the JDK's MemFree
   counter is near-zero on any healthy Linux box), JVM heap, Hikari pool saturation, and
   HTTP quality (5xx ratio + count-weighted p95 from the published percentile) — taking
-  `GET /api/v1/status` from 8 to 13 components. Thresholds live under `store.monitoring.*`
-  (`STORE_MONITOR_*` env), each defaulting sanely and overridable per deployment.
+  `GET /api/v1/status` from 8 to 11 components. The three host-level probes report as one
+  merged `host-load` cell (worst-of storage/memory/heap): operators act on "the host is
+  loaded", not on three separately blinking cells. Thresholds live under
+  `store.monitoring.*` (`STORE_MONITOR_*` env), each defaulting sanely and overridable
+  per deployment.
 - The store SPA's `/status` route now redirects to the standalone monitor
   (`VITE_MONITOR_BASE_URL` at build time); the in-SPA StatusView and its locale slice were
   removed in favor of the monitor's page. The store's status API itself is unchanged and

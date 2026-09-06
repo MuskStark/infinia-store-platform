@@ -68,9 +68,10 @@ public class StatusService {
 
     /**
      * Display order of the page; probed components also open/close incidents.
-     * The five infrastructure/runtime components (host-disk … http-quality) keep
-     * the store observable from the outside only through this API — the mirror
-     * on the monitor server renders whatever this list reports.
+     * The host-level probes (disk, memory, JVM) feed one merged component —
+     * host-load, worst-of — because operators act on "the host is loaded",
+     * not on three separately blinking cells; db-pool and http-quality stay
+     * separate as application-behaviour signals.
      */
     private static final List<Component> COMPONENTS = List.of(
             new Component("api", false, "Store API"),
@@ -81,9 +82,7 @@ public class StatusService {
             new Component("blob", true, "Artifact storage"),
             new Component("scanner", false, "Security scanning"),
             new Component("upstream", true, "Upstream sync"),
-            new Component("host-disk", true, "Host storage capacity"),
-            new Component("host-memory", true, "Host memory"),
-            new Component("runtime-jvm", true, "Java runtime"),
+            new Component("host-load", true, "Host server load"),
             new Component("db-pool", true, "Database connection pool"),
             new Component("http-quality", true, "HTTP response quality"));
 
@@ -278,9 +277,7 @@ public class StatusService {
                 case "delivery" -> worst(List.of(probeDatabase(), probeBlobStorage()));
                 case "auth" -> probeDatabase();
                 case "upstream" -> probeUpstream();
-                case "host-disk" -> probeHostDisk();
-                case "host-memory" -> probeHostMemory();
-                case "runtime-jvm" -> probeJvmHeap();
+                case "host-load" -> probeHostLoad();
                 case "db-pool" -> probeDbPool();
                 case "http-quality" -> probeHttpQuality();
                 default -> OPERATIONAL;
@@ -320,6 +317,23 @@ public class StatusService {
         } catch (Exception e) {
             return MAJOR_OUTAGE;
         }
+    }
+
+    /**
+     * Host server load: worst-of storage capacity, memory headroom and JVM
+     * heap pressure — one honest cell for "the host is in trouble", with the
+     * specific probe logged at debug level for diagnosis.
+     */
+    private String probeHostLoad() throws Exception {
+        String disk = probeHostDisk();
+        String memory = probeHostMemory();
+        String jvm = probeJvmHeap();
+        String worst = worst(List.of(disk, memory, jvm));
+        if (!OPERATIONAL.equals(worst)) {
+            org.slf4j.LoggerFactory.getLogger(StatusService.class)
+                    .debug("host-load probes: disk={} memory={} jvm={}", disk, memory, jvm);
+        }
+        return worst;
     }
 
     /**

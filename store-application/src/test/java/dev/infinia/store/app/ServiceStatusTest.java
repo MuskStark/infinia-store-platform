@@ -46,11 +46,10 @@ class ServiceStatusTest {
                 .contains(page.get("indicator")));
 
         List<Map<String, Object>> components = (List<Map<String, Object>>) page.get("components");
-        assertEquals(13, components.size());
+        assertEquals(11, components.size());
         List<String> keys = components.stream().map(c -> String.valueOf(c.get("key"))).toList();
         assertEquals(List.of("api", "web", "auth", "delivery", "database", "blob",
-                "scanner", "upstream", "host-disk", "host-memory", "runtime-jvm",
-                "db-pool", "http-quality"), keys);
+                "scanner", "upstream", "host-load", "db-pool", "http-quality"), keys);
 
         // The live database probe must be healthy in the test profile.
         Map<String, Object> database = components.stream()

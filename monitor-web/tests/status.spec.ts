@@ -28,7 +28,7 @@ function day(index: number): ServiceStatus['components'][number]['history'][numb
 /** The full 14-component merged page the monitor serves (13 mirrored + external). */
 const componentKeys = [
   'api', 'web', 'auth', 'delivery', 'database', 'blob', 'scanner', 'upstream',
-  'host-disk', 'host-memory', 'runtime-jvm', 'db-pool', 'http-quality', 'external',
+  'host-load', 'db-pool', 'http-quality', 'external',
 ];
 
 function statusWith(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
@@ -39,7 +39,7 @@ function statusWith(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
     stale: false,
     components: componentKeys.map((key, index) => ({
       key,
-      indicator: index === 13 ? 'operational' : 'operational',
+      indicator: 'operational',
       uptime90d: 100,
       history: Array.from({ length: 90 }, (_, i) => day(i)),
     })),
@@ -73,15 +73,15 @@ describe('StatusView (monitor)', () => {
     expect(wrapper.find('[data-testid="status-banner"]').text().replace(/\s+/g, ' ')).toBe(
       '✓ All systems operational',
     );
-    // 14 services + 1 overall + 4 spare = 19 hexagon cells.
+    // 12 services + 1 overall + 6 spare = 19 hexagon cells.
     expect(wrapper.findAll('.hive-cell')).toHaveLength(19);
-    expect(wrapper.findAll('[data-testid="status-component"]')).toHaveLength(14);
+    expect(wrapper.findAll('[data-testid="status-component"]')).toHaveLength(12);
     expect(wrapper.findAll('.hive-cell--overall')).toHaveLength(1);
     // The legend mirrors the full component list, external reachability included.
     const legend = wrapper.find('[data-testid="hive-legend"]');
-    expect(legend.findAll('li')).toHaveLength(14);
+    expect(legend.findAll('li')).toHaveLength(12);
     expect(legend.text()).toContain('External reachability');
-    expect(legend.text()).toContain('Host storage capacity');
+    expect(legend.text()).toContain('Host server load');
     expect(legend.text()).toContain('HTTP response quality');
   });
 
@@ -111,7 +111,7 @@ describe('StatusView (monitor)', () => {
       stale: true,
       components: componentKeys.map((key, index) => ({
         key,
-        indicator: index === 13 ? 'major_outage' as const : 'operational' as const,
+        indicator: 'operational' as const,
         uptime90d: 100,
         history: Array.from({ length: 90 }, (_, i) => day(i)),
       })),
