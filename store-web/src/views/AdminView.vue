@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n';
 import { api, type AdminAppRelease, type AdminAppUploadSession, type AdminListing, type AdminUser, type AuditEvent, type DataSourceStatus, type RemoteDatabase, type RemoteDatabaseTestResult, type Report } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
-import { beeMark } from '../bee-levels';
 import EmptyState from '../components/EmptyState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
 import ErrorState from '../components/ErrorState.vue';
@@ -129,9 +128,8 @@ const usersError = ref<string | null>(null);
 const savingUserId = ref<string | null>(null);
 const userSearch = ref('');
 const BEE_LEVELS = [0, 1, 2, 3, 4];
-/** Option label mirrors the badge: the emblem changes with the level. */
 function beeLevelLabel(level: number, suffix = ''): string {
-  return `${beeMark(level).emblem} ${t(`beeLevel.${level}`)} · Lv${level}${suffix}`;
+  return `${t(`beeLevel.${level}`)} · Lv${level}${suffix}`;
 }
 
 const filteredUsers = ref<AdminUser[]>([]);
@@ -466,7 +464,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 :key="key"
                 role="tab"
                 :aria-selected="tab === key"
-                class="rounded-lg px-3 py-1.5 text-left text-sm transition-colors"
+                class="flex items-center rounded-lg px-3 py-1.5 text-left text-sm transition-colors [min-height:2.25rem]"
                 :class="tab === key
                   ? 'bg-accent/10 font-semibold text-accent dark:bg-accent/20'
                   : 'text-muted hover:bg-surface-muted hover:text-ink dark:hover:bg-slate-800 dark:hover:text-slate-200'"
@@ -481,30 +479,26 @@ async function deleteAppRelease(rel: AdminAppRelease) {
         <div class="min-w-0">
           <section v-if="tab === 'users'" class="space-y-3">
         <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.usersHint') }}</p>
-        <p
-          v-if="usersError"
-          class="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-          role="alert"
-        >
+        <p v-if="usersError" class="alert alert-error" role="alert">
           {{ usersError }}
         </p>
         <input
           v-model="userSearch"
           :placeholder="t('admin.userSearch')"
-          class="w-full max-w-md rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+          class="input max-w-md"
           @input="applyUserFilter"
         />
         <LoadingGrid v-if="usersLoading && !users.length" />
         <EmptyState v-else-if="!filteredUsers.length" :title="t('common.empty')" />
-        <div v-else class="overflow-x-auto">
-          <table class="w-full text-left text-sm">
+        <div v-else class="table-card">
+          <table>
             <thead>
-              <tr class="text-muted">
-                <th class="p-2">{{ t('admin.userAccount') }}</th>
-                <th class="p-2">{{ t('account.roles') }}</th>
-                <th class="p-2">{{ t('beeLevel.title') }}</th>
-                <th class="p-2">{{ t('admin.userStatus') }}</th>
-                <th class="p-2">{{ t('admin.userLastLogin') }}</th>
+              <tr>
+                <th>{{ t('admin.userAccount') }}</th>
+                <th>{{ t('account.roles') }}</th>
+                <th>{{ t('beeLevel.title') }}</th>
+                <th>{{ t('admin.userStatus') }}</th>
+                <th>{{ t('admin.userLastLogin') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -513,18 +507,18 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 :key="row.userId"
                 class="border-t border-line dark:border-slate-800"
               >
-                <td class="p-2">
+                <td>
                   <div class="font-medium">{{ row.displayName }}</div>
                   <code class="block text-xs text-muted">{{ row.email }}</code>
                 </td>
-                <td class="p-2">
+                <td>
                   <span class="flex flex-wrap gap-1">
                     <Badge v-for="role in row.roles" :key="role" tone="muted">
                       {{ t(`role.${role}`) }}
                     </Badge>
                   </span>
                 </td>
-                <td class="p-2">
+                <td>
                   <!-- The badge itself is the trigger: click to change the level
                        in place, no duplicate dropdown beside it. -->
                   <SelectMenu
@@ -542,19 +536,17 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                     </template>
                   </SelectMenu>
                 </td>
-                <td class="p-2">
+                <td>
                   <button
-                    class="rounded-lg px-3 py-1.5 text-xs font-semibold"
-                    :class="row.status === 'ACTIVE'
-                      ? 'border border-line text-muted dark:border-slate-800'
-                      : 'bg-red-600 text-white'"
+                    class="btn btn-sm"
+                    :class="row.status === 'ACTIVE' ? 'btn-danger-outline' : 'btn-success'"
                     :disabled="savingUserId === row.userId"
                     @click="toggleUserStatus(row)"
                   >
                     {{ row.status === 'ACTIVE' ? t('admin.disable') : t('admin.enable') }}
                   </button>
                 </td>
-                <td class="p-2 text-xs text-muted">{{ formatDateTime(row.lastLoginAt) }}</td>
+                <td class="text-xs text-muted">{{ formatDateTime(row.lastLoginAt) }}</td>
               </tr>
             </tbody>
           </table>
@@ -563,11 +555,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
 
       <section v-if="tab === 'databases'" class="space-y-5">
         <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.databasesHint') }}</p>
-        <p
-          v-if="databasesError"
-          class="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-          role="alert"
-        >
+        <p v-if="databasesError" class="alert alert-error" role="alert">
           {{ databasesError }}
         </p>
 
@@ -612,7 +600,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 required
                 maxlength="100"
                 placeholder="production-pg"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1"
               />
             </label>
             <label class="block text-sm">
@@ -622,7 +610,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 required
                 maxlength="200"
                 placeholder="store"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1"
               />
             </label>
             <label class="block text-sm sm:col-span-2">
@@ -632,7 +620,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 required
                 maxlength="500"
                 placeholder="jdbc:postgresql://db.example.com:5432/store"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 font-mono text-sm dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1 font-mono text-xs"
               />
             </label>
             <label class="block text-sm">
@@ -642,14 +630,11 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 required
                 type="password"
                 autocomplete="new-password"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1"
               />
             </label>
             <div class="sm:self-end">
-              <button
-                :disabled="addingDb"
-                class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
+              <button :disabled="addingDb" class="btn btn-primary">
                 {{ addingDb ? t('common.loading') : t('admin.addDatabase') }}
               </button>
             </div>
@@ -663,7 +648,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           <li
             v-for="row in databases"
             :key="row.databaseId"
-            class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-4 dark:border-slate-800"
+            class="card flex flex-wrap items-center justify-between gap-3 p-4"
           >
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
@@ -689,24 +674,22 @@ async function deleteAppRelease(rel: AdminAppRelease) {
             <div class="flex flex-wrap items-center gap-2">
               <button
                 :disabled="dbBusyId === row.databaseId"
-                class="rounded-xl border border-line px-3 py-2 text-sm font-semibold disabled:opacity-50 dark:border-slate-800"
+                class="btn btn-secondary btn-sm"
                 @click="probeDatabase(row)"
               >
                 {{ t('admin.dbTest') }}
               </button>
               <button
                 :disabled="dbBusyId === row.databaseId"
-                class="rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
-                :class="row.enabled
-                  ? 'border border-line text-muted dark:border-slate-800'
-                  : 'bg-accent text-white'"
+                class="btn btn-sm"
+                :class="row.enabled ? 'btn-secondary' : 'btn-primary'"
                 @click="toggleActivation(row)"
               >
                 {{ row.enabled ? t('admin.dbDeactivate') : t('admin.dbActivate') }}
               </button>
               <button
                 :disabled="dbBusyId === row.databaseId"
-                class="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                class="btn btn-danger btn-sm"
                 @click="removeDatabase(row)"
               >
                 {{ t('admin.dbDelete') }}
@@ -715,11 +698,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           </li>
         </ul>
 
-        <div
-          v-if="lastProbe"
-          class="rounded-xl border border-line p-4 text-sm dark:border-slate-800"
-          role="status"
-        >
+        <div v-if="lastProbe" class="card p-4 text-sm" role="status">
           <template v-if="lastProbe.ok">
             ✅ {{ t('admin.dbTestOk') }} — {{ lastProbe.productName }}
             {{ lastProbe.productVersion }}
@@ -743,7 +722,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 v-model="newName"
                 required
                 :placeholder="'superpowers'"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1"
               />
             </label>
             <label class="block text-sm">
@@ -753,7 +732,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 required
                 type="url"
                 placeholder="https://github.com/obra/superpowers"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1"
               />
             </label>
             <label class="block text-sm">
@@ -763,27 +742,26 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 required
                 pattern="[a-z0-9][a-z0-9-]{0,62}"
                 placeholder="superpowers"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1"
               />
             </label>
             <label class="block text-sm">
               {{ t('admin.upstreamAdapter') }}
-              <select
+              <SelectMenu
                 v-model="newAdapter"
-                class="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
-              >
-                <option value="AUTO">AUTO</option>
-                <option value="CLAUDE_MARKETPLACE">CLAUDE_MARKETPLACE</option>
-                <option value="SKILL_REPOSITORY">SKILL_REPOSITORY</option>
-                <option value="MCP_REGISTRY">MCP_REGISTRY</option>
-                <option value="SKILLHUB_REGISTRY">SKILLHUB_REGISTRY</option>
-              </select>
+                class="mt-1"
+                :options="[
+                  { value: 'AUTO', label: 'AUTO' },
+                  { value: 'CLAUDE_MARKETPLACE', label: 'CLAUDE_MARKETPLACE' },
+                  { value: 'SKILL_REPOSITORY', label: 'SKILL_REPOSITORY' },
+                  { value: 'MCP_REGISTRY', label: 'MCP_REGISTRY' },
+                  { value: 'SKILLHUB_REGISTRY', label: 'SKILLHUB_REGISTRY' },
+                ]"
+                :aria-label="t('admin.upstreamAdapter')"
+              />
             </label>
             <div class="sm:col-span-2">
-              <button
-                :disabled="adding"
-                class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
-              >
+              <button :disabled="adding" class="btn btn-primary">
                 {{ adding ? t('common.loading') : t('admin.addUpstream') }}
               </button>
             </div>
@@ -796,7 +774,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           <li
             v-for="row in upstreams"
             :key="row.upstreamId"
-            class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-4 dark:border-slate-800"
+            class="card flex flex-wrap items-center justify-between gap-3 p-4"
           >
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
@@ -826,7 +804,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
               </span>
               <button
                 :disabled="syncingId === row.upstreamId"
-                class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                class="btn btn-primary btn-sm"
                 @click="syncNow(row)"
               >
                 <span v-if="syncingId === row.upstreamId" class="mr-1 inline-block cx-spin" />
@@ -836,11 +814,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           </li>
         </ul>
 
-        <div
-          v-if="lastSync"
-          class="rounded-xl border border-line p-4 text-sm dark:border-slate-800"
-          role="status"
-        >
+        <div v-if="lastSync" class="card p-4 text-sm" role="status">
           <strong>{{ lastSync.upstream }}</strong>:
           {{ t('admin.syncImported', { n: lastSync.imported }) }} ·
           {{ t('admin.syncSkipped', { n: lastSync.skipped }) }} ·
@@ -855,52 +829,48 @@ async function deleteAppRelease(rel: AdminAppRelease) {
         <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.listingsHint') }}</p>
         <LoadingGrid v-if="listingsLoading && !listings.length" />
         <EmptyState v-else-if="!listings.length" :title="t('common.empty')" />
-        <div v-else class="overflow-x-auto">
-          <table class="w-full text-left text-sm">
+        <div v-else class="table-card">
+          <table>
             <thead>
-              <tr class="text-muted">
-                <th class="p-2">{{ t('admin.listingName') }}</th>
-                <th class="p-2">{{ t('common.type') }}</th>
-                <th class="p-2">{{ t('publisher.version') }}</th>
-                <th class="p-2">{{ t('admin.visibility') }}</th>
-                <th class="p-2">{{ t('admin.featured') }}</th>
-                <th class="p-2">{{ t('admin.minBeeLevel') }}</th>
+              <tr>
+                <th>{{ t('admin.listingName') }}</th>
+                <th>{{ t('common.type') }}</th>
+                <th>{{ t('publisher.version') }}</th>
+                <th>{{ t('admin.visibility') }}</th>
+                <th>{{ t('admin.featured') }}</th>
+                <th>{{ t('admin.minBeeLevel') }}</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in listings" :key="row.listingId" class="border-t border-line dark:border-slate-800">
-                <td class="p-2">
+              <tr v-for="row in listings" :key="row.listingId">
+                <td>
                   <RouterLink :to="listingRoute(row.coordinate)" class="font-medium hover:text-accent">
                     {{ row.name }}
                   </RouterLink>
                   <code class="block text-xs text-muted">{{ row.coordinate }}</code>
                 </td>
-                <td class="p-2">{{ t(`type.${row.type}`) }}</td>
-                <td class="p-2">{{ row.latestVersion ? 'v' + row.latestVersion : '—' }}</td>
-                <td class="p-2">
+                <td>{{ t(`type.${row.type}`) }}</td>
+                <td class="whitespace-nowrap">{{ row.latestVersion ? 'v' + row.latestVersion : '—' }}</td>
+                <td>
                   <button
-                    class="rounded-lg px-3 py-1.5 text-xs font-semibold"
-                    :class="row.visibility === 'PUBLIC'
-                      ? 'border border-line text-muted dark:border-slate-800'
-                      : 'bg-red-600 text-white'"
+                    class="btn btn-sm"
+                    :class="row.visibility === 'PUBLIC' ? 'btn-secondary' : 'btn-danger'"
                     @click="toggleVisibility(row)"
                   >
                     {{ row.visibility === 'PUBLIC' ? t('admin.delist') : t('admin.relist') }}
                   </button>
                 </td>
-                <td class="p-2">
+                <td>
                   <button
-                    class="rounded-lg px-3 py-1.5 text-xs font-semibold"
-                    :class="row.featured
-                      ? 'bg-amber-500 text-white'
-                      : 'border border-line text-muted dark:border-slate-800'"
+                    class="btn btn-sm"
+                    :class="row.featured ? 'bg-warning text-white' : 'btn-secondary'"
                     :aria-pressed="row.featured"
                     @click="toggleFeatured(row)"
                   >
                     {{ row.featured ? '★ ' + t('admin.featured') : t('admin.feature') }}
                   </button>
                 </td>
-                <td class="p-2">
+                <td class="whitespace-nowrap">
                   <SelectMenu
                     :model-value="row.minBeeLevel"
                     :options="BEE_LEVELS.map((level) => ({ value: level, label: level === 0 ? t('admin.beeLevelPublic') : beeLevelLabel(level, '+') }))"
@@ -910,9 +880,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                     <template #trigger>
                       <span class="inline-flex items-center gap-1 whitespace-nowrap">
                         <Badge v-if="row.minBeeLevel === 0" tone="muted">{{ t('admin.beeLevelPublic') }}</Badge>
-                        <Badge v-else :tone="beeMark(row.minBeeLevel).tone">
-                          {{ beeMark(row.minBeeLevel).emblem }} {{ t(`beeLevel.${row.minBeeLevel}`) }} · Lv{{ row.minBeeLevel }}+
-                        </Badge>
+                        <BeeLevelBadge v-else :level="row.minBeeLevel" demands />
                         <span class="text-xs text-muted" aria-hidden="true">▾</span>
                       </span>
                     </template>
@@ -944,19 +912,13 @@ async function deleteAppRelease(rel: AdminAppRelease) {
               v-model="notes[report.reportId ?? '']"
               :placeholder="t('admin.resolutionNote')"
               rows="2"
-              class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+              class="input"
             />
             <div class="flex gap-2">
-              <button
-                class="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white"
-                @click="resolve(report, 'ACTIONED')"
-              >
+              <button class="btn btn-danger" @click="resolve(report, 'ACTIONED')">
                 {{ t('admin.action') }}
               </button>
-              <button
-                class="rounded-xl border border-line px-4 py-2 text-sm dark:border-slate-800"
-                @click="resolve(report, 'DISMISSED')"
-              >
+              <button class="btn btn-secondary" @click="resolve(report, 'DISMISSED')">
                 {{ t('admin.dismiss') }}
               </button>
             </div>
@@ -979,11 +941,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                 class="hidden"
                 @change="onAppFileChange"
               />
-              <button
-                type="button"
-                class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
-                @click="appFileInput?.click()"
-              >
+              <button type="button" class="btn btn-secondary" @click="appFileInput?.click()">
                 {{ t('admin.appChooseFile') }}
               </button>
               <span class="min-w-0 flex-1 truncate text-sm" :class="appFile ? '' : 'text-muted dark:text-slate-400'">
@@ -996,21 +954,17 @@ async function deleteAppRelease(rel: AdminAppRelease) {
             </div>
             <label class="block w-full text-sm">
               {{ t('admin.appChangelog') }}
-              <textarea
-                v-model="appChangelog"
-                rows="2"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
-              />
+              <textarea v-model="appChangelog" rows="2" class="input mt-1" />
             </label>
             <button
               :disabled="appUploading || !appFile || !appDetected"
-              class="self-start whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              class="btn btn-primary self-start whitespace-nowrap"
             >
               {{ appUploading ? t('admin.appUploading') : t('admin.appUploadAndPublish') }}
             </button>
           </form>
-          <p v-if="appMessage" class="mt-2 text-sm text-green-600 dark:text-green-400">{{ appMessage }}</p>
-          <p v-if="appError" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ appError }}</p>
+          <p v-if="appMessage" class="alert alert-success mt-2" role="status">{{ appMessage }}</p>
+          <p v-if="appError" class="alert alert-error mt-2" role="alert">{{ appError }}</p>
         </MagicCard>
 
         <h3 class="font-semibold">{{ t('admin.appReleaseHistory') }}</h3>
@@ -1019,7 +973,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           <li
             v-for="rel in appReleases"
             :key="rel.releaseId"
-            class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 dark:border-slate-800"
+            class="card flex flex-wrap items-center justify-between gap-2 px-3 py-2"
           >
             <div class="flex flex-wrap items-center gap-2">
               <span class="font-semibold">v{{ rel.version }}</span>
@@ -1031,10 +985,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
             </div>
             <div class="flex items-center gap-2">
               <span class="text-xs text-muted">{{ formatDateTime(rel.publishedAt) }}</span>
-              <button
-                class="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-red-600 dark:border-slate-800 dark:text-red-400"
-                @click="deleteAppRelease(rel)"
-              >
+              <button class="btn btn-danger-outline btn-sm" @click="deleteAppRelease(rel)">
                 {{ t('admin.appDelete') }}
               </button>
             </div>
@@ -1050,19 +1001,15 @@ async function deleteAppRelease(rel: AdminAppRelease) {
               v-model="releaseId"
               required
               placeholder="release UUID"
-              class="w-full rounded-xl border border-line px-3 py-2 font-mono text-sm dark:border-slate-800 dark:bg-slate-900"
+              class="input font-mono"
             />
-            <input
-              v-model="reason"
-              :placeholder="t('admin.reasonLabel')"
-              class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
-            />
-            <button class="rounded-xl border border-line px-4 py-2 text-sm font-semibold dark:border-slate-800">
+            <input v-model="reason" :placeholder="t('admin.reasonLabel')" class="input" />
+            <button class="btn btn-secondary">
               {{ t('admin.yank') }}
             </button>
           </form>
           <button
-            class="mt-3 w-full rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white"
+            class="btn btn-danger mt-3 w-full"
             :disabled="!releaseId"
             @click="withdraw('quarantine')"
           >
@@ -1078,7 +1025,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           <li
             v-for="event in auditEvents"
             :key="event.eventId"
-            class="rounded-lg border border-line px-3 py-2 dark:border-slate-800"
+            class="card px-3 py-2"
           >
             <span class="text-muted">{{ formatDateTime(event.occurredAt) }}</span>
             · <span class="font-semibold">{{ event.action }}</span>

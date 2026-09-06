@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api, ApiRequestError, type DownloadTicket, type Library, type ListingDetail, type RatingsPage, type ResolveResponse } from '../api/client';
-import { Badge, MagicCard, ShimmerButton, ProgressBar, BorderBeam } from '@infinia/magic-ui-vue';
+import { Badge, MagicCard, ProgressBar } from '@infinia/magic-ui-vue';
 import StateChip from '../components/StateChip.vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
 import ErrorState from '../components/ErrorState.vue';
@@ -308,7 +308,7 @@ const installLabel = computed(() => {
   <LoadingGrid v-else-if="loading" />
   <div
     v-else-if="gateRequired !== null"
-    class="rounded-3xl border border-line bg-surface p-10 text-center dark:border-slate-800 dark:bg-slate-900"
+    class="rounded-xl border border-line bg-surface p-10 text-center dark:border-slate-800 dark:bg-slate-900"
   >
     <div class="text-5xl">🐝</div>
     <h1 class="mt-4 text-2xl font-bold">{{ t('listing.beeGateTitle') }}</h1>
@@ -320,31 +320,20 @@ const installLabel = computed(() => {
       <RouterLink
         v-if="!auth.isAuthenticated"
         to="/signin"
-        class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
+        class="btn btn-primary"
       >
         {{ t('listing.beeGateSignIn') }}
       </RouterLink>
     </div>
   </div>
-  <div v-else-if="detail" class="space-y-8">
-    <header class="relative overflow-visible rounded-3xl border border-line bg-surface p-8 dark:border-slate-800 dark:bg-slate-900">
-      <BorderBeam v-if="latestRelease?.channel === 'beta'" :size="2" :duration="7" />
-      <div class="flex flex-wrap items-start gap-6">
-        <img
-          v-if="detail.iconUrl"
-          :src="detail.iconUrl"
-          alt=""
-          class="h-16 w-16 rounded-2xl object-cover"
-        />
-        <div
-          v-else
-          class="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-accent to-accent2 text-2xl font-bold text-white"
-        >
-          {{ displayName.charAt(0) }}
-        </div>
+  <div v-else-if="detail" class="space-y-6">
+    <!-- Marketplace detail header: big black title, badge row, publisher line;
+         the CTA rail sits at the right like the marketplace install column. -->
+    <header class="space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-6">
         <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <h1 class="text-2xl font-bold">{{ displayName }}</h1>
+          <h1 class="max-w-2xl text-3xl font-bold leading-tight tracking-tight">{{ displayName }}</h1>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
             <Badge tone="muted">{{ t(`type.${detail.type}`) }}</Badge>
             <Badge v-if="latestRelease" tone="muted">{{ displayVersion(latestRelease.version) }}</Badge>
             <Badge v-if="isLiveUpstream" tone="accent">{{ t('listing.liveDelivery') }}</Badge>
@@ -353,12 +342,19 @@ const installLabel = computed(() => {
               {{ t(`channel.${detail.defaultChannel}`) }}
             </Badge>
           </div>
-          <p class="mt-2 max-w-2xl text-muted dark:text-slate-400">
+          <div class="mt-3 flex items-center gap-2.5">
+            <span
+              class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-xs font-bold text-white"
+              style="background: var(--hero-gradient)"
+              aria-hidden="true"
+            >{{ (detail.publisherName ?? '?').charAt(0).toUpperCase() }}</span>
+            <span class="text-sm font-semibold">{{ detail.publisherName }}</span>
+          </div>
+          <p class="mt-3 max-w-2xl text-[15px] leading-7 text-muted dark:text-slate-400">
             {{ localization?.summary }}
           </p>
           <p class="mt-2 text-sm text-muted dark:text-slate-500">
-            {{ t('listing.publisher') }}: <strong>{{ detail.publisherName }}</strong>
-            · {{ formatNumber(detail.downloads ?? 0) }} {{ t('discover.statsDownloads') }}
+            {{ formatNumber(detail.downloads ?? 0) }} {{ t('discover.statsDownloads') }}
             · {{ formatNumber(detail.favorites ?? 0) }} {{ t('listing.favoritesCount') }}
             · {{ t('listing.updated') }}: {{ formatDate(detail.updatedAt) }}
           </p>
@@ -366,37 +362,39 @@ const installLabel = computed(() => {
             v-if="detail.category || detail.tags?.length"
             class="mt-3 flex flex-wrap items-center gap-1.5"
           >
-            <Badge v-if="detail.category" tone="accent">{{ detail.category }}</Badge>
+            <Badge v-if="detail.category" tone="muted">{{ detail.category }}</Badge>
             <Badge v-for="tag in detail.tags" :key="tag" tone="muted">{{ tag }}</Badge>
           </div>
         </div>
         <div class="flex w-full flex-col gap-2 sm:w-56">
-          <ShimmerButton
+          <button
             v-if="!isAppListing"
+            class="btn btn-primary"
             :disabled="installStage !== 'idle' && installStage !== 'failed'"
             @click="startInstall"
           >
             {{ installLabel }}
-          </ShimmerButton>
-          <ShimmerButton
+          </button>
+          <button
             v-else-if="recommendedArtifact"
+            class="btn btn-primary"
             :disabled="artifactTickets[recommendedArtifact.artifactId ?? ''] === 'loading'"
             @click="downloadArtifact(recommendedArtifact)"
           >
             {{ artifactTickets[recommendedArtifact.artifactId ?? ''] === 'loading'
               ? t('listing.downloading') : t('common.download') }}
-          </ShimmerButton>
+          </button>
           <ProgressBar v-if="installStage === 'downloading' || installStage === 'verifying'" />
           <button
             v-if="auth.isAuthenticated"
-            class="rounded-xl border border-line px-4 py-2 text-sm dark:border-slate-800"
+            class="btn btn-secondary"
             @click="toggleFavorite"
           >
             {{ favorited ? t('listing.favoriteRemove') : t('listing.favoriteAdd') }}
           </button>
           <button
             v-if="auth.isAuthenticated && !reportDone"
-            class="rounded-xl border border-line px-4 py-2 text-sm text-muted dark:border-slate-800"
+            class="btn btn-ghost"
             @click="reporting = true"
           >
             {{ t('listing.report') }}
@@ -404,7 +402,7 @@ const installLabel = computed(() => {
           <a
             v-if="ticket"
             :href="ticket.url"
-            class="rounded-xl border border-line px-4 py-2 text-center text-sm underline dark:border-slate-800"
+            class="btn btn-secondary text-center"
             download
           >
             {{ t('common.download') }} (sha256:{{ (ticket.sha256 ?? '').slice(0, 12) }}…)
@@ -415,7 +413,7 @@ const installLabel = computed(() => {
       <!-- Permission confirmation step (design §9.3): escalate = ask again. -->
       <div
         v-if="installStage === 'confirm' && resolution"
-        class="mt-6 rounded-2xl border border-accent/40 bg-accent/5 p-4"
+        class="mt-6 rounded-lg border border-accent/40 bg-accent/5 p-4"
       >
         <h2 class="font-semibold">{{ t('listing.confirmInstall') }}</h2>
         <ul class="mt-2 list-disc space-y-1 pl-6 text-sm">
@@ -429,10 +427,10 @@ const installLabel = computed(() => {
           {{ resolution.missing.map((m) => m.coordinate).join(', ') }}
         </div>
         <div class="mt-3 flex gap-2">
-          <button class="rounded-xl bg-accent px-4 py-2 font-medium text-white" @click="confirmInstall">
+          <button class="btn btn-primary" @click="confirmInstall">
             {{ t('common.confirm') }}
           </button>
-          <button class="rounded-xl border border-line px-4 py-2 dark:border-slate-800" @click="installStage = 'idle'">
+          <button class="btn btn-secondary" @click="installStage = 'idle'">
             {{ t('common.cancel') }}
           </button>
         </div>
@@ -448,8 +446,10 @@ const installLabel = computed(() => {
         :key="key"
         role="tab"
         :aria-selected="tab === key"
-        class="rounded-t-xl px-4 py-2 text-sm"
-        :class="tab === key ? 'border-b-2 border-accent font-semibold' : 'text-muted'"
+        class="-mb-px border-b-2 px-4 py-2.5 text-sm transition-colors"
+        :class="tab === key
+          ? 'border-accent font-semibold text-accent'
+          : 'border-transparent text-muted hover:text-ink dark:hover:text-slate-200'"
         @click="tab = key"
       >
         {{ t(`listing.${key}`) }}
@@ -464,7 +464,7 @@ const installLabel = computed(() => {
         </div>
         <div
           v-if="upstream"
-          class="rounded-2xl border border-line bg-surface-muted p-5 dark:border-slate-800 dark:bg-slate-900/60"
+          class="rounded-lg border border-line bg-surface-muted p-5 dark:border-slate-800 dark:bg-slate-900/60"
         >
           <div class="flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-semibold">{{ t('listing.upstreamMetadata') }}</h3>
@@ -499,11 +499,11 @@ const installLabel = computed(() => {
             :src="shot"
             :alt="displayName"
             loading="lazy"
-            class="w-full rounded-2xl border border-line object-cover dark:border-slate-800"
+            class="w-full rounded-lg border border-line object-cover dark:border-slate-800"
           />
         </div>
       </article>
-      <aside class="space-y-3 self-start rounded-2xl border border-line p-5 text-sm dark:border-slate-800">
+      <aside class="card space-y-3 self-start p-5 text-sm">
         <h2 class="font-semibold">{{ t('listing.infoTitle') }}</h2>
         <dl class="space-y-2">
           <div class="flex justify-between gap-3">
@@ -531,7 +531,7 @@ const installLabel = computed(() => {
           </div>
           <div class="flex justify-between gap-3">
             <dt class="shrink-0 text-muted dark:text-slate-400">{{ t('listing.coordinate') }}</dt>
-            <dd class="break-all text-right"><code class="text-xs">{{ detail.coordinate }}</code></dd>
+            <dd class="text-right"><code class="block break-all rounded-lg bg-surface-muted px-2 py-1 text-left text-xs dark:bg-slate-800/60">{{ detail.coordinate }}</code></dd>
           </div>
         </dl>
         <a
@@ -553,7 +553,7 @@ const installLabel = computed(() => {
     <section v-if="tab === 'versions'" class="space-y-3">
       <div
         v-if="isLiveUpstream && !upstream?.upstreamVersion"
-        class="rounded-2xl border border-accent/30 bg-accent/5 p-4 text-sm text-muted dark:text-slate-300"
+        class="rounded-lg border border-accent/30 bg-accent/5 p-4 text-sm text-muted dark:text-slate-300"
       >
         <p class="font-semibold text-fg dark:text-white">{{ t('listing.versionUnspecified') }}</p>
         <p class="mt-1">{{ t('listing.versionPlaceholderHint') }}</p>
@@ -615,7 +615,7 @@ const installLabel = computed(() => {
           </tr>
         </tbody>
       </table>
-      <div v-else class="rounded-2xl border border-line p-5 dark:border-slate-800">
+      <div v-else class="card p-5">
         <h2 class="font-semibold">{{ t('listing.noPermissionsDeclared') }}</h2>
         <p class="mt-2 text-sm leading-6 text-muted dark:text-slate-400">
           {{ isLiveUpstream ? t('listing.noPermissionsDeclaredUpstream') : t('listing.noPermissionsDeclaredLocal') }}
@@ -631,14 +631,14 @@ const installLabel = computed(() => {
         <li
           v-for="dependency in latestRelease.dependencies"
           :key="dependency.coordinate"
-          class="flex items-center gap-2 rounded-xl border border-line p-3 text-sm dark:border-slate-800"
+          class="card flex items-center gap-2 p-3 text-sm"
         >
           <code class="text-xs">{{ dependency.coordinate }}</code>
           <Badge tone="muted">{{ dependency.range }}</Badge>
           <Badge v-if="!dependency.optional" tone="danger">{{ t('listing.required') }}</Badge>
         </li>
       </ul>
-      <div v-else class="rounded-2xl border border-line p-5 dark:border-slate-800">
+      <div v-else class="card p-5">
         <h2 class="font-semibold">{{ t('listing.noDependenciesDeclared') }}</h2>
         <p class="mt-2 text-sm leading-6 text-muted dark:text-slate-400">
           {{ isLiveUpstream ? t('listing.noDependenciesDeclaredUpstream') : t('listing.noDependenciesDeclaredLocal') }}
@@ -649,12 +649,12 @@ const installLabel = computed(() => {
     <section v-if="tab === 'compatibility'" class="space-y-3">
       <p class="text-sm text-muted dark:text-slate-400">{{ t('listing.compatHint') }}</p>
       <div v-if="isLiveUpstream" class="grid gap-3 sm:grid-cols-2">
-        <div class="rounded-2xl border border-line p-4 dark:border-slate-800">
+        <div class="card p-4">
           <p class="text-xs text-muted dark:text-slate-400">{{ t('listing.deliveryMode') }}</p>
           <p class="mt-1 font-semibold">{{ t('listing.liveDelivery') }}</p>
           <p class="mt-1 text-sm text-muted dark:text-slate-400">{{ t('listing.noRetention') }}</p>
         </div>
-        <div class="rounded-2xl border border-line p-4 dark:border-slate-800">
+        <div class="card p-4">
           <p class="text-xs text-muted dark:text-slate-400">{{ t('listing.targetPlatform') }}</p>
           <p class="mt-1 font-semibold">{{ t('listing.targetPlatformUniversal') }}</p>
           <p class="mt-1 text-sm text-muted dark:text-slate-400">{{ t('listing.noHostRestriction') }}</p>
@@ -685,7 +685,7 @@ const installLabel = computed(() => {
     </section>
 
     <section v-if="tab === 'security'" class="space-y-4 text-sm">
-      <div v-if="isLiveUpstream" class="rounded-2xl border border-accent/30 bg-accent/5 p-5">
+      <div v-if="isLiveUpstream" class="rounded-lg border border-accent/30 bg-accent/5 p-5">
         <h2 class="font-semibold">{{ t('listing.liveSecurityTitle') }}</h2>
         <ol class="mt-3 grid gap-3 sm:grid-cols-2">
           <li v-for="(item, index) in [
@@ -716,7 +716,7 @@ const installLabel = computed(() => {
         <div
           v-for="artifact in latestRelease.artifacts"
           :key="artifact.artifactId"
-          class="space-y-1 rounded-2xl border border-line p-4 dark:border-slate-800"
+          class="card space-y-1 p-4"
         >
           <div class="flex flex-wrap items-center gap-2">
             <Badge tone="muted">{{ artifact.kind }}</Badge>
@@ -768,7 +768,7 @@ const installLabel = computed(() => {
         <li
           v-for="rating in ratings?.ratings ?? []"
           :key="rating.ratingId"
-          class="rounded-xl border border-line p-3 text-sm dark:border-slate-800"
+          class="card p-3 text-sm"
         >
           <div class="flex items-center gap-1" :aria-label="String(rating.stars)">
             <span v-for="n in 5" :key="n" :class="n <= (rating.stars ?? 0) ? 'text-amber-500' : 'text-muted'">★</span>
@@ -778,7 +778,7 @@ const installLabel = computed(() => {
         <li v-if="!ratings?.ratings?.length" class="text-sm text-muted">{{ t('listing.noReviews') }}</li>
       </ul>
 
-      <form v-if="auth.isAuthenticated" class="space-y-3 rounded-2xl border border-line p-4 dark:border-slate-800" @submit.prevent="submitRating">
+      <form v-if="auth.isAuthenticated" class="card space-y-3 p-4" @submit.prevent="submitRating">
         <h3 class="font-semibold">{{ t('listing.writeReview') }}</h3>
         <div class="flex gap-1" role="radiogroup" :aria-label="t('listing.stars')">
           <button
@@ -799,13 +799,13 @@ const installLabel = computed(() => {
           rows="3"
           maxlength="2000"
           :placeholder="t('listing.reviewPlaceholder')"
-          class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+          class="input"
         />
         <div class="flex items-center gap-2">
-          <button :disabled="!myStars" class="shrink-0 whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white">
+          <button :disabled="!myStars" class="btn btn-primary shrink-0 whitespace-nowrap">
             {{ t('listing.submitReview') }}
           </button>
-          <span v-if="ratingSaved" class="text-sm text-green-600 dark:text-green-400">{{ t('listing.reviewSaved') }}</span>
+          <span v-if="ratingSaved" class="text-sm text-success dark:text-emerald-400">{{ t('listing.reviewSaved') }}</span>
         </div>
       </form>
       <p v-else class="text-sm text-muted">{{ t('listing.signInToReview') }}</p>
@@ -820,9 +820,9 @@ const installLabel = computed(() => {
     :aria-label="t('listing.report')"
     @click.self="reporting = false"
   >
-    <div class="w-full max-w-md rounded-2xl border border-line bg-surface p-6 dark:border-slate-800 dark:bg-slate-900">
+    <div class="w-full max-w-md rounded-lg border border-line bg-surface p-6 dark:border-slate-800 dark:bg-slate-900">
       <h2 class="text-lg font-bold">{{ t('listing.report') }}</h2>
-      <p v-if="reportDone" class="mt-4 text-sm text-green-600 dark:text-green-400">
+      <p v-if="reportDone" class="alert alert-success mt-4" role="status">
         {{ t('listing.reportDone') }}
       </p>
       <form v-else class="mt-4 space-y-3" @submit.prevent="submitReport">
@@ -830,7 +830,7 @@ const installLabel = computed(() => {
           {{ t('listing.reportReason') }}
           <select
             v-model="reportReason"
-            class="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+            class="input mt-1"
           >
             <option v-for="reason in ['malware', 'policy_violation', 'spam', 'misleading', 'license', 'other']" :key="reason" :value="reason">
               {{ t(`admin.reason.${reason}`) }}
@@ -842,14 +842,14 @@ const installLabel = computed(() => {
           rows="3"
           maxlength="2000"
           :placeholder="t('listing.reportDetails')"
-          class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+          class="input"
         />
-        <p v-if="reportError" class="text-sm text-red-600 dark:text-red-400">{{ reportError }}</p>
+        <p v-if="reportError" class="text-sm text-danger dark:text-red-400">{{ reportError }}</p>
         <div class="flex justify-end gap-2">
-          <button type="button" class="rounded-xl border border-line px-4 py-2 text-sm dark:border-slate-800" @click="reporting = false">
+          <button type="button" class="btn btn-secondary" @click="reporting = false">
             {{ t('common.cancel') }}
           </button>
-          <button class="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white">
+          <button class="btn btn-danger">
             {{ t('listing.reportSubmit') }}
           </button>
         </div>

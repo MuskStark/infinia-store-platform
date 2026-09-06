@@ -6,6 +6,7 @@ import { useLibraryStore } from '../stores/library';
 import { Badge, BlurFade } from '@infinia/magic-ui-vue';
 import EmptyState from '../components/EmptyState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
+import PageHeader from '../components/PageHeader.vue';
 import { formatDate, formatDateTime } from '../utils/format';
 
 const { t } = useI18n();
@@ -32,7 +33,7 @@ function itemRoute(item: InstalledItem) {
 
 <template>
   <div class="space-y-10">
-    <h1 class="text-2xl font-bold">{{ t('library.title') }}</h1>
+    <PageHeader :title="t('library.title')" />
 
     <LoadingGrid v-if="library.loading" />
     <template v-else>
@@ -44,14 +45,14 @@ function itemRoute(item: InstalledItem) {
             <li
               v-for="item in updates"
               :key="item.coordinate"
-              class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40"
+              class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-warning/40 bg-warning/10 p-3"
             >
               <RouterLink :to="itemRoute(item)" class="font-medium hover:text-accent">
                 <code class="text-xs">{{ item.coordinate }}</code>
               </RouterLink>
               <div class="flex items-center gap-2 text-xs">
                 <Badge tone="muted">{{ item.version }} → {{ item.latestVersion }}</Badge>
-                <RouterLink :to="itemRoute(item)" class="rounded-lg bg-accent px-3 py-1.5 font-semibold text-white">
+                <RouterLink :to="itemRoute(item)" class="btn btn-primary btn-sm">
                   {{ t('library.updateAction') }}
                 </RouterLink>
               </div>
@@ -67,7 +68,7 @@ function itemRoute(item: InstalledItem) {
           <li
             v-for="item in installed"
             :key="item.coordinate"
-            class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line p-3 dark:border-slate-800"
+            class="card flex flex-wrap items-center justify-between gap-2 p-3"
           >
             <RouterLink :to="itemRoute(item)" class="font-medium hover:text-accent">
               <code class="text-xs">{{ item.coordinate }}</code>
@@ -89,7 +90,7 @@ function itemRoute(item: InstalledItem) {
             <li
               v-for="favorite in library.library.favorites"
               :key="favorite.listingCoordinate ?? favorite.name"
-              class="rounded-2xl border border-line p-4 dark:border-slate-800"
+              class="card p-4"
             >
               <RouterLink
                 :to="favoriteRoute(favorite)"
@@ -114,7 +115,7 @@ function itemRoute(item: InstalledItem) {
           <li
             v-for="entitlement in library.library.entitlements"
             :key="entitlement.listingCoordinate"
-            class="flex items-center gap-2 rounded-xl border border-line p-3 dark:border-slate-800"
+            class="card flex items-center gap-2 p-3"
           >
             <code class="text-xs">{{ entitlement.listingCoordinate }}</code>
             <Badge v-if="entitlement.free" tone="success">{{ t('library.free') }}</Badge>
@@ -125,28 +126,26 @@ function itemRoute(item: InstalledItem) {
       <section aria-labelledby="history-heading">
         <h2 id="history-heading" class="mb-3 text-lg font-semibold">{{ t('library.installHistory') }}</h2>
         <EmptyState v-if="!library.library?.installHistory?.length" :title="t('library.noHistory')" />
-        <table v-else class="w-full text-left text-sm">
-          <thead>
-            <tr class="text-muted">
-              <th class="p-2">{{ t('listing.version') }}</th>
-              <th class="p-2">{{ t('library.action') }}</th>
-              <th class="p-2">{{ t('library.outcome') }}</th>
-              <th class="p-2">{{ t('library.when') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="event in library.library.installHistory"
-              :key="event.idempotencyKey"
-              class="border-t border-line dark:border-slate-800"
-            >
-              <td class="p-2"><code class="text-xs">{{ event.coordinate }}</code></td>
-              <td class="p-2">{{ event.action }}</td>
-              <td class="p-2">{{ event.outcome }}</td>
-              <td class="p-2 text-muted">{{ formatDateTime(event.occurredAt) }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="table-card">
+          <table>
+            <thead>
+              <tr>
+                <th>{{ t('listing.version') }}</th>
+                <th>{{ t('library.action') }}</th>
+                <th>{{ t('library.outcome') }}</th>
+                <th>{{ t('library.when') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="event in library.library.installHistory" :key="event.idempotencyKey">
+                <td><code class="text-xs">{{ event.coordinate }}</code></td>
+                <td>{{ event.action }}</td>
+                <td>{{ event.outcome }}</td>
+                <td class="text-muted">{{ formatDateTime(event.occurredAt) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </template>
   </div>

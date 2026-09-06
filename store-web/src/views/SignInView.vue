@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { api, ApiRequestError, setAccessToken, type PublicUser } from '../api/client';
 import { useAuthStore } from '../stores/auth';
 import { submitOAuthSessionLogin } from '../auth/sessionLogin';
-import { MagicCard, ShimmerButton } from '@infinia/magic-ui-vue';
+import { MagicCard } from '@infinia/magic-ui-vue';
 
 /**
  * Sign-in / registration (design §7.4).
@@ -165,7 +165,7 @@ async function register() {
             autocomplete="username"
             :aria-invalid="emailInvalid || undefined"
             placeholder="you@example.com"
-            class="mt-1 w-full rounded-xl border border-line px-4 py-3 dark:border-slate-800 dark:bg-slate-900"
+            class="input mt-1"
           />
           <span v-if="emailInvalid" class="mt-1 block text-xs text-red-600 dark:text-red-400">
             {{ t('auth.emailInvalid') }}
@@ -183,7 +183,7 @@ async function register() {
               :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
               :aria-invalid="passwordShort || undefined"
               placeholder="Password123!"
-              class="w-full rounded-xl border border-line px-4 py-3 pr-16 dark:border-slate-800 dark:bg-slate-900"
+              class="input pr-16!"
             />
             <button
               type="button"
@@ -208,7 +208,7 @@ async function register() {
               required
               autocomplete="new-password"
               :aria-invalid="passwordMismatch || undefined"
-              class="mt-1 w-full rounded-xl border border-line px-4 py-3 dark:border-slate-800 dark:bg-slate-900"
+              class="input mt-1"
             />
             <span v-if="passwordMismatch" class="mt-1 block text-xs text-red-600 dark:text-red-400">
               {{ t('auth.passwordMismatch') }}
@@ -221,24 +221,20 @@ async function register() {
               v-model="displayName"
               autocomplete="nickname"
               :placeholder="t('auth.displayNamePlaceholder')"
-              class="mt-1 w-full rounded-xl border border-line px-4 py-3 dark:border-slate-800 dark:bg-slate-900"
+              class="input mt-1"
             />
           </label>
         </template>
 
-        <ShimmerButton type="submit" class="w-full" :disabled="busy || formInvalid">
+        <button type="submit" class="btn btn-primary h-11 w-full" :disabled="busy || formInvalid">
           {{ busy ? t('common.loading') : mode === 'signin' ? t('nav.signIn') : t('auth.register') }}
-        </ShimmerButton>
+        </button>
       </form>
 
-      <p
-        v-if="error"
-        class="mt-4 rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
-        role="alert"
-      >
+      <p v-if="error" class="alert alert-error mt-4" role="alert">
         {{ error }}
       </p>
-      <p v-else-if="notice" class="mt-4 rounded-xl bg-accent/10 p-3 text-sm text-accent" role="status">
+      <p v-else-if="notice" class="alert alert-info mt-4" role="status">
         {{ notice }}
       </p>
 

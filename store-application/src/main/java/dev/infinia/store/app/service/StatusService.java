@@ -12,6 +12,9 @@ import dev.infinia.store.domain.port.StatusRepositories.IncidentRepository;
 import dev.infinia.store.domain.port.StatusRepositories.UptimeRepository;
 import dev.infinia.store.domain.service.UuidV7;
 import dev.infinia.store.app.config.StoreProperties;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -86,20 +89,82 @@ public class StatusService {
 
     private LocalDate lastPruneDay = null;
 
+    private final boolean seedEnabled;
+    /** Demo history variety is opt-in per profile: tests keep the honest empty comb. */
+    private final boolean statusHistorySeeded;
+
     public StatusService(DataSource dataSource, StoreProperties properties,
             UpstreamSourceRepository upstreams, UptimeRepository uptimeRepo,
-            IncidentRepository incidentRepo) {
+            IncidentRepository incidentRepo,
+            @Value("${store.seed.enabled:false}") boolean seedEnabled,
+            @Value("${store.seed.status-history:false}") boolean statusHistorySeeded) {
         this.dataSource = dataSource;
         this.properties = properties;
         this.upstreams = upstreams;
         this.uptimeRepo = uptimeRepo;
         this.incidentRepo = incidentRepo;
+        this.seedEnabled = seedEnabled;
+        this.statusHistorySeeded = statusHistorySeeded;
     }
 
     /** Background sampler so downtime is recorded even when nobody is watching. */
     @Scheduled(fixedDelayString = "${store.status.sample-interval-ms:60000}")
     public void sample() {
         page();
+    }
+
+    /**
+     * Demo environments (local/dev: {@code store.seed.enabled=true}) boot with an
+     * empty samples table, which would paint 89 gray "no data" days next to the
+     * single day the server has been up. Backfill a believable history instead:
+     * mostly operational with deterministic sprinkles of degraded, partial and
+     * major outage days plus a few empty cells, so the monitoring hive shows
+     * every state the page can render. Only gap days are written — real sample
+     * days are never overwritten — and the last five days stay healthy so the
+     * page opens on a living hive. Real deployments leave the seed switch off
+     * and keep their honest history.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void backfillDemoHistory() {
+        if (!seedEnabled || !statusHistorySeeded) {
+            return;
+        }
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        LocalDate from = today.minusDays(HISTORY_DAYS - 1L);
+        synchronized (recordLock) {
+            for (int componentIndex = 0; componentIndex < COMPONENTS.size(); componentIndex++) {
+                Component component = COMPONENTS.get(componentIndex);
+                Map<LocalDate, DailySample> sampled = new LinkedHashMap<>();
+                for (DailySample sample : uptimeRepo.findSince(component.key(), from)) {
+                    sampled.put(sample.day(), sample);
+                }
+                for (int i = 1; i < HISTORY_DAYS; i++) {
+                    LocalDate day = today.minusDays(i);
+                    if (sampled.containsKey(day)) {
+                        continue; // never overwrite a real sample day
+                    }
+                    if (i < 5) {
+                        uptimeRepo.record(new DailySample(component.key(), day, 1, 0, 0));
+                        continue;
+                    }
+                    int roll = (componentIndex * 31 + i * 7) % 23;
+                    if (roll == 3) {
+                        // 性能下降: some requests slow, none failing
+                        uptimeRepo.record(new DailySample(component.key(), day, 1, 2, 0));
+                    } else if (roll == 7) {
+                        // 局部故障: a share of requests failing
+                        uptimeRepo.record(new DailySample(component.key(), day, 1, 0, 1));
+                    } else if (roll == 11) {
+                        // 严重故障: everything down that day
+                        uptimeRepo.record(new DailySample(component.key(), day, 0, 0, 2));
+                    } else if (roll == 17) {
+                        // 暂无数据: spare comb, no samples that day
+                    } else {
+                        uptimeRepo.record(new DailySample(component.key(), day, 1, 0, 0));
+                    }
+                }
+            }
+        }
     }
 
     /** Runs the live probes, records today's samples, and assembles the page. */

@@ -4,10 +4,12 @@ import { useI18n } from 'vue-i18n';
 import { api, type Library, type PublicUser } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
-import { BEE_LEVELS, beeMark } from '../bee-levels';
+import { BEE_LEVELS } from '../bee-levels';
+import BeeCrest from '../components/BeeCrest.vue';
 import EmptyState from '../components/EmptyState.vue';
 import ErrorState from '../components/ErrorState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
+import PageHeader from '../components/PageHeader.vue';
 import { formatDate, formatDateTime } from '../utils/format';
 import { useAuthStore } from '../stores/auth';
 
@@ -147,7 +149,7 @@ function listingRoute(coordinate: string) {
 
 <template>
   <div class="space-y-8">
-    <h1 class="text-2xl font-bold">{{ t('account.title') }}</h1>
+    <PageHeader :title="t('account.title')" />
     <ErrorState v-if="error" :message="error" @retry="load" />
     <LoadingGrid v-else-if="loading" />
 
@@ -156,7 +158,8 @@ function listingRoute(coordinate: string) {
       <MagicCard class="p-6">
         <div class="flex flex-wrap items-start gap-6">
           <div
-            class="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-accent to-accent2 text-2xl font-bold text-white"
+            class="grid h-16 w-16 shrink-0 place-items-center rounded-xl text-2xl font-bold text-white"
+            style="background: var(--hero-gradient)"
           >
             {{ (user.displayName ?? user.email).charAt(0).toUpperCase() }}
           </div>
@@ -184,8 +187,8 @@ function listingRoute(coordinate: string) {
                     : 'border-line opacity-50 dark:border-slate-800'"
                 :aria-current="level === beeLevel ? 'step' : undefined"
               >
-                <span>{{ beeMark(level).emblem }}</span>
-                {{ t(`beeLevel.${level}`) }}
+                <BeeCrest :level="level" :size="14" />
+                <span>{{ t(`beeLevel.${level}`) }}</span>
                 <span class="text-muted">Lv{{ level }}</span>
               </li>
             </ol>
@@ -203,7 +206,7 @@ function listingRoute(coordinate: string) {
                 v-for="link in quickLinks"
                 :key="link.to"
                 :to="link.to"
-                class="rounded-xl border border-line px-3 py-2 text-center text-sm hover:text-accent dark:border-slate-800"
+                class="btn btn-secondary w-full"
               >
                 {{ link.label }}
               </RouterLink>
@@ -225,20 +228,20 @@ function listingRoute(coordinate: string) {
                 required
                 minlength="1"
                 maxlength="64"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1"
               />
             </label>
             <button
               :disabled="savingProfile || displayNameDraft.trim() === user.displayName"
-              class="shrink-0 self-end whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              class="btn btn-primary shrink-0 self-end whitespace-nowrap"
             >
               {{ t('common.confirm') }}
             </button>
           </form>
-          <p v-if="profileMessage" class="mt-2 text-sm text-green-600 dark:text-green-400">
+          <p v-if="profileMessage" class="alert alert-success mt-2" role="status">
             {{ profileMessage }}
           </p>
-          <p v-if="profileError" class="mt-2 text-sm text-red-600 dark:text-red-400">
+          <p v-if="profileError" class="alert alert-error mt-2" role="alert">
             {{ profileError }}
           </p>
         </MagicCard>
@@ -252,15 +255,15 @@ function listingRoute(coordinate: string) {
             </RouterLink>
           </div>
           <dl class="grid grid-cols-3 gap-3 text-center">
-            <div class="rounded-xl border border-line p-3 dark:border-slate-800">
+            <div class="card p-3">
               <dd class="text-2xl font-bold">{{ library?.favorites?.length ?? 0 }}</dd>
               <dt class="text-xs text-muted">{{ t('account.favoritesCount') }}</dt>
             </div>
-            <div class="rounded-xl border border-line p-3 dark:border-slate-800">
+            <div class="card p-3">
               <dd class="text-2xl font-bold">{{ library?.entitlements?.length ?? 0 }}</dd>
               <dt class="text-xs text-muted">{{ t('account.entitlementsCount') }}</dt>
             </div>
-            <div class="rounded-xl border border-line p-3 dark:border-slate-800">
+            <div class="card p-3">
               <dd class="text-2xl font-bold">{{ library?.installHistory?.length ?? 0 }}</dd>
               <dt class="text-xs text-muted">{{ t('account.installedCount') }}</dt>
             </div>
@@ -316,7 +319,7 @@ function listingRoute(coordinate: string) {
                 type="password"
                 required
                 autocomplete="current-password"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1"
               />
             </label>
             <label class="w-full text-sm">
@@ -327,17 +330,15 @@ function listingRoute(coordinate: string) {
                 required
                 minlength="8"
                 autocomplete="new-password"
-                class="mt-1 w-full rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+                class="input mt-1"
               />
             </label>
-            <button
-              class="shrink-0 self-end whitespace-nowrap rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
-            >
+            <button class="btn btn-primary shrink-0 self-end whitespace-nowrap">
               {{ t('account.changePassword') }}
             </button>
           </form>
-          <p v-if="passwordMessage" class="mt-2 text-sm text-green-600 dark:text-green-400">{{ passwordMessage }}</p>
-          <p v-if="passwordError" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ passwordError }}</p>
+          <p v-if="passwordMessage" class="alert alert-success mt-2" role="status">{{ passwordMessage }}</p>
+          <p v-if="passwordError" class="alert alert-error mt-2" role="alert">{{ passwordError }}</p>
 
           <details class="mt-4">
             <summary class="cursor-pointer text-sm font-medium text-muted hover:text-accent">
@@ -348,17 +349,14 @@ function listingRoute(coordinate: string) {
               <li
                 v-for="session in sessions"
                 :key="session.sessionId"
-                class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 dark:border-slate-800"
+                class="card flex flex-wrap items-center justify-between gap-2 px-3 py-2"
               >
                 <div class="flex flex-wrap items-center gap-2">
                   <Badge tone="muted">{{ session.clientId }}</Badge>
                   <Badge tone="muted">{{ session.kind }}</Badge>
                   <span class="text-xs text-muted">{{ formatDateTime(session.createdAt) }}</span>
                 </div>
-                <button
-                  class="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-red-600 dark:border-slate-800 dark:text-red-400"
-                  @click="revokeSession(session.sessionId)"
-                >
+                <button class="btn btn-danger-outline btn-sm" @click="revokeSession(session.sessionId)">
                   {{ t('account.revoke') }}
                 </button>
               </li>
@@ -374,7 +372,7 @@ function listingRoute(coordinate: string) {
               <li
                 v-for="device in devices"
                 :key="device.deviceId"
-                class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 dark:border-slate-800"
+                class="card flex flex-wrap items-center justify-between gap-2 px-3 py-2"
               >
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="font-medium">{{ device.name }}</span>
@@ -383,7 +381,7 @@ function listingRoute(coordinate: string) {
                 </div>
                 <button
                   v-if="!device.revoked"
-                  class="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-red-600 dark:border-slate-800 dark:text-red-400"
+                  class="btn btn-danger-outline btn-sm"
                   @click="revokeDevice(device.deviceId)"
                 >
                   {{ t('account.revoke') }}

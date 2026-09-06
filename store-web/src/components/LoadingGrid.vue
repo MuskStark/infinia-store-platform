@@ -8,7 +8,7 @@ const defaultCount = 6;
     <div
       v-for="i in count ?? defaultCount"
       :key="i"
-      class="h-44 animate-pulse rounded-2xl bg-surface dark:bg-slate-900"
+      class="h-44 animate-pulse rounded-lg bg-surface dark:bg-slate-900"
     />
   </div>
 </template>

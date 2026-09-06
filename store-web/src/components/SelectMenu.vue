@@ -141,19 +141,29 @@ onBeforeUnmount(() => {
       v-else
       type="button"
       :disabled="disabled"
-      class="inline-flex min-h-0 w-full items-center justify-between gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs hover:bg-surface-muted disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+      class="inline-flex min-h-0 w-full items-center justify-between gap-1.5 rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition-colors hover:border-muted/40 hover:bg-surface-muted disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800"
       :aria-label="ariaLabel"
       aria-haspopup="listbox"
       :aria-expanded="open"
       @click="toggle"
     >
       <span class="truncate">{{ current?.label ?? '—' }}</span>
-      <span class="shrink-0 text-muted" aria-hidden="true">▾</span>
+      <svg
+        class="shrink-0 text-muted transition-transform dark:text-slate-400"
+        :class="open ? 'rotate-180' : ''"
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
+        fill="none"
+        aria-hidden="true"
+      >
+        <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
     </button>
     <ul
       v-if="open"
       ref="listRef"
-      class="fixed z-50 max-h-64 w-max overflow-y-auto rounded-xl border border-line bg-surface py-1 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+      class="fixed z-50 max-h-64 w-max overflow-y-auto rounded-xl border border-line bg-surface py-1 shadow-xl shadow-slate-900/10 ring-1 ring-black/5 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/40 dark:ring-white/5"
       :style="listStyle"
       role="listbox"
     >
@@ -162,18 +172,23 @@ onBeforeUnmount(() => {
           type="button"
           role="option"
           :aria-selected="option.value === modelValue"
-          class="flex min-h-0 w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-xs"
+          class="flex min-h-0 w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-sm"
           :class="option.value === modelValue
             ? 'font-semibold text-accent'
             : index === activeIndex
-              ? 'bg-surface-muted dark:bg-slate-800'
-              : ''"
+              ? 'bg-surface-muted text-ink dark:bg-slate-800 dark:text-slate-100'
+              : 'text-ink dark:text-slate-200'"
           @click="choose(option)"
           @mouseenter="activeIndex = index"
         >
           <span class="w-3.5 shrink-0" aria-hidden="true">{{ option.value === modelValue ? '✓' : '' }}</span>
           <span>{{ option.label }}</span>
         </button>
+      </li>
+      <li v-if="!options.length">
+        <slot name="empty">
+          <span class="block px-3 py-2 text-sm text-muted">—</span>
+        </slot>
       </li>
     </ul>
   </div>

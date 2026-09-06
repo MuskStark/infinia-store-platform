@@ -87,10 +87,11 @@ describe('User Center (用户中心)', () => {
     expect(wrapper.text()).toContain('User Center');
     expect(wrapper.text()).toContain('Busy Bee');
     expect(wrapper.text()).toContain('bee@example.com');
-    // Level 2 = Forager with its own emblem; next level hinted.
+    // Level 2 = Forager with its own honeycomb tier mark; next level hinted.
     expect(wrapper.text()).toContain('Forager');
     expect(wrapper.text()).toContain('Next up: Guard');
-    expect(wrapper.text()).toContain('🍯');
+    // The identity is the designed hex mark now, not an emoji.
+    expect(wrapper.findAll('.bee-crest').length).toBeGreaterThan(0);
   });
 
   it('highlights the current Infinia Level step in the ladder', async () => {

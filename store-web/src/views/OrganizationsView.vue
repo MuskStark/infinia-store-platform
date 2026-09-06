@@ -2,10 +2,12 @@
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api, type AuditEvent, type Organization, type OrganizationMember, type Webhook } from '../api/client';
-import { Badge, MagicCard, ShimmerButton } from '@infinia/magic-ui-vue';
+import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import EmptyState from '../components/EmptyState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
 import ErrorState from '../components/ErrorState.vue';
+import PageHeader from '../components/PageHeader.vue';
+import SelectMenu from '../components/SelectMenu.vue';
 
 /**
  * Organization center (design §7.1, §7.3, §12.4 账号: 组织): member RBAC,
@@ -91,7 +93,7 @@ async function addMember() {
 }
 
 async function changeRole(member: OrganizationMember, role: string) {
-  if (!selected.value) return;
+  if (!selected.value || role === member.role) return;
   await api.put(`/api/v1/organizations/${selected.value.organizationId}/members/${member.userId}/role`, { role });
   await select(selected.value);
 }
@@ -120,7 +122,7 @@ async function createWebhook() {
 
 <template>
   <div class="space-y-8">
-    <h1 class="text-2xl font-bold">{{ t('org.title') }}</h1>
+    <PageHeader :title="t('org.title')" />
     <ErrorState v-if="error" :message="error" @retry="load" />
     <LoadingGrid v-else-if="loading" />
     <template v-else>
@@ -132,16 +134,16 @@ async function createWebhook() {
             required
             pattern="[a-z0-9][a-z0-9-]{0,62}"
             :placeholder="t('publisher.orgSlug')"
-            class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+            class="input"
           />
           <input
             v-model="newOrgName"
             :placeholder="t('publisher.orgName')"
-            class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+            class="input"
           />
-          <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">
+          <button type="submit" :disabled="busy" class="btn btn-primary shrink-0 whitespace-nowrap">
             {{ t('common.confirm') }}
-          </ShimmerButton>
+          </button>
         </form>
         <p class="mt-2 text-xs text-muted">{{ t('org.createHint') }}</p>
       </MagicCard>
@@ -152,10 +154,10 @@ async function createWebhook() {
         <button
           v-for="org in orgs"
           :key="org.organizationId"
-          class="rounded-xl border px-4 py-2 text-sm"
+          class="rounded-xl border px-4 py-2 text-sm font-medium"
           :class="selected?.organizationId === org.organizationId
-            ? 'border-accent font-semibold'
-            : 'border-line dark:border-slate-800'"
+            ? 'border-accent bg-accent/10 font-semibold text-accent'
+            : 'border-line bg-surface text-muted hover:border-muted/40 hover:text-ink dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
           @click="select(org)"
         >
           {{ org.name }}
@@ -169,7 +171,7 @@ async function createWebhook() {
             <li
               v-for="member in members"
               :key="member.userId"
-              class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line p-3 dark:border-slate-800"
+              class="card flex flex-wrap items-center justify-between gap-2 p-3"
             >
               <div>
                 <div class="font-medium">{{ member.displayName ?? member.email }}</div>
@@ -177,18 +179,17 @@ async function createWebhook() {
               </div>
               <div class="flex items-center gap-2">
                 <Badge v-if="member.owner" tone="accent">{{ t('org.owner') }}</Badge>
-                <select
-                  :value="member.role"
+                <SelectMenu
+                  :model-value="member.role ?? 'PUBLISHER'"
+                  class="w-36"
                   :disabled="member.owner"
-                  class="rounded-lg border border-line bg-surface px-2 py-1 text-xs dark:border-slate-800 dark:bg-slate-900"
+                  :options="['PUBLISHER', 'ORG_ADMIN'].map((role) => ({ value: role, label: t(`role.${role}`) }))"
                   :aria-label="t('org.role')"
-                  @change="changeRole(member, ($event.target as HTMLSelectElement).value)"
-                >
-                  <option v-for="role in ['PUBLISHER', 'ORG_ADMIN']" :key="role" :value="role">{{ t(`role.${role}`) }}</option>
-                </select>
+                  @update:model-value="changeRole(member, String($event))"
+                />
                 <button
                   v-if="!member.owner"
-                  class="rounded-lg border border-red-300 px-3 py-1 text-xs text-red-600 dark:border-red-900 dark:text-red-400"
+                  class="btn btn-danger-outline btn-sm"
                   @click="removeMember(member)"
                 >
                   {{ t('org.removeMember') }}
@@ -202,19 +203,17 @@ async function createWebhook() {
               type="email"
               required
               :placeholder="t('org.memberEmail')"
-              class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+              class="input"
             />
-            <select
+            <SelectMenu
               v-model="memberRole"
-              class="rounded-xl border border-line bg-surface px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+              class="w-40"
+              :options="['PUBLISHER', 'ORG_ADMIN'].map((role) => ({ value: role, label: t(`role.${role}`) }))"
               :aria-label="t('org.role')"
-            >
-              <option value="PUBLISHER">{{ t('role.PUBLISHER') }}</option>
-              <option value="ORG_ADMIN">{{ t('role.ORG_ADMIN') }}</option>
-            </select>
-            <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">
+            />
+            <button type="submit" :disabled="busy" class="btn btn-primary shrink-0 whitespace-nowrap">
               {{ t('org.addMember') }}
-            </ShimmerButton>
+            </button>
           </form>
         </section>
 
@@ -225,7 +224,7 @@ async function createWebhook() {
             <li
               v-for="webhook in webhooks"
               :key="webhook.webhookId"
-              class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line p-3 dark:border-slate-800"
+              class="card flex flex-wrap items-center justify-between gap-2 p-3"
             >
               <code class="text-xs">{{ webhook.url }}</code>
               <div class="flex flex-wrap gap-1">
@@ -239,11 +238,11 @@ async function createWebhook() {
               type="url"
               required
               placeholder="https://ci.example.com/hooks/infinia"
-              class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+              class="input"
             />
-            <ShimmerButton type="submit" :disabled="busy" class="shrink-0 whitespace-nowrap">
+            <button type="submit" :disabled="busy" class="btn btn-primary shrink-0 whitespace-nowrap">
               {{ t('org.addWebhook') }}
-            </ShimmerButton>
+            </button>
           </form>
           <p class="mt-2 text-xs text-muted">{{ t('org.webhookHint') }}</p>
         </section>
@@ -255,7 +254,7 @@ async function createWebhook() {
             <li
               v-for="event in auditEvents"
               :key="event.eventId"
-              class="rounded-lg border border-line px-3 py-2 font-mono dark:border-slate-800"
+              class="card px-3 py-2 font-mono"
             >
               {{ event.occurredAt }} · {{ event.action }} · {{ event.actorId }}
             </li>

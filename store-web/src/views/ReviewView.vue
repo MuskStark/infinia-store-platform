@@ -5,6 +5,7 @@ import { api, type Review } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import EmptyState from '../components/EmptyState.vue';
 import StateChip from '../components/StateChip.vue';
+import PageHeader from '../components/PageHeader.vue';
 
 /** Review queue for REVIEWER/PLATFORM_ADMIN roles (design §7.3, §8). */
 const { t } = useI18n();
@@ -35,7 +36,7 @@ async function decide(review: Review, decision: 'APPROVE' | 'REJECT' | 'REQUEST_
 
 <template>
   <div class="space-y-6">
-    <h1 class="text-2xl font-bold">{{ t('review.title') }}</h1>
+    <PageHeader :title="t('review.title')" />
     <EmptyState v-if="!loading && !reviews.length" :title="t('review.queueEmpty')" />
     <MagicCard v-for="review in reviews" :key="review.reviewId" class="p-6">
       <div class="flex flex-wrap items-center justify-between gap-2">
@@ -49,7 +50,7 @@ async function decide(review: Review, decision: 'APPROVE' | 'REJECT' | 'REQUEST_
       <div v-if="review.findings?.length" class="mt-4">
         <h3 class="mb-2 text-sm font-semibold">{{ t('review.findings') }}</h3>
         <ul class="space-y-1 text-sm">
-          <li v-for="finding in review.findings" :key="finding.rule" class="rounded-lg border border-line p-2 dark:border-slate-800">
+          <li v-for="finding in review.findings" :key="finding.rule" class="card p-2">
             <Badge :tone="['ERROR', 'CRITICAL'].includes(finding.severity ?? '') ? 'danger' : 'muted'">
               {{ finding.severity }}
             </Badge>
@@ -62,17 +63,17 @@ async function decide(review: Review, decision: 'APPROVE' | 'REJECT' | 'REQUEST_
         <textarea
           v-model="notes[review.reviewId ?? '']"
           :placeholder="t('review.notesPlaceholder')"
-          class="w-full rounded-xl border border-line px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+          class="input"
           rows="2"
         />
         <div class="flex gap-2">
-          <button class="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white" @click="decide(review, 'APPROVE')">
+          <button class="btn btn-success" @click="decide(review, 'APPROVE')">
             {{ t('review.approve') }}
           </button>
-          <button class="rounded-xl border border-line px-4 py-2 text-sm dark:border-slate-800" @click="decide(review, 'REQUEST_CHANGES')">
+          <button class="btn btn-secondary" @click="decide(review, 'REQUEST_CHANGES')">
             {{ t('review.requestChanges') }}
           </button>
-          <button class="rounded-xl border border-red-300 px-4 py-2 text-sm text-red-600 dark:border-red-900 dark:text-red-400" @click="decide(review, 'REJECT')">
+          <button class="btn btn-danger-outline" @click="decide(review, 'REJECT')">
             {{ t('review.reject') }}
           </button>
         </div>

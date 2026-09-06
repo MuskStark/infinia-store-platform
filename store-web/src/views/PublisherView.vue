@@ -9,9 +9,10 @@ import {
   type SubmitResult,
   type UploadSession,
 } from '../api/client';
-import { Badge, MagicCard, ProgressBar, ShimmerButton } from '@infinia/magic-ui-vue';
+import { Badge, MagicCard, ProgressBar } from '@infinia/magic-ui-vue';
 import StateChip from '../components/StateChip.vue';
-import { beeMark } from '../bee-levels';
+import SelectMenu from '../components/SelectMenu.vue';
+import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
 import { formatDate } from '../utils/format';
 import { usePublisherStore } from '../stores/publisher';
@@ -232,13 +233,25 @@ onMounted(() => {
   store.load();
   loadOrgNamespaces();
 });
+
+const LISTING_TYPES = ['APP', 'PLUGIN', 'SKILL', 'MCP', 'FLOW'] as const;
+const BEE_LEVEL_OPTIONS = [0, 1, 2, 3, 4].map((level) => ({
+  value: level,
+  label:
+    level === 0
+      ? t('publisher.beeLevelPublic')
+      : `${t(`beeLevel.${level}`)} · Lv${level}+`,
+}));
+const CHANNEL_OPTIONS = [
+  { value: 'stable', label: t('channel.stable') },
+  { value: 'beta', label: t('channel.beta') },
+];
 </script>
 
 <template>
   <div class="space-y-8">
-    <h1 class="text-2xl font-bold">{{ t('publisher.title') }}</h1>
-    <p class="text-sm text-muted dark:text-slate-400">{{ t('publisher.steps') }}</p>
-    <p v-if="message" class="rounded-xl bg-accent/10 p-3 text-sm text-accent" role="status">
+    <PageHeader :title="t('publisher.title')" :subtitle="t('publisher.steps')" />
+    <p v-if="message" class="alert alert-info" role="status">
       {{ message }}
     </p>
 
@@ -249,10 +262,10 @@ onMounted(() => {
         <li
           v-for="listing in store.listings"
           :key="listing.coordinate"
-          class="cursor-pointer rounded-2xl border p-4 text-sm"
+          class="card cursor-pointer p-4 text-sm transition-colors"
           :class="selectedListing?.coordinate === listing.coordinate
-            ? 'border-accent'
-            : 'border-line dark:border-slate-800'"
+            ? 'border-accent ring-1 ring-accent'
+            : 'hover:border-muted/40'"
           @click="selectListing(listing)"
         >
           <div class="font-medium">{{ listing.name }}</div>
@@ -264,68 +277,60 @@ onMounted(() => {
     <MagicCard class="p-6">
       <h2 class="mb-4 font-semibold">{{ t('publisher.createOrg') }}</h2>
       <form class="grid gap-3 sm:grid-cols-3" @submit.prevent="createOrg">
-        <input v-model="orgForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" :placeholder="t('publisher.orgSlug')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <input v-model="orgForm.name" :placeholder="t('publisher.orgName')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <!-- justify-self-start: hug the label like every other form button instead
-             of stretching across the whole grid column. -->
-        <ShimmerButton type="submit" :disabled="busy" class="self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
+        <input v-model="orgForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" :placeholder="t('publisher.orgSlug')" class="input" />
+        <input v-model="orgForm.name" :placeholder="t('publisher.orgName')" class="input" />
+        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</button>
       </form>
     </MagicCard>
 
     <MagicCard class="p-6">
       <h2 class="mb-4 font-semibold">{{ t('publisher.newListings') }}</h2>
       <form class="grid gap-3 sm:grid-cols-3" @submit.prevent="createListing">
-        <select
+        <SelectMenu
           v-if="!useCustomNamespace"
-          :value="listingForm.namespace"
-          required
-          class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+          :model-value="listingForm.namespace"
+          :options="[
+            ...orgNamespaces.map((ns) => ({ value: ns, label: ns })),
+            { value: CUSTOM_NAMESPACE, label: t('publisher.namespaceCustom') },
+          ]"
           :aria-label="t('publisher.namespace')"
-          @change="onNamespaceChange(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-if="!orgNamespaces.length" value="" disabled>
-            {{ t('publisher.namespaceNone') }}
-          </option>
-          <option v-for="ns in orgNamespaces" :key="ns" :value="ns">{{ ns }}</option>
-          <option :value="CUSTOM_NAMESPACE">{{ t('publisher.namespaceCustom') }}</option>
-        </select>
+          @update:model-value="onNamespaceChange(String($event))"
+        />
         <input
           v-else
           v-model="listingForm.namespace"
           required
           :placeholder="t('publisher.namespace')"
-          class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+          class="input"
         />
         <button
           v-if="useCustomNamespace"
           type="button"
-          class="shrink-0 whitespace-nowrap rounded-xl border border-line px-3 py-2 text-sm text-muted dark:border-slate-800 dark:text-slate-400"
+          class="btn btn-secondary shrink-0 whitespace-nowrap"
           @click="useCustomNamespace = false"
         >
           {{ t('publisher.namespaceBackToList') }}
         </button>
-        <input v-model="listingForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" :placeholder="t('publisher.slug')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <select v-model="listingForm.type" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <option v-for="type in ['APP', 'PLUGIN', 'SKILL', 'MCP', 'FLOW']" :key="type" :value="type">
-            {{ t(`type.${type}`) }}
-          </option>
-        </select>
-        <input v-model="listingForm.name" required :placeholder="t('publisher.name')" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <input v-model="listingForm.summary" :placeholder="t('publisher.summary')" class="sm:col-span-2 rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
+        <input v-model="listingForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" :placeholder="t('publisher.slug')" class="input" />
+        <SelectMenu
+          v-model="listingForm.type"
+          :options="LISTING_TYPES.map((type) => ({ value: type, label: t(`type.${type}`) }))"
+          :aria-label="t('common.type')"
+        />
+        <input v-model="listingForm.name" required :placeholder="t('publisher.name')" class="input" />
+        <input v-model="listingForm.summary" :placeholder="t('publisher.summary')" class="input sm:col-span-2" />
         <label class="block text-sm sm:col-span-2">
           {{ t('publisher.minBeeLevel') }}
-          <select
-            v-model="listingForm.minBeeLevel"
-            class="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
-          >
-            <option value="0">{{ t('publisher.beeLevelPublic') }}</option>
-            <option v-for="level in [1, 2, 3, 4]" :key="level" :value="level">
-              {{ beeMark(level).emblem }} {{ t(`beeLevel.${level}`) }} · Lv{{ level }}+ ({{ t('publisher.beeLevelSignIn') }})
-            </option>
-          </select>
+          <SelectMenu
+            :model-value="listingForm.minBeeLevel"
+            class="mt-1"
+            :options="BEE_LEVEL_OPTIONS"
+            :aria-label="t('publisher.minBeeLevel')"
+            @update:model-value="listingForm.minBeeLevel = Number($event)"
+          />
           <span class="mt-1 block text-xs text-muted">{{ t('publisher.minBeeLevelHint') }}</span>
         </label>
-        <ShimmerButton type="submit" :disabled="busy" class="self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
+        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</button>
       </form>
     </MagicCard>
 
@@ -337,21 +342,17 @@ onMounted(() => {
           v-model="gateListingId"
           required
           placeholder="listing UUID"
-          class="rounded-xl border border-line px-3 py-2 font-mono text-sm dark:border-slate-800 dark:bg-slate-900"
+          class="input font-mono"
         />
-        <select
-          v-model="gateLevel"
-          class="rounded-xl border border-line bg-surface px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
-        >
-          <option v-for="level in [0, 1, 2, 3, 4]" :key="level" :value="level">
-            {{ level === 0
-              ? t('publisher.beeLevelPublic')
-              : beeMark(level).emblem + ' ' + t(`beeLevel.${level}`) + ' · Lv' + level + '+' }}
-          </option>
-        </select>
-        <ShimmerButton type="submit" :disabled="busy" class="self-start justify-self-start whitespace-nowrap">
+        <SelectMenu
+          :model-value="gateLevel"
+          :options="BEE_LEVEL_OPTIONS"
+          :aria-label="t('publisher.minBeeLevel')"
+          @update:model-value="gateLevel = Number($event)"
+        />
+        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">
           {{ t('common.confirm') }}
-        </ShimmerButton>
+        </button>
       </form>
     </MagicCard>
 
@@ -381,13 +382,10 @@ onMounted(() => {
     <MagicCard v-if="selectedListing" class="p-6">
       <h2 class="mb-4 font-semibold">{{ t('publisher.newRelease') }}</h2>
       <form class="grid gap-3 sm:grid-cols-4" @submit.prevent="createRelease">
-        <input v-model="releaseForm.version" required placeholder="1.0.0" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <select v-model="releaseForm.channel" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <option value="stable">{{ t('channel.stable') }}</option>
-          <option value="beta">{{ t('channel.beta') }}</option>
-        </select>
-        <input v-model="releaseForm.requiresHost" placeholder=">=4.0.0 <5.0.0" class="rounded-xl border border-line px-3 py-2 dark:border-slate-800 dark:bg-slate-900" />
-        <ShimmerButton type="submit" :disabled="busy" class="self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</ShimmerButton>
+        <input v-model="releaseForm.version" required placeholder="1.0.0" class="input" />
+        <SelectMenu v-model="releaseForm.channel" :options="CHANNEL_OPTIONS" :aria-label="t('listing.channel')" />
+        <input v-model="releaseForm.requiresHost" placeholder=">=4.0.0 <5.0.0" class="input" />
+        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</button>
       </form>
 
       <div v-if="currentRelease" class="mt-6 space-y-4">
@@ -401,23 +399,19 @@ onMounted(() => {
                upload, so both package uploaders render identically. -->
           <input ref="fileInput" type="file" class="hidden" @change="onPackageChange" />
           <div class="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
-              @click="fileInput?.click()"
-            >
+            <button type="button" class="btn btn-secondary" @click="fileInput?.click()">
               {{ t('publisher.uploadPackage') }}
             </button>
             <span class="min-w-0 flex-1 truncate text-sm" :class="packageName ? '' : 'text-muted dark:text-slate-400'">
               {{ packageName || '—' }}
             </span>
           </div>
-          <ShimmerButton :disabled="busy || !packageName" @click="uploadAndSubmit">
+          <button :disabled="busy || !packageName" class="btn btn-primary" @click="uploadAndSubmit">
             {{ t('publisher.submit') }}
-          </ShimmerButton>
+          </button>
         </div>
         <ul v-if="currentRelease.findings?.length" class="space-y-1 text-sm">
-          <li v-for="finding in currentRelease.findings" :key="finding.rule" class="rounded-lg border border-line p-2 dark:border-slate-800">
+          <li v-for="finding in currentRelease.findings" :key="finding.rule" class="card p-2">
             <Badge :tone="finding.severity === 'ERROR' || finding.severity === 'CRITICAL' ? 'danger' : 'muted'">
               {{ finding.severity }}
             </Badge>

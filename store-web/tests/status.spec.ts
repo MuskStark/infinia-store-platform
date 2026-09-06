@@ -67,7 +67,7 @@ describe('StatusView', () => {
     vi.mocked(api.getServiceIncidents).mockResolvedValue(incidents);
   });
 
-  it('renders the overall banner, per-component bars and the incident feed', async () => {
+  it('renders the overall banner, per-component days and the incident feed', async () => {
     const wrapper = mount(StatusView, { global: { plugins: [i18n] } });
     await flushPromises();
 
@@ -76,10 +76,14 @@ describe('StatusView', () => {
     );
     const components = wrapper.findAll('[data-testid="status-component"]');
     expect(components).toHaveLength(2);
-    // One uptime bar per history day, exactly 90 like the npm status page.
-    expect(components[0].find('.flex.h-7').findAll('span')).toHaveLength(90);
-    expect(components[0].text()).toContain('100.00% uptime');
-    expect(components[1].text()).toContain('Degraded');
+    // Every history day remains visible as an individually labelled target.
+    expect(components[0].findAll('.hive-history button')).toHaveLength(90);
+    // With the on-hive labels gone, the left legend maps each service's
+    // border color to its name — details move into the hover tooltip.
+    const legend = wrapper.find('[data-testid="hive-legend"]');
+    expect(legend.findAll('li')).toHaveLength(2);
+    expect(legend.text()).toContain('Database');
+    expect(legend.text()).toContain('Upstream sync');
 
     const incidentSection = wrapper.find('[data-testid="status-incidents"]');
     expect(incidentSection.text()).toContain('Past Incidents');

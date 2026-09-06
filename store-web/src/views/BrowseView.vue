@@ -7,6 +7,7 @@ import ListingCard from '../components/ListingCard.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
 import ErrorState from '../components/ErrorState.vue';
 import EmptyState from '../components/EmptyState.vue';
+import SelectMenu from '../components/SelectMenu.vue';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -33,43 +34,49 @@ function submitSearch() {
 
 <template>
   <div class="space-y-6">
-    <div class="flex flex-wrap items-center gap-3">
-      <form class="flex flex-1 gap-2" @submit.prevent="submitSearch">
-        <input
-          v-model="catalog.query"
-          type="search"
-          :placeholder="t('common.search')"
-          class="w-full max-w-md rounded-xl border border-line bg-surface px-4 py-2 dark:border-slate-800 dark:bg-slate-900"
-        />
-        <button class="rounded-xl bg-accent px-4 py-2 font-medium text-white" type="submit">
-          {{ t('common.searchAction') }}
-        </button>
-      </form>
-      <select
-        v-model="catalog.sort"
-        class="rounded-xl border border-line bg-surface px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
-        aria-label="sort"
-      >
-        <option v-for="sort in sorts" :key="sort" :value="sort">{{ t(`sort.${sort}`) }}</option>
-      </select>
-    </div>
-
-    <div class="flex flex-wrap gap-2" role="tablist" aria-label="type">
+    <!-- Composite search bar + filter row, marketplace search page style. -->
+    <form class="flex" role="search" @submit.prevent="submitSearch">
+      <label class="sr-only" for="browse-search">{{ t('common.search') }}</label>
+      <input
+        id="browse-search"
+        v-model="catalog.query"
+        type="search"
+        :placeholder="t('common.search')"
+        class="h-11 w-full max-w-2xl rounded-l-lg border border-line bg-surface px-4 text-[15px] text-ink placeholder:text-muted/70 focus:border-accent focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+      />
       <button
-        v-for="type in types"
-        :key="type ?? 'all'"
-        class="rounded-xl border px-4 py-2 text-sm"
-        :class="
-          catalog.type === type
-            ? 'border-accent bg-accent/10 text-accent'
-            : 'border-line bg-surface dark:border-slate-800 dark:bg-slate-900'
-        "
-        role="tab"
-        :aria-selected="catalog.type === type"
-        @click="catalog.type = type"
+        type="submit"
+        class="shrink-0 rounded-r-lg bg-accent px-5 text-sm font-medium text-white transition-colors hover:brightness-110"
       >
-        {{ type ? t(`type.${type}`) : t('common.viewAll') }}
+        {{ t('common.searchAction') }}
       </button>
+    </form>
+
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap gap-2" role="tablist" aria-label="type">
+        <button
+          v-for="type in types"
+          :key="type ?? 'all'"
+          class="rounded-lg border px-3.5 py-1.5 text-sm font-medium transition-colors"
+          :class="
+            catalog.type === type
+              ? 'border-accent bg-accent/5 font-semibold text-accent'
+              : 'border-line bg-surface text-muted hover:border-muted/40 hover:text-ink dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+          "
+          role="tab"
+          :aria-selected="catalog.type === type"
+          @click="catalog.type = type"
+        >
+          {{ type ? t(`type.${type}`) : t('common.viewAll') }}
+        </button>
+      </div>
+      <SelectMenu
+        :model-value="catalog.sort"
+        class="w-44"
+        :options="sorts.map((sort) => ({ value: sort, label: `${t('common.sort')}: ${t(`sort.${sort}`)}` }))"
+        :aria-label="t('common.sort')"
+        @update:model-value="catalog.sort = $event as SortKey"
+      />
     </div>
 
     <ErrorState v-if="catalog.error" :message="catalog.error" @retry="catalog.browse()" />
@@ -80,10 +87,7 @@ function submitSearch() {
     </div>
 
     <div v-if="catalog.nextCursor" class="text-center">
-      <button
-        class="rounded-xl border border-line px-6 py-2 dark:border-slate-800"
-        @click="catalog.browse(false)"
-      >
+      <button class="btn btn-secondary px-8" @click="catalog.browse(false)">
         {{ t('common.viewAll') }}
       </button>
     </div>

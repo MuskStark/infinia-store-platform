@@ -4,7 +4,7 @@ import { createI18n } from 'vue-i18n';
 import BeeLevelBadge from '../src/components/BeeLevelBadge.vue';
 import en from '../src/locales/en';
 import zhCN from '../src/locales/zh-CN';
-import { BEE_MARKS, beeMark } from '../src/bee-levels';
+import { BEE_MARKS, beeMark, type BeeTier } from '../src/bee-levels';
 
 const i18n = (locale: 'en' | 'zh-CN') =>
   createI18n({ legacy: false, locale, messages: { en, 'zh-CN': zhCN } });
@@ -35,40 +35,47 @@ describe('BeeLevelBadge (蜜蜂等级标识随等级变更)', () => {
     expect(wrapper.text()).toContain('Lv4');
   });
 
-  it('every level carries its own emblem and tone — the mark changes with the level', () => {
-    const seenEmblems = new Set<string>();
-    const seenTones = new Set<string>();
+  it('every level carries its own honeycomb tier — the mark changes with the level', () => {
+    const seenTiers = new Set<BeeTier>();
     for (const level of [0, 1, 2, 3, 4]) {
       const wrapper = mountBadge(level);
-      const emblem = BEE_MARKS[level].emblem;
-      expect(wrapper.text()).toContain(emblem);
-      expect(wrapper.find('span').classes()).toContain(
-        `magic-badge--${BEE_MARKS[level].tone}`,
-      );
-      seenEmblems.add(emblem);
-      seenTones.add(BEE_MARKS[level].tone);
+      const mark = BEE_MARKS[level];
+      expect(wrapper.find('span').classes()).toContain(`bee-badge--${mark.tier}`);
+      // Each level renders its own crest silhouette.
+      const crest = wrapper.find('.bee-crest');
+      expect(crest.exists()).toBe(true);
+      expect(crest.find('svg').exists()).toBe(true);
+      seenTiers.add(mark.tier);
     }
-    expect(seenEmblems.size).toBe(5);
-    expect(seenTones.size).toBe(5);
+    expect(seenTiers.size).toBe(5);
   });
 
-  it('the queen gets the royal gold badge', () => {
+  it('the queen wears the crown crest filled with the brand sweep', () => {
     const wrapper = mountBadge(4);
-    expect(wrapper.text()).toContain('👑');
-    expect(wrapper.find('span').classes()).toContain('magic-badge--gold');
+    expect(wrapper.find('span').classes()).toContain('bee-badge--queen');
+    expect(wrapper.html()).toContain('bee-royal-grad');
   });
 
-  it('demands mode prefixes the requirement with the target level emblem', () => {
+  it('compact mode keeps the mark and level number only', () => {
+    const wrapper = mount(BeeLevelBadge, {
+      props: { level: 4, compact: true },
+      global: { plugins: [i18n('en')] },
+    });
+    expect(wrapper.find('span').classes()).toContain('bee-badge--compact');
+    expect(wrapper.text()).toContain('Lv4');
+    expect(wrapper.text()).not.toContain('Queen');
+  });
+
+  it('demands mode prefixes the requirement with the target level', () => {
     const wrapper = mountBadge(3, true);
     expect(wrapper.text()).toContain('Requires');
-    expect(wrapper.text()).toContain('🛡️');
     expect(wrapper.text()).toContain('Guard');
     expect(wrapper.text()).toContain('Lv3+');
   });
 
   it('out-of-range levels clamp to the ladder ends', () => {
-    expect(beeMark(-3).emblem).toBe(beeMark(0).emblem);
-    expect(beeMark(99).emblem).toBe(beeMark(4).emblem);
+    expect(beeMark(-3).tier).toBe(beeMark(0).tier);
+    expect(beeMark(99).tier).toBe(beeMark(4).tier);
   });
 });
 
