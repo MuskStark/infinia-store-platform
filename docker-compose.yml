@@ -9,7 +9,9 @@ services:
       POSTGRES_USER: store
       POSTGRES_PASSWORD: store
     ports:
-      - "5432:5432"
+      # Loopback-only: these ports carry fixed dev credentials and must not be
+      # reachable from the LAN on laptop deployments.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -21,7 +23,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -35,11 +37,65 @@ services:
       MINIO_ROOT_USER: store
       MINIO_ROOT_PASSWORD: store-secret
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: creates the bucket the store's S3 storage mode expects, so
+  # `store.storage.type=s3` works against this stack without manual steps.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set store http://minio:9000 store store-secret &&
+      mc mb --ignore-existing store/store-blobs"
+
+  # The store itself, built from the repo Dockerfile. Opt-in via
+  # `docker compose --profile app up -d store` so the plain
+  # `docker compose up -d` dependency-stack behaviour is unchanged.
+  # Secrets default to dev values — override STORE_*_SECRET for anything
+  # reachable beyond loopback.
+  store:
+    build: .
+    image: infinia-store
+    profiles: ["app"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      STORE_BASE_URL: ${STORE_BASE_URL:-http://localhost:8080}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/store
+      SPRING_DATASOURCE_USERNAME: store
+      SPRING_DATASOURCE_PASSWORD: store
+      STORE_STORAGE_TYPE: s3
+      STORE_STORAGE_S3_ENDPOINT: http://minio:9000
+      STORE_STORAGE_S3_BUCKET: store-blobs
+      STORE_STORAGE_S3_ACCESS_KEY: store
+      STORE_STORAGE_S3_SECRET_KEY: store-secret
+      STORE_TICKET_SECRET: ${STORE_TICKET_SECRET:-dev-only-ticket-secret-change-me}
+      STORE_ROLLOUT_SECRET: ${STORE_ROLLOUT_SECRET:-dev-only-rollout-secret-change-me}
+      STORE_CLI_CLIENT_SECRET: ${STORE_CLI_CLIENT_SECRET:-dev-only-cli-secret}
+    ports:
+      # Behind your own reverse proxy / TLS terminator in production.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - storedata:/var/lib/infinia-store
+    restart: unless-stopped
 
 volumes:
   pgdata:
   miniodata:
+  storedata:

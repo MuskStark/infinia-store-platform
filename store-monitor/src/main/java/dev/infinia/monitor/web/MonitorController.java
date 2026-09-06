@@ -80,7 +80,10 @@ public class MonitorController {
         if (snapshot != null) {
             merged.addAll(snapshot.incidents());
         }
-        merged.sort(Comparator.comparing(IncidentDto::startedAt).reversed());
+        // Parse, not lexical-compare: Instant.toString() precision varies, and ':' < 'Z'
+        // would order a whole-minute instant above one 30 seconds later.
+        merged.sort(Comparator.comparing((IncidentDto i) -> java.time.Instant.parse(
+                i.startedAt())).reversed());
         return merged.stream().limit(Math.clamp(limit, 1, 200)).toList();
     }
 }

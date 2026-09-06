@@ -409,12 +409,11 @@ public class PackageScanner {
                 if (command == null || command.isBlank()) {
                     result.error("mcp.stdio-command-missing",
                             "STDIO templates must declare commandTemplate");
-                } else if (command.contains("$(") || command.contains("`")
-                        || command.contains(" && ") || command.contains(" || ")) {
+                } else if (hasShellComposition(command)) {
                     result.error("mcp.command-injection",
                             "commandTemplate must not contain shell composition");
                 }
-            } else if (!url.startsWith("https://") && url != null) {
+            } else if (url != null && !url.startsWith("https://")) {
                 result.error("mcp.url-not-https", "Remote MCP templates must use HTTPS URLs");
             }
             if (url == null && json.get("stdioDeployment") == null) {
@@ -443,8 +442,7 @@ public class PackageScanner {
             if (isBlank(command)) {
                 result.error("mcp.stdio-command-missing",
                         "stdioDeployment must declare the launch command");
-            } else if (command.contains("$(") || command.contains("`")
-                    || command.contains(";") || command.contains("|")) {
+            } else if (hasShellComposition(command)) {
                 result.error("mcp.command-injection",
                         "stdioDeployment command must be a single executable, no shell composition");
             }
@@ -535,6 +533,12 @@ public class PackageScanner {
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
+    }
+
+    /** One predicate for every "no shell composition" rule, so the checks cannot drift apart. */
+    private static boolean hasShellComposition(String command) {
+        return command.contains("$(") || command.contains("`") || command.contains(";")
+                || command.contains("|") || command.contains("&&") || command.contains("||");
     }
 
     private static String text(JsonNode node, String field) {

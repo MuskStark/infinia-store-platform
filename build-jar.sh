@@ -49,7 +49,7 @@ if [ "$SKIP_TESTS" -eq 1 ]; then
 fi
 ./mvnw "${MAVEN_ARGS[@]}"
 
-JAR=$(ls store-application/target/store-application-*.jar 2>/dev/null | grep -v '\.original$' | head -1)
+JAR=$( { ls store-application/target/store-application-*.jar; } 2>/dev/null | grep -v '\.original$' | head -1 || true)
 [ -n "$JAR" ] || fail "no jar produced in store-application/target"
 # Buffer the listing first: `unzip -l | grep -q` breaks under pipefail because
 # grep -q exits on the first match and SIGPIPEs the archiver.

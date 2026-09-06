@@ -22,6 +22,14 @@ public interface BlobStorage {
 
     long size(String blobKey);
 
+    /**
+     * Verifies the backend accepts writes right now; used by the status page's
+     * artifact-storage probe. Throws {@link BlobStorageException} (or any other
+     * exception) when the backend is not writable — never returns a status flag.
+     */
+    default void checkWritable() {
+    }
+
     class BlobStorageException extends RuntimeException {
         public BlobStorageException(String message) {
             super(message);

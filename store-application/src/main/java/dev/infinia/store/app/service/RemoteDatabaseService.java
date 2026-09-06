@@ -309,8 +309,9 @@ public class RemoteDatabaseService {
 
     /**
      * Only the drivers the platform ships (PostgreSQL, H2) are accepted, and
-     * H2's script-executing URL parameters (INIT/RUNSCRIPT) are rejected — a
-     * JDBC URL is otherwise an arbitrary code-execution vector.
+     * script/class-instantiating URL parameters are rejected — a JDBC URL is
+     * otherwise an arbitrary code-execution vector (INIT/RUNSCRIPT on H2;
+     * socketFactory/sslfactory/loggerClass and friends on PostgreSQL).
      */
     private static String validatedUrl(String raw) {
         String url = requireText(raw, "jdbcUrl", 1, 500);
@@ -320,9 +321,13 @@ public class RemoteDatabaseService {
                     "jdbcUrl must be jdbc:postgresql://host:port/db or jdbc:h2:… "
                             + "(the two drivers this platform ships)");
         }
-        if (lower.contains("init=") || lower.contains("runscript")) {
-            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
-                    "jdbcUrl must not contain INIT/RUNSCRIPT parameters");
+        for (String banned : new String[] {"init=", "runscript", "socketfactory",
+                "sslfactory", "sslpasswordcallback", "loggerclass", "loggerlevel",
+                "authenticator=", "sslpassword="}) {
+            if (lower.contains(banned)) {
+                throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                        "jdbcUrl must not contain script- or class-instantiating parameters");
+            }
         }
         return url;
     }

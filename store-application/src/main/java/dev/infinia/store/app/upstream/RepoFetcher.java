@@ -226,6 +226,10 @@ public class RepoFetcher {
     }
 
     private byte[] fetch(String url, long maxBytes) throws IOException, InterruptedException {
+        // Guard here — the single choke point — so no caller (repoFiles included,
+        // whose URL comes from upstream-controlled marketplace metadata) can route
+        // around the SSRF policy.
+        SourceFetchGuard.validate(url);
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofSeconds(60))
                 .header("User-Agent", "Infinia-Store-Sync")

@@ -2,6 +2,83 @@
 
 ## Unreleased
 
+### Full-repo review fixes + production container image
+
+- Reliability: outbox events that failed once were never retried — the relay selected
+  `PENDING` rows only while failures were marked `FAILED`, silently dropping every
+  webhook after its first transient error. `findPending` now includes backoff-elapsed
+  `FAILED` rows and exhausted events move to a terminal `DEAD` status. Uploads no
+  longer stream up to 1 GiB inside a database transaction (`completeUpload` stores the
+  blob first, then claims the session atomically — concurrent replays of one presigned
+  URL can no longer attach an artifact twice), and listing download/favorite counters
+  are atomic SQL updates instead of read-modify-write.
+- Security & correctness: `GET /publisher/releases/{id}` now enforces owner-or-admin
+  (it previously leaked other publishers' drafts and scan findings); review decisions
+  reject unattributable (null-reviewer) callers instead of skipping the self-review
+  guard; the remote-database JDBC guard also blocks class-instantiating PostgreSQL URL
+  parameters (`socketFactory`, `sslfactory`, …); `SourceFetchGuard` rejects IPv6
+  unique-local (fc00::/7) addresses and `RepoFetcher.fetch` validates every URL at the
+  single choke point, closing a latent marketplace-URL SSRF path. The SPA keeps its
+  access token in memory in production builds (sessionStorage persistence is now
+  dev-only) and clears one-shot PKCE material after login.
+- Scanner hardening: an MCP template with a remote transport and no `urlTemplate` no
+  longer NPEs (which wedged releases in `SCANNING` forever — the scan pipeline now
+  auto-rejects on any crash instead of wedging); SafeZip's zip-bomb ratio check
+  actually compares uncompressed vs compressed size, duplicate entry names are
+  rejected, and the in-memory tar.gz extractor validates sizes before allocation and
+  budgets every entry. MCP shell-composition rules are one shared predicate for
+  `commandTemplate` and `stdioDeployment`.
+- Housekeeping: rejected/oversized local uploads no longer leak `.part` temp files
+  (client-triggerable disk fill); `store.blob-dir`/`key-dir` default to
+  `~/.infinia-store/…` so the default profile boots without explicit config; S3
+  promote failures delete the completed staging object; partial S3 credentials fail
+  at boot; the status-page blob probe runs off the request thread with hard timeouts;
+  upstream download streams are opened lazily inside the response body;
+  `publish-app-release.sh` checks the submit HTTP status, URL-encodes the client
+  secret, jq-quotes the version and warns about drafts left behind on failure;
+  `build-jar.sh`'s "no jar produced" guard is actually reachable; compose dev-stack
+  ports bind to loopback; a corrupt 44-byte `compat-portable.zip` test artifact was
+  removed from the repo; monitor incidents sort by parsed instants; the OpenAPI
+  contract documents `POST /admin/databases/deactivate`.
+- New `Dockerfile` (Node → SPA, Maven → jar, non-root JRE runtime with healthcheck)
+  plus `.dockerignore`; `docker compose --profile app up` runs the full store against
+  the stack's PostgreSQL/Redis/MinIO with S3 artifact storage wired in. Nine new
+  regression tests pin the outbox retry ladder, local temp-file cleanup, S3
+  promote-failure cleanup and the MCP template null path.
+
+### Configurable external artifact storage (ADR-012)
+
+- Uploaded artifacts no longer require host disk: `store.storage.type=s3` points the
+  artifact plane at one S3-compatible bucket (MinIO, AWS S3, any SigV4 endpoint) behind
+  the unchanged `BlobStorage` port; `local` stays the default. Settings live under
+  `store.storage.s3.*` with `STORE_STORAGE_*` env fallbacks — blank credentials defer
+  to the SDK's default provider chain, `path-style-access` auto-selects (path-style for
+  custom endpoints, virtual-hosted for AWS), and `key-prefix` lets deployments share a
+  bucket. Blob keys remain `sha256/<2>/<62>` content addresses in both backends, so the
+  database stays valid across a switch.
+- `S3BlobStorage` streams uploads the way the local backend does: size-capped,
+  SHA-256-computed in flight. Since a content-addressed key is only known after the
+  last byte, multi-part uploads land on a `staging/<uuid>` object and are promoted by
+  server-side copy (part-copy above the 5 GiB `CopyObject` ceiling); hash mismatch or
+  cap violation aborts the multipart upload and leaves nothing behind, and single-part
+  blobs go straight to their final key. Existing content short-circuits the copy.
+- The `BlobStorage` port gained `checkWritable()`: the status page's artifact-storage
+  probe now exercises the real backend (a put+delete probe object on S3) instead of
+  assuming a local directory, and the `host-load` disk probe anchors on the key
+  directory when artifacts live remotely. Half-configured S3 deployments (missing
+  bucket/endpoint) fail at boot with a clear message.
+- The compose stack's MinIO is now actually used: a one-shot `minio-init` service
+  creates the `store-blobs` bucket. Also fixed a latent bug ported from the local
+  backend — the optional `expectedSha256` check compared the expected hash with
+  itself (no caller passed one, so nothing could regress).
+- Covered by 26 new backend tests (22 in the default suite): mocked-S3 unit tests for
+  every put path (single, multipart, dedupe, mismatch, cap, abort/cleanup),
+  `ApplicationContextRunner` bean selection and boot-failure cases, a full
+  `@SpringBootTest` context against S3 config (unreachable bucket degrades the `blob`
+  component without taking the page down), and an opt-in wire-level MinIO smoke suite
+  (`TEST_S3_ENDPOINT`, exercised end-to-end against a live MinIO: real publish-script
+  upload → content-addressed object keys → empty staging).
+
 ### Standalone status monitor (ADR-011: the status page survives the store)
 
 - New `store-monitor` module: a second Spring Boot deployable for the monitoring host. It

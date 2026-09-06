@@ -9,5 +9,8 @@ public record OutboxRecord(UUID id, String aggregateType, String aggregateId, St
 
     public static final String STATUS_PENDING = "PENDING";
     public static final String STATUS_DISPATCHED = "DISPATCHED";
+    /** Retryable failure: still selected by {@code findPending} once the backoff elapses. */
     public static final String STATUS_FAILED = "FAILED";
+    /** Terminal: attempts exhausted, operator intervention required. */
+    public static final String STATUS_DEAD = "DEAD";
 }

@@ -38,8 +38,7 @@ public class OutboxAdapter implements PublishingRepositories.OutboxRepository {
 
     @Override
     public List<OutboxRecord> findPending(int limit, Instant now) {
-        return jpa.findTop50ByStatusAndNextAttemptAtBeforeOrderByCreatedAtAsc(
-                OutboxRecord.STATUS_PENDING, now).stream()
+        return jpa.findRetryable(now).stream()
                 .limit(limit)
                 .map(OutboxAdapter::toDomain)
                 .toList();
@@ -49,6 +48,12 @@ public class OutboxAdapter implements PublishingRepositories.OutboxRepository {
     @Transactional
     public void markDispatched(UUID id) {
         jpa.markDispatched(id);
+    }
+
+    @Override
+    @Transactional
+    public void markDead(UUID id) {
+        jpa.markDead(id);
     }
 
     @Override

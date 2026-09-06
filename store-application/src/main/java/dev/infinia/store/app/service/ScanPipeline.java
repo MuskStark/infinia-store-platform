@@ -23,6 +23,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -52,6 +53,37 @@ public class ScanPipeline {
     @Async("scanExecutor")
     @Transactional
     public void runScan(UUID releaseId, UUID reviewId) {
+        try {
+            runScanInternal(releaseId, reviewId);
+        } catch (Exception e) {
+            // A crash inside the scan worker (scanner bug, malformed package)
+            // must never leave the release wedged in SCANNING — there is no
+            // watchdog to reconcile it later. Fail closed: auto-reject.
+            log.error("Scan crashed for release {} — auto-rejecting", releaseId, e);
+            try {
+                releases.findById(releaseId).ifPresent(release -> {
+                    if (release.status == ReleaseStatus.SCANNING) {
+                        ReleaseStateMachine.assertTransition(release.status,
+                                ReleaseStatus.REJECTED);
+                        release.status = ReleaseStatus.REJECTED;
+                        releases.save(release);
+                    }
+                });
+                reviews.findById(reviewId).ifPresent(review -> {
+                    review.findings = new ArrayList<>(List.of(
+                            Review.Finding.error("scanner.error",
+                                    "Scan crashed: " + e.getClass().getSimpleName())));
+                    review.status = "REJECTED";
+                    reviews.save(review);
+                });
+            } catch (Exception cleanupFailure) {
+                log.error("Scan crash cleanup also failed for release {}", releaseId,
+                        cleanupFailure);
+            }
+        }
+    }
+
+    private void runScanInternal(UUID releaseId, UUID reviewId) {
         // Wait briefly for the submitting transaction to commit before flipping state.
         Release release = null;
         Review review = null;

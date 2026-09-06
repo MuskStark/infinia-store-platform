@@ -60,6 +60,12 @@ public final class SafeZip {
                 if (entry.isDirectory()) {
                     continue;
                 }
+                // Duplicate names let the last entry silently win here while
+                // other extractors take the first — a manifest-swap vector.
+                if (files.containsKey(name)) {
+                    throw new ScanViolation("zip.duplicate-entry",
+                            "Archive declares " + name + " more than once");
+                }
                 long declared = entry.getSize(); // -1 when unknown
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 byte[] buffer = new byte[8192];
@@ -75,11 +81,18 @@ public final class SafeZip {
                         throw new ScanViolation("zip.total-too-large",
                                 "Archive exceeds the total uncompressed size limit");
                     }
-                    if (declared > 0 && written / Math.max(declared, 1) > limits.maxRatio()) {
+                    // Bomb metric = uncompressed / compressed; comparing against the
+                    // header's uncompressed size converges to ~1 and catches nothing.
+                    if (entry.getCompressedSize() > 0
+                            && written / entry.getCompressedSize() > limits.maxRatio()) {
                         throw new ScanViolation("zip.bomb",
                                 "Entry " + name + " exceeds the compression ratio limit");
                     }
                     out.write(buffer, 0, read);
+                }
+                if (declared > 0 && written > declared) {
+                    throw new ScanViolation("zip.bomb",
+                            "Entry " + name + " expands beyond its declared size");
                 }
                 total += written;
                 files.put(name, new ExtractedFile(name, out.toByteArray()));

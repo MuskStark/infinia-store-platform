@@ -35,6 +35,13 @@ public final class PublishingRepositories {
         void save(UploadSessionInfo session);
 
         List<UploadSessionInfo> findByReleaseId(UUID releaseId);
+
+        /**
+         * Atomically transitions a PENDING session to COMPLETED; false when the
+         * session is gone, expired or already completed — the guard against
+         * concurrent replays of one presigned upload URL.
+         */
+        boolean claimForCompletion(UUID id);
     }
 
     public interface SigningKeyRepository {
@@ -54,11 +61,17 @@ public final class PublishingRepositories {
     public interface OutboxRepository {
         void enqueue(OutboxRecord record);
 
+        /**
+         * Selects PENDING events plus FAILED events whose backoff has elapsed;
+         * DEAD (attempts exhausted) rows are never returned.
+         */
         List<OutboxRecord> findPending(int limit, Instant now);
 
         void markDispatched(UUID id);
 
         void markFailed(UUID id, Instant nextAttemptAt);
+
+        void markDead(UUID id);
     }
 
     public interface WebhookRepository {

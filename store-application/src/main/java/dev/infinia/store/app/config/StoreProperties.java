@@ -25,15 +25,18 @@ public record StoreProperties(
 
     public StoreProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8080" : baseUrl;
-        blobDir = blobDir == null || blobDir.isBlank() ? "data/blobs" : blobDir;
-        keyDir = keyDir == null || keyDir.isBlank() ? "data/keys" : keyDir;
-        // A relative storage path silently splits data when the working directory
-        // changes between IDEA/maven launches — refuse to boot instead.
-        if (!java.nio.file.Path.of(blobDir).isAbsolute()
-                || !java.nio.file.Path.of(keyDir).isAbsolute()) {
-            throw new IllegalStateException("store.blob-dir / store.key-dir must be "
-                    + "absolute paths (working-directory-independent); got blob-dir="
-                    + blobDir + " key-dir=" + keyDir);
+        // Absolute defaults (working-directory independent): LocalFsBlobStorage
+        // enforces blob-dir absoluteness and the check below enforces key-dir's.
+        // S3 storage ignores blob-dir entirely.
+        blobDir = blobDir == null || blobDir.isBlank()
+                ? System.getProperty("user.home") + "/.infinia-store/blobs" : blobDir;
+        keyDir = keyDir == null || keyDir.isBlank()
+                ? System.getProperty("user.home") + "/.infinia-store/keys" : keyDir;
+        // blob-dir absoluteness is enforced by LocalFsBlobStorage (the only backend
+        // that consumes it — S3 storage ignores it); key-dir stays local-disk state.
+        if (!java.nio.file.Path.of(keyDir).isAbsolute()) {
+            throw new IllegalStateException("store.key-dir must be an absolute path "
+                    + "(working-directory-independent); got key-dir=" + keyDir);
         }
         ticketSecret = ticketSecret == null || ticketSecret.isBlank()
                 ? "dev-only-ticket-secret-change-me" : ticketSecret;

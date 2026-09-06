@@ -8,6 +8,7 @@ import dev.infinia.store.domain.port.PublishingRepositories;
 import dev.infinia.store.infrastructure.persistence.entity.UploadSessionEntity;
 import dev.infinia.store.infrastructure.persistence.repository.UploadSessionJpaRepository;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -49,6 +50,12 @@ public class UploadSessionAdapter implements PublishingRepositories.UploadSessio
     @Override
     public List<UploadSessionInfo> findByReleaseId(UUID releaseId) {
         return jpa.findByReleaseId(releaseId).stream().map(UploadSessionAdapter::toDomain).toList();
+    }
+
+    @Override
+    @Transactional
+    public boolean claimForCompletion(UUID id) {
+        return jpa.claimForCompletion(id) == 1;
     }
 
     static UploadSessionInfo toDomain(UploadSessionEntity e) {

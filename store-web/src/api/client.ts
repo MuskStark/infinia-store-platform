@@ -36,14 +36,19 @@ export class ApiRequestError extends Error implements ApiError {
 
 const TOKEN_STORAGE = 'infinia.store.token';
 
-/** Access token lives in memory by default; sessionStorage bridges reloads during dev. */
+/** Access token lives in memory only; sessionStorage bridges reloads during dev. */
 let accessToken: string | null = null;
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
-  if (token) {
-    sessionStorage.setItem(TOKEN_STORAGE, token);
-  } else {
+  if (import.meta.env.DEV) {
+    if (token) {
+      sessionStorage.setItem(TOKEN_STORAGE, token);
+    } else {
+      sessionStorage.removeItem(TOKEN_STORAGE);
+    }
+  } else if (!token) {
+    // Clear any token persisted by a dev build in the same tab.
     sessionStorage.removeItem(TOKEN_STORAGE);
   }
 }

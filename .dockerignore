@@ -1,0 +1,36 @@
+# Build context hygiene: everything here is either regenerable inside the image
+# (node_modules, dist, target), local state (data/), or irrelevant to the build.
+
+# --- VCS / IDE ---
+.git
+.gitignore
+.idea
+.vscode
+
+# --- Java ---
+**/target
+hs_err_pid*
+
+# --- Node / Yarn ---
+**/node_modules
+**/dist
+**/coverage
+*.tsbuildinfo
+.yarn/cache
+.yarn/unplugged
+.yarn/install-state.gz
+
+# --- Runtime state and local artifacts ---
+data
+store-application/data
+store-application/data.bak-module-20260828
+*.log
+
+# --- Not needed inside the build ---
+docs
+scripts
+*.md
+LICENSE
+docker-compose.yml
+Dockerfile
+.dockerignore

@@ -2,6 +2,7 @@ package dev.infinia.store.infrastructure.persistence.repository;
 
 import dev.infinia.store.infrastructure.persistence.entity.ListingEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -17,4 +18,15 @@ public interface ListingJpaRepository extends JpaRepository<ListingEntity, UUID>
 
     @Query("SELECT l FROM ListingEntity l WHERE (:type IS NULL OR l.type = :type)")
     List<ListingEntity> findAllByOptionalType(@Param("type") String type);
+
+    /** Atomic counter bumps — read-modify-write loses increments under concurrency. */
+    @Modifying
+    @Query("UPDATE ListingEntity l SET l.downloads = l.downloads + 1 WHERE l.id = :id")
+    int incrementDownloads(@Param("id") UUID id);
+
+    @Modifying
+    @Query("UPDATE ListingEntity l SET l.favoriteCount = "
+            + "CASE WHEN l.favoriteCount + :delta < 0 THEN 0 ELSE l.favoriteCount + :delta END"
+            + " WHERE l.id = :id")
+    int incrementFavorites(@Param("id") UUID id, @Param("delta") long delta);
 }

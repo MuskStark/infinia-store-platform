@@ -1,9 +1,6 @@
 package dev.infinia.store.infrastructure.blob;
 
 import dev.infinia.store.domain.port.BlobStorage;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -16,17 +13,17 @@ import java.util.HexFormat;
 
 /**
  * Local filesystem, content-addressed blob store for development and tests
- * (design §5.1: production uses S3/MinIO behind the same port). Keys are
- * {@code sha256/<first2>/<rest>}; completed blobs are immutable.
+ * (design §5.1: production points {@code store.storage.type} at an S3-compatible
+ * bucket behind the same port). Keys are {@code sha256/<first2>/<rest>};
+ * completed blobs are immutable.
  */
-@Component
 public class LocalFsBlobStorage implements BlobStorage {
 
     private final Path root;
 
-    public LocalFsBlobStorage(@Value("${store.blob-dir:data/blobs}") String dir) {
-        // Same key StoreProperties validates — a mismatch here once silently split
-        // blob storage across working directories (db anchored, blobs relative).
+    public LocalFsBlobStorage(String dir) {
+        // Same key StoreProperties used to validate — a mismatch here once silently
+        // split blob storage across working directories (db anchored, blobs relative).
         if (!Path.of(dir).isAbsolute()) {
             throw new IllegalStateException("store.blob-dir must be absolute, got: " + dir);
         }
@@ -35,7 +32,7 @@ public class LocalFsBlobStorage implements BlobStorage {
 
     @Override
     public String put(InputStream in, long maxSizeBytes, String expectedSha256) {
-        Path tmp;
+        Path tmp = null;
         try {
             Files.createDirectories(root.resolve("tmp"));
             tmp = Files.createTempFile(root.resolve("tmp"), "upload-", ".part");
@@ -55,12 +52,9 @@ public class LocalFsBlobStorage implements BlobStorage {
                 }
             }
             String sha256 = HexFormat.of().formatHex(digest.digest());
-            if (expectedSha256 != null && !expectedSha256.equalsIgnoreCase(expectedSha256.trim())) {
+            if (expectedSha256 != null && !sha256.equalsIgnoreCase(expectedSha256.trim())) {
                 throw new BlobStorageException("SHA-256 mismatch: expected "
                         + expectedSha256 + " but computed " + sha256);
-            }
-            if (expectedSha256 == null && !sha256.matches("[0-9a-fA-F]{64}")) {
-                throw new BlobStorageException("Computed hash is not a valid SHA-256");
             }
             String blobKey = "sha256/" + sha256.substring(0, 2) + "/" + sha256.substring(2);
             Path target = root.resolve(blobKey);
@@ -72,7 +66,20 @@ public class LocalFsBlobStorage implements BlobStorage {
                 Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE);
             }
             return blobKey;
-        } catch (IOException | NoSuchAlgorithmException e) {
+        } catch (IOException | NoSuchAlgorithmException | RuntimeException e) {
+            // Rejected (oversize / hash mismatch) or failed uploads must not leave
+            // .part files behind — the triggers are client-controlled, so leaked
+            // parts would silently eat the disk.
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException ignored) {
+                    // best effort — the original failure is the one to report
+                }
+            }
+            if (e instanceof BlobStorageException rejection) {
+                throw rejection;
+            }
             throw new BlobStorageException("Failed to store blob", e);
         }
     }
@@ -97,6 +104,17 @@ public class LocalFsBlobStorage implements BlobStorage {
             return Files.size(root.resolve(blobKey));
         } catch (IOException e) {
             throw new BlobStorageException("Blob not found: " + blobKey, e);
+        }
+    }
+
+    @Override
+    public void checkWritable() {
+        try {
+            Files.createDirectories(root);
+            Path probe = Files.createTempFile(root, "status-probe", ".tmp");
+            Files.delete(probe);
+        } catch (IOException e) {
+            throw new BlobStorageException("Blob directory is not writable: " + root, e);
         }
     }
 }

@@ -180,19 +180,13 @@ public class ListingRepositoryAdapter implements ListingRepository {
     @Override
     @Transactional
     public void incrementDownloads(UUID listingId) {
-        jpa.findById(listingId).ifPresent(e -> {
-            e.downloads++;
-            jpa.save(e);
-        });
+        jpa.incrementDownloads(listingId);
     }
 
     @Override
     @Transactional
     public void incrementFavorites(UUID listingId, long delta) {
-        jpa.findById(listingId).ifPresent(e -> {
-            e.favoriteCount = Math.max(0, e.favoriteCount + delta);
-            jpa.save(e);
-        });
+        jpa.incrementFavorites(listingId, delta);
     }
 
     private static void copy(Listing l, ListingEntity e) {

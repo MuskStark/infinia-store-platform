@@ -41,8 +41,26 @@ store:
   app-coordinate: ${STORE_APP_COORDINATE:infinia://app/official/fengyu-host}
   app-minimum-supported-version: ${STORE_APP_MINIMUM_SUPPORTED_VERSION:4.0.0}
   base-url: http://localhost:8080
-  blob-dir: data/blobs
-  key-dir: data/keys
+  # Absolute by default: a relative path silently splits blob storage across
+  # working directories, and LocalFsBlobStorage refuses it at boot anyway.
+  blob-dir: ${user.home}/.infinia-store/blobs
+  # Same working-directory rule as blob-dir (enforced in StoreProperties).
+  key-dir: ${user.home}/.infinia-store/keys
+  # Artifact plane (design §5.1): local filesystem by default, or point type at
+  # s3 to keep uploaded artifacts in one S3-compatible bucket (MinIO, AWS S3,
+  # any SigV4 endpoint). Blob keys are content addresses either way, so the
+  # database is portable between backends; only the bytes move.
+  storage:
+    type: ${STORE_STORAGE_TYPE:local}
+    s3:
+      endpoint: ${STORE_STORAGE_S3_ENDPOINT:}
+      region: ${STORE_STORAGE_S3_REGION:}
+      bucket: ${STORE_STORAGE_S3_BUCKET:}
+      access-key: ${STORE_STORAGE_S3_ACCESS_KEY:}
+      secret-key: ${STORE_STORAGE_S3_SECRET_KEY:}
+      # null = auto: path-style for custom endpoints (MinIO), virtual-hosted for AWS.
+      path-style-access: ${STORE_STORAGE_S3_PATH_STYLE:}
+      key-prefix: ${STORE_STORAGE_S3_KEY_PREFIX:}
   ticket-secret: ${STORE_TICKET_SECRET:dev-only-ticket-secret-change-me}
   rollout-secret: ${STORE_ROLLOUT_SECRET:dev-only-rollout-secret-change-me}
   max-upload-bytes: 1073741824

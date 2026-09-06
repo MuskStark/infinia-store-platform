@@ -45,8 +45,15 @@ public final class TarGz {
                 String name = cString(header, 0, 100);
                 long size = octal(header, 124, 12);
                 char type = (char) header[156];
-                if (size > 256L * 1024 * 1024) {
+                // Validate before allocating, and count EVERY entry (directory,
+                // symlink, long-name blocks included) against the budget — a small
+                // gzip otherwise decompresses gigabytes of non-regular entries freely.
+                if (size < 0 || size > 256L * 1024 * 1024) {
                     throw new IOException("tar entry too large: " + name);
+                }
+                total += size;
+                if (total > maxTotalBytes) {
+                    throw new IOException("tar archive exceeds size budget");
                 }
                 byte[] content = new byte[(int) size];
                 int got = 0;
@@ -67,10 +74,6 @@ public final class TarGz {
                     pendingLongName = null;
                 }
                 if (type == '0' || type == '\0') {
-                    total += size;
-                    if (total > maxTotalBytes) {
-                        throw new IOException("tar archive exceeds size budget");
-                    }
                     files.put(name, content);
                 }
             }
@@ -238,9 +241,18 @@ public final class TarGz {
         return new String(block, offset, end - offset, StandardCharsets.UTF_8);
     }
 
-    private static long octal(byte[] block, int offset, int length) {
+    private static long octal(byte[] block, int offset, int length) throws IOException {
         String text = cString(block, offset, length).trim();
-        return text.isEmpty() ? 0 : Long.parseLong(text, 8);
+        if (text.isEmpty()) {
+            return 0;
+        }
+        try {
+            return Long.parseLong(text, 8);
+        } catch (NumberFormatException e) {
+            // GNU base-256 sizes and garbage headers must fail as I/O errors,
+            // not escape as uncaught runtime exceptions.
+            throw new IOException("malformed tar size field: " + text);
+        }
     }
 
     private static boolean isZeroBlock(byte[] block) {

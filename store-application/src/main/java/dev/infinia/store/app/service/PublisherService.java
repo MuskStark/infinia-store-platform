@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -60,6 +61,7 @@ public class PublisherService {
     private final ObjectMapper mapper;
     private final AuditService audit;
     private final ScanPipeline scanPipeline;
+    private final TransactionTemplate transactions;
 
     public PublisherService(ListingRepository listings, ReleaseRepository releases,
             IdentityRepositories.NamespaceRepository namespaces,
@@ -68,7 +70,8 @@ public class PublisherService {
             PublishingRepositories.ReviewRepository reviews,
             PublishingRepositories.OutboxRepository outbox,
             dev.infinia.store.domain.port.BlobStorage blobs, StoreProperties properties,
-            ObjectMapper mapper, AuditService audit, ScanPipeline scanPipeline) {
+            ObjectMapper mapper, AuditService audit, ScanPipeline scanPipeline,
+            TransactionTemplate transactions) {
         this.listings = listings;
         this.releases = releases;
         this.namespaces = namespaces;
@@ -81,6 +84,7 @@ public class PublisherService {
         this.mapper = mapper;
         this.audit = audit;
         this.scanPipeline = scanPipeline;
+        this.transactions = transactions;
     }
 
     // ---- listings ----
@@ -347,9 +351,12 @@ public class PublisherService {
 
     /**
      * Receives the presigned PUT: streams to blob storage, computes SHA-256 and
-     * attaches the artifact to the release (design §8.2 steps 1-2).
+     * attaches the artifact to the release (design §8.2 steps 1-2). The body is
+     * streamed and digested BEFORE any transaction opens — a slow upload must
+     * not pin a pooled database connection — and the session is then claimed
+     * atomically, so concurrent replays of one presigned URL cannot attach the
+     * artifact twice.
      */
-    @Transactional
     public UploadSessionInfo completeUpload(UUID uploadId, InputStream body) throws IOException {
         UploadSessionInfo session = uploads.findById(uploadId).orElseThrow(
                 () -> new DomainException(StoreErrorCode.NOT_FOUND, "Upload session not found"));
@@ -364,12 +371,34 @@ public class PublisherService {
         }
         String blobKey = blobs.put(body, properties.maxUploadBytes(), null);
         long size = blobs.size(blobKey);
-        String sha256 = blobKey.substring(blobKey.lastIndexOf('/') + 1);
-        int digestPrefix = blobKey.indexOf("sha256/");
-        if (digestPrefix >= 0) {
-            sha256 = blobKey.substring(digestPrefix + "sha256/".length()).replace("/", "");
-        }
+        String sha256 = sha256Of(blobKey);
         String mimeType = mimeType(session.filename);
+        return transactions.execute(txStatus -> finalizeUpload(uploadId, blobKey, size, sha256,
+                mimeType));
+    }
+
+    /** Recovers the digest from a content-addressed key ({@code sha256/<2>/<62>}). */
+    private static String sha256Of(String blobKey) {
+        int digestPrefix = blobKey.indexOf("sha256/");
+        if (digestPrefix < 0) {
+            return blobKey.substring(blobKey.lastIndexOf('/') + 1);
+        }
+        return blobKey.substring(digestPrefix + "sha256/".length()).replace("/", "");
+    }
+
+    private UploadSessionInfo finalizeUpload(UUID uploadId, String blobKey, long size,
+            String sha256, String mimeType) {
+        UploadSessionInfo session = uploads.findById(uploadId).orElseThrow(
+                () -> new DomainException(StoreErrorCode.NOT_FOUND, "Upload session not found"));
+        if (session.expired(Instant.now())) {
+            session.status = "EXPIRED";
+            uploads.save(session);
+            throw new DomainException(StoreErrorCode.UPLOAD_EXPIRED, "Upload session expired");
+        }
+        if (!uploads.claimForCompletion(uploadId)) {
+            throw new DomainException(StoreErrorCode.UPLOAD_NOT_COMPLETE,
+                    "Upload session already used");
+        }
 
         Release release = releases.findById(session.releaseId).orElseThrow(
                 () -> new DomainException(StoreErrorCode.RELEASE_NOT_FOUND, "Release missing"));

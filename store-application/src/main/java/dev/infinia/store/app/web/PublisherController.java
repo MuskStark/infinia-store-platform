@@ -161,9 +161,14 @@ public class PublisherController {
                 review.submittedAt.toString()));
     }
 
+    /** One release incl. DRAFT state and scan findings — owner or platform admin only. */
     @GetMapping("/releases/{releaseId}")
     public PublisherDtos.PublisherReleaseDto release(@PathVariable UUID releaseId) {
         Release release = catalog.releaseOrThrow(releaseId);
+        var current = principal.require();
+        if (!current.hasRole("PLATFORM_ADMIN")) {
+            publisher.requireListingOwner(current.userId(), release);
+        }
         Listing listing = listings.findById(release.listingId).orElse(null);
         var findings = reviews.findLatestByReleaseId(release.id)
                 .map(reviewService::findingsOf)

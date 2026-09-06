@@ -1156,6 +1156,21 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RemoteDatabase' }
 
+  /admin/databases/deactivate:
+    post:
+      operationId: deactivateRemoteDatabases
+      tags: [Admin]
+      summary: Deactivate the remote data-source override — PLATFORM_ADMIN
+      description: >-
+        Clears the data-source override file read at startup so the store boots
+        from its configured local data source again (applied on restart).
+        Equivalent to setting enabled=false, provided as an explicit escape hatch.
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Override deactivated
+
   /admin/users:
     get:
       operationId: listAdminUsers

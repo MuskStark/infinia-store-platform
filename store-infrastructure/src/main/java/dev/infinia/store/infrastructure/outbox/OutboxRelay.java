@@ -61,7 +61,8 @@ public class OutboxRelay {
                 log.warn("Outbox event {} dispatch failed (attempt {}): {}", event.id(),
                         event.attempts() + 1, e.getMessage());
                 if (event.attempts() + 1 >= MAX_ATTEMPTS) {
-                    outbox.markFailed(event.id(), Instant.now().plusSeconds(3600));
+                    // Terminal: FAILED stays retryable via findPending, DEAD does not.
+                    outbox.markDead(event.id());
                 } else {
                     long backoffSeconds = (1L << Math.min(event.attempts(), 6)) * 2;
                     outbox.markFailed(event.id(), Instant.now().plusSeconds(backoffSeconds));

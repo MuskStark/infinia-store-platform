@@ -5,6 +5,7 @@ import dev.infinia.store.contract.api.StatusDtos.ComponentDto;
 import dev.infinia.store.contract.api.StatusDtos.DayDto;
 import dev.infinia.store.contract.api.StatusDtos.IncidentDto;
 import dev.infinia.store.contract.api.StatusDtos.StatusPageDto;
+import dev.infinia.store.domain.port.BlobStorage;
 import dev.infinia.store.domain.port.PublishingRepositories.UpstreamSourceRepository;
 import dev.infinia.store.domain.port.StatusRepositories.DailySample;
 import dev.infinia.store.domain.port.StatusRepositories.Incident;
@@ -12,6 +13,7 @@ import dev.infinia.store.domain.port.StatusRepositories.IncidentRepository;
 import dev.infinia.store.domain.port.StatusRepositories.UptimeRepository;
 import dev.infinia.store.domain.service.UuidV7;
 import dev.infinia.store.app.config.StoreProperties;
+import dev.infinia.store.infrastructure.blob.BlobStorageProperties;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.springframework.beans.factory.annotation.Value;
@@ -95,6 +97,8 @@ public class StatusService {
 
     private final DataSource dataSource;
     private final StoreProperties properties;
+    private final BlobStorageProperties storageProperties;
+    private final BlobStorage blobs;
     private final UpstreamSourceRepository upstreams;
     private final UptimeRepository uptimeRepo;
     private final IncidentRepository incidentRepo;
@@ -113,12 +117,15 @@ public class StatusService {
     private final boolean statusHistorySeeded;
 
     public StatusService(DataSource dataSource, StoreProperties properties,
+            BlobStorageProperties storageProperties, BlobStorage blobs,
             UpstreamSourceRepository upstreams, UptimeRepository uptimeRepo,
             IncidentRepository incidentRepo, MeterRegistry registry,
             @Value("${store.seed.enabled:false}") boolean seedEnabled,
             @Value("${store.seed.status-history:false}") boolean statusHistorySeeded) {
         this.dataSource = dataSource;
         this.properties = properties;
+        this.storageProperties = storageProperties;
+        this.blobs = blobs;
         this.upstreams = upstreams;
         this.uptimeRepo = uptimeRepo;
         this.incidentRepo = incidentRepo;
@@ -308,13 +315,17 @@ public class StatusService {
     }
 
     private String probeBlobStorage() {
-        try {
-            Path dir = Path.of(properties.blobDir());
-            Files.createDirectories(dir);
-            Path probe = Files.createTempFile(dir, "status-probe", ".tmp");
-            Files.delete(probe);
+        // Off the request thread with a hard cap: with S3 storage this probe
+        // makes real network calls, and the status page must stay reachable
+        // exactly when the backend is not answering.
+        Future<String> probe = PROBES.submit(() -> {
+            blobs.checkWritable();
             return OPERATIONAL;
+        });
+        try {
+            return probe.get(6, TimeUnit.SECONDS);
         } catch (Exception e) {
+            probe.cancel(true);
             return MAJOR_OUTAGE;
         }
     }
@@ -337,13 +348,15 @@ public class StatusService {
     }
 
     /**
-     * Remaining capacity of the filesystem holding the blob directory — the
-     * volume whose exhaustion kills uploads, downloads and the blob probe at
-     * once. Unquotable filesystems (total ≤ 0) report operational rather than
-     * failing the page on a platform quirk.
+     * Remaining capacity of the filesystem holding the store's local state —
+     * the blob directory with local storage, or the key directory when
+     * artifacts live in object storage (S3), where that volume still carries
+     * keys, git exports and logs. Unquotable filesystems (total ≤ 0) report
+     * operational rather than failing the page on a platform quirk.
      */
     private String probeHostDisk() throws Exception {
-        Path dir = Path.of(properties.blobDir());
+        Path dir = Path.of(storageProperties.s3Mode()
+                ? properties.keyDir() : properties.blobDir());
         Files.createDirectories(dir);
         FileStore store = Files.getFileStore(dir);
         long total = store.getTotalSpace();

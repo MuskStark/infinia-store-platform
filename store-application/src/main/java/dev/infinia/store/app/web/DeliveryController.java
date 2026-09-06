@@ -148,9 +148,11 @@ public class DeliveryController {
                     .header("Cache-Control", "no-store")
                     .body(body);
         }
-        InputStream in = blobs.open(key);
+        // Opened inside writeTo: if the async body never executes (client abort,
+        // dispatch failure) there is no leaked stream — S3-backed streams hold
+        // a pooled HTTP connection until closed.
         StreamingResponseBody body = out -> {
-            try (in) {
+            try (InputStream in = blobs.open(key)) {
                 in.transferTo(out);
             }
         };

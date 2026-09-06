@@ -46,6 +46,9 @@
         <!-- Single maintenance line: Spring Boot 4.1.x, always latest security patch. -->
         <spring-boot.version>4.1.1</spring-boot.version>
 
+        <!-- S3-compatible artifact storage (MinIO in compose, any SigV4 endpoint). -->
+        <aws-sdk.version>2.54.13</aws-sdk.version>
+
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.5.3</maven-surefire-plugin.version>
         <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
@@ -57,6 +60,15 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
                 <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- AWS SDK v2 is outside the Boot BOM; every S3 artifact version comes
+                 from this import so modules never pin their own. -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

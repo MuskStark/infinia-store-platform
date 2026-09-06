@@ -74,8 +74,13 @@ public class ReviewService {
         Listing listing = listings.findById(release.listingId)
                 .orElseThrow(() -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND,
                         "Listing not found"));
-        // A reviewer must never approve their own release (design §7.3).
-        if (reviewerUserId != null && reviewerUserId.equals(listing.publisherUserId)) {
+        // A reviewer must never approve their own release (design §7.3). An
+        // unattributable caller (client-credentials token with no service
+        // account) must not slip past that guard on a null id.
+        if (reviewerUserId == null) {
+            throw DomainException.forbidden("Review decisions require an attributed reviewer");
+        }
+        if (reviewerUserId.equals(listing.publisherUserId)) {
             throw new DomainException(StoreErrorCode.SELF_REVIEW_FORBIDDEN,
                     "Reviewers cannot review their own releases");
         }

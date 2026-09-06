@@ -42,7 +42,8 @@ public final class SourceFetchGuard {
             for (InetAddress address : InetAddress.getAllByName(host)) {
                 if (!ALLOW_INTERNAL && (address.isLoopbackAddress()
                         || address.isAnyLocalAddress() || address.isLinkLocalAddress()
-                        || address.isSiteLocalAddress() || address.isMulticastAddress())) {
+                        || address.isSiteLocalAddress() || address.isMulticastAddress()
+                        || isUniqueLocalIpv6(address))) {
                     throw new IllegalArgumentException(
                             "Upstream host resolves to a blocked address range: " + host);
                 }
@@ -52,5 +53,15 @@ public final class SourceFetchGuard {
         } catch (Exception e) {
             throw new IllegalArgumentException("Cannot resolve upstream host " + host);
         }
+    }
+
+    /**
+     * IPv6 unique-local addresses (fc00::/7, in practice fd00::/8) are the IPv6
+     * equivalent of RFC1918 space; {@code isSiteLocalAddress()} only knows the
+     * deprecated fec0::/10, so they must be rejected explicitly.
+     */
+    private static boolean isUniqueLocalIpv6(InetAddress address) {
+        byte[] bytes = address.getAddress();
+        return bytes.length == 16 && (bytes[0] & 0xfe) == 0xfc;
     }
 }

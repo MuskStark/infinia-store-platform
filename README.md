@@ -13,7 +13,7 @@ principles of the FengYu host.
   authorization server · Ed25519 release signing
 - **Frontend:** Vue 3.5 (English-first UI with 简体中文 switch) · Vite 7 · Pinia · vue-i18n ·
   Tailwind CSS 4 · a controlled, MIT-attributed Vue port of Magic UI
-- **Tests:** 142 backend tests (unit + full HTTP integration) and 18 frontend tests
+- **Tests:** 267 backend tests (unit + full HTTP integration) and 18 frontend tests
 
 ## Architecture
 
@@ -22,7 +22,8 @@ store-platform/
 ├── store-contract/         # Dependency-free contract: coordinates, SemVer, DTOs, OpenAPI 3.1
 ├── store-domain/           # Pure domain model + policies (state machine, dependency solver,
 │                           #   permission diff, rollout bucketing, UUIDv7)
-├── store-infrastructure/   # JPA persistence, Flyway, local blob store, outbox relay, cache
+├── store-infrastructure/   # JPA persistence, Flyway, content-addressed blob store
+│                           #   (local FS or any S3-compatible bucket), outbox relay, cache
 ├── store-scanner/          # Safe unpacking, manifest validation for all 5 classes,
 │                           #   secret/malicious-content scanning, SBOM, Ed25519
 ├── store-application/      # The store Spring Boot app (API + auth server + embedded SPA)
@@ -129,13 +130,67 @@ sha256sum-compatible manifest at `GET /api/v1/releases/{releaseId}/checksums.txt
 ### Production-like stack (Docker)
 
 ```bash
-docker compose up -d          # PostgreSQL 17, Redis 7, MinIO
+docker compose up -d           # PostgreSQL 17, Redis 7, MinIO (+ store-blobs bucket)
 ./build-jar.sh
 java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar
 ```
 
 Secrets come from the environment (`STORE_TICKET_SECRET`, `STORE_ROLLOUT_SECRET`,
 `STORE_CLI_CLIENT_SECRET`, key material under `store.key-dir` → KMS in production).
+
+### External artifact storage (S3 / MinIO, ADR-012)
+
+Uploaded artifacts live in content-addressed storage behind the `BlobStorage`
+port. The default is the local filesystem (`store.blob-dir`); production can
+point the store at one S3-compatible bucket instead — same blob keys either
+way, so the database stays portable across the switch:
+
+```bash
+STORE_STORAGE_TYPE=s3 \
+STORE_STORAGE_S3_ENDPOINT=http://localhost:9000 \   # MinIO; omit for AWS S3
+STORE_STORAGE_S3_BUCKET=store-blobs \
+STORE_STORAGE_S3_ACCESS_KEY=store \
+STORE_STORAGE_S3_SECRET_KEY=store-secret \
+java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar
+```
+
+All knobs live under `store.storage.s3.*` (`region`, `path-style-access`,
+`key-prefix` for sharing a bucket). Blank credentials fall back to the SDK's
+default provider chain (env vars, profile, instance role), and the compose
+stack's `minio-init` one-shot creates the `store-blobs` bucket. Uploads stream
+through multipart staging and are promoted by server-side copy; the status
+page's artifact-storage probe writes and deletes a real probe object, so a
+misconfigured bucket shows up red on `/status`.
+
+### Production container image
+
+The repo ships a production `Dockerfile` (multi-stage: Node → Vite SPA, Maven →
+executable Boot jar, then a non-root JRE runtime with a healthcheck on
+`/actuator/health`):
+
+```bash
+docker build -t infinia-store .
+docker run -d --name store -p 8080:8080 \
+  -e STORE_BASE_URL=https://store.example.com \
+  -e STORE_TICKET_SECRET=… -e STORE_ROLLOUT_SECRET=… -e STORE_CLI_CLIENT_SECRET=… \
+  -v store-data:/var/lib/infinia-store \
+  infinia-store
+```
+
+Local blob/key state lives under `/var/lib/infinia-store` (mount it as a
+volume, or point `STORE_STORAGE_*` at your object storage as above). The image
+build skips tests — run `./mvnw verify` in CI first, matching `build-jar.sh`
+usage. The compose stack can also bring the whole application up against its
+PostgreSQL/Redis/MinIO dependencies:
+
+```bash
+docker compose --profile app up -d --build   # store on 127.0.0.1:8080
+```
+
+The `store` service is behind the opt-in `app` profile, so plain
+`docker compose up -d` still starts only the dependency stack, and its ports
+bind to loopback — put a TLS-terminating reverse proxy in front for real
+exposure.
 
 ### Standalone status monitor (two-server deployments, ADR-011)
 
@@ -206,7 +261,7 @@ yarn workspace @infinia/store-web gen:api
 ## Development
 
 ```bash
-./mvnw verify                        # backend: 142 tests
+./mvnw verify                        # backend: 267 tests
 yarn ui:test                         # magic-ui-vue port: visual/behavior tests
 yarn web:test && yarn web:build      # SPA: i18n parity, client, component tests + typecheck
 ```

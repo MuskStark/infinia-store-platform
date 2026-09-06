@@ -66,6 +66,10 @@ export async function completeLogin(code: string, state: string): Promise<boolea
   if (!verifier || state !== expectedState) {
     return false;
   }
+  // The verifier and state are one-shot; never let them linger for the tab's
+  // lifetime after the round-trip completes (or fails).
+  sessionStorage.removeItem('infinia.store.pkce');
+  sessionStorage.removeItem('infinia.store.state');
   const response = await fetch('/oauth2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
