@@ -45,5 +45,11 @@ jobs:
         run: yarn ui:test
       - name: Unit tests (store web)
         run: yarn web:test
-      - name: Typecheck & build
+      - name: Unit tests (monitor web)
+        run: yarn monitor:test
+      - name: Typecheck & build (store web)
         run: yarn web:build
+      - name: Typecheck & build (monitor web)
+        run: yarn monitor:build
+      - name: Monitor jar embeds its SPA
+        run: ./build-monitor-jar.sh --skip-tests --skip-web

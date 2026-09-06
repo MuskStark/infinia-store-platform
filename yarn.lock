@@ -334,6 +334,24 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@infinia/monitor-web@workspace:monitor-web":
+  version: 0.0.0-use.local
+  resolution: "@infinia/monitor-web@workspace:monitor-web"
+  dependencies:
+    "@tailwindcss/vite": "npm:^4.3.3"
+    "@vitejs/plugin-vue": "npm:^6.0.1"
+    "@vue/test-utils": "npm:^2.4.6"
+    jsdom: "npm:^26.1.0"
+    tailwindcss: "npm:^4.3.3"
+    typescript: "npm:^5.9.2"
+    vite: "npm:^7.1.3"
+    vitest: "npm:^4.1.9"
+    vue: "npm:3.5.41"
+    vue-i18n: "npm:11.4.9"
+    vue-tsc: "npm:^3.3.8"
+  languageName: unknown
+  linkType: soft
+
 "@infinia/store-web@workspace:store-web":
   version: 0.0.0-use.local
   resolution: "@infinia/store-web@workspace:store-web"

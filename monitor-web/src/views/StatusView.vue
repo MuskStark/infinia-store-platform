@@ -1,13 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import {
-  api,
-  type ServiceIncident,
-  type ServiceStatus,
-  type StatusDayUptime,
-  type StatusIndicator,
-} from '../api/client';
+import { api, type ServiceIncident, type ServiceStatus, type StatusDayUptime, type StatusIndicator } from '../api/client';
 import { formatDate, formatDateTime } from '../utils/format';
 import ErrorState from '../components/ErrorState.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -27,8 +21,8 @@ async function load() {
   try {
     // The incident feed failing alone should not blank the whole page.
     const [page, incidentList] = await Promise.all([
-      api.getServiceStatus(),
-      api.getServiceIncidents().catch(() => [] as ServiceIncident[]),
+      api.getStatus(),
+      api.getIncidents().catch(() => [] as ServiceIncident[]),
     ]);
     status.value = page;
     incidents.value = incidentList;
@@ -99,6 +93,17 @@ const banner = computed(() => {
   }
 });
 
+/**
+ * Frozen-view banner: the monitor survives the store, so the page must say
+ * plainly when the numbers below are the last known ones (ADR-011).
+ */
+const staleBanner = computed(() => {
+  if (!status.value?.stale) return null;
+  return status.value.mirroredAt
+    ? t('status.staleBanner', { time: formatDateTime(status.value.mirroredAt) })
+    : t('status.neverReached');
+});
+
 /** Honest aggregate: the mean of the components' 90-day uptime. */
 const averageUptime = computed(() => {
   const withUptime = (status.value?.components ?? []).filter((c) => c.uptime90d != null);
@@ -119,14 +124,15 @@ const updatedAgo = computed(() => {
 });
 
 /* Edge-sharing pointy-top hexagons; each service owns one border color, mapped
- * to its name in the legend on the left — the hive itself stays label-free. */
+ * to its name in the legend — the hive itself stays label-free. */
 
 const CELL_W = 180;
 const CELL_H = 208;
-const COLUMN_STEP = CELL_W;
 const ROW_STEP = CELL_H * 0.75;
 const HIVE_LEFT = 16;
 const HIVE_TOP = 16;
+/** The hive generalizes to any component count: center + two rings = 19 slots. */
+const HIVE_RADIUS = 2;
 
 /** One border color per service, in component order. */
 const SERVICE_COLORS = [
@@ -138,39 +144,76 @@ const SERVICE_COLORS = [
   '#eab308', // yellow
   '#14b8a6', // teal
   '#f472b6', // pink
+  '#22d3ee', // cyan
+  '#818cf8', // indigo
+  '#a3e635', // lime
+  '#d946ef', // magenta
+  '#c2410c', // burnt orange
+  '#64748b', // slate
+];
+
+type Axial = { q: number; r: number };
+
+function hexDistance({ q, r }: Axial): number {
+  return (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
+}
+
+function pixelX({ q, r }: Axial): number {
+  return (HIVE_RADIUS + q + r / 2) * CELL_W;
+}
+
+function pixelY({ r }: Axial): number {
+  return (HIVE_RADIUS + r) * ROW_STEP;
+}
+
+/** Ring cells in reading order: starting at the top, circling clockwise. */
+function ringClockwise(radius: number): Axial[] {
+  const cells: Axial[] = [];
+  for (let q = -radius; q <= radius; q++) {
+    for (let r = -radius; r <= radius; r++) {
+      if (hexDistance({ q, r }) === radius) {
+        cells.push({ q, r });
+      }
+    }
+  }
+  return cells.sort((a, b) => angle(a) - angle(b));
+}
+
+function angle(cell: Axial): number {
+  const x = pixelX(cell) - pixelX({ q: 0, r: 0 });
+  const y = pixelY(cell) - pixelY({ q: 0, r: 0 });
+  return Math.atan2(x, -y); // 0 at the top, growing clockwise
+}
+
+const hiveSlots: { cell: Axial; overall?: boolean }[] = [
+  { cell: { q: 0, r: 0 }, overall: true },
+  ...ringClockwise(1).map((cell) => ({ cell })),
+  ...ringClockwise(2).map((cell) => ({ cell })),
 ];
 
 const hive = computed(() => {
   const components = status.value?.components ?? [];
-  // Reading order starts at the top and circles the center clockwise.
-  const slots: { x: number; y: number; overall?: boolean }[] = [
-    { x: COLUMN_STEP, y: 0 },
-    { x: COLUMN_STEP / 2, y: ROW_STEP },
-    { x: COLUMN_STEP * 1.5, y: ROW_STEP },
-    { x: COLUMN_STEP, y: ROW_STEP * 2, overall: true },
-    { x: 0, y: ROW_STEP * 2 },
-    { x: COLUMN_STEP * 2, y: ROW_STEP * 2 },
-    { x: COLUMN_STEP / 2, y: ROW_STEP * 3 },
-    { x: COLUMN_STEP * 1.5, y: ROW_STEP * 3 },
-    { x: COLUMN_STEP, y: ROW_STEP * 4 },
-  ];
-  // Service slots in reading order (overall owns the center): top, upper pair,
-  // center pair, lower pair, bottom.
-  const serviceSlotIndexes = [0, 1, 2, 4, 5, 6, 7, 8];
-  const cells = slots.map((slot, index) => {
+  const cells = hiveSlots.map((slot, index) => {
     const overall = Boolean(slot.overall);
-    const serviceIndex = serviceSlotIndexes.indexOf(index);
-    const component = overall || serviceIndex < 0 ? undefined : components[serviceIndex];
+    const serviceIndex = overall ? -1 : index - 1;
+    const component = serviceIndex >= 0 && serviceIndex < components.length
+      ? components[serviceIndex]
+      : undefined;
     return {
       kind: (overall ? 'overall' : component ? 'service' : 'spare') as 'overall' | 'service' | 'spare',
       component,
       color: component ? SERVICE_COLORS[serviceIndex % SERVICE_COLORS.length] : undefined,
-      x: slot.x + HIVE_LEFT,
-      y: slot.y + HIVE_TOP,
+      x: pixelX(slot.cell) + HIVE_LEFT,
+      y: pixelY(slot.cell) + HIVE_TOP,
       key: `hive-${index}`,
     };
   });
-  return { cells, width: HIVE_LEFT * 2 + CELL_W * 3, height: HIVE_TOP * 2 + CELL_H * 4 };
+  const columns = HIVE_RADIUS * 2 + 1;
+  return {
+    cells,
+    width: HIVE_LEFT * 2 + columns * CELL_W,
+    height: HIVE_TOP * 2 + (HIVE_RADIUS * 2) * ROW_STEP + CELL_H,
+  };
 });
 
 /** Legend rows: border color → service name, live indicator and 90-day uptime. */
@@ -311,7 +354,7 @@ function incidentDuration(incident: ServiceIncident): string | null {
 </script>
 
 <template>
-  <div class="mx-auto max-w-5xl space-y-8">
+  <div class="space-y-8">
     <PageHeader :title="t('status.title')" :subtitle="t('status.subtitle')">
       <template #actions>
         <span v-if="updatedAgo" class="text-xs text-muted dark:text-slate-400" data-testid="status-updated">{{ updatedAgo }}</span>
@@ -327,6 +370,17 @@ function incidentDuration(incident: ServiceIncident): string | null {
       <span class="sr-only" data-testid="status-banner" role="status">
         ✓ {{ t(banner.key) }}
       </span>
+
+      <!-- Frozen-view banner: the store is unreachable, data below is frozen. -->
+      <div
+        v-if="staleBanner"
+        data-testid="stale-banner"
+        role="alert"
+        class="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm font-medium text-warning dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-400"
+      >
+        ⚠ {{ staleBanner }}
+      </div>
+
       <section :aria-label="t('status.components')">
         <div class="flex flex-col items-center gap-8 lg:flex-row lg:items-center lg:justify-center">
         <!-- Service legend: one swatch per border color, with live status. -->
@@ -481,26 +535,6 @@ function incidentDuration(incident: ServiceIncident): string | null {
       <div class="h-64 animate-pulse rounded-lg bg-surface-muted dark:bg-slate-800" />
     </template>
   </div>
-
-  <Teleport to="body">
-    <div
-      v-if="serviceTip"
-      role="tooltip"
-      class="hive-tooltip pointer-events-none fixed z-50 w-max max-w-[calc(100vw-24px)] rounded-lg border border-line bg-surface px-3 py-2 text-center text-xs shadow-lg"
-      :style="{ left: `${serviceTip.x}px`, top: `${serviceTip.y}px`, transform: 'translate(-50%, -130%)' }"
-    >
-      <span class="font-bold" :style="{ color: serviceTip.color }">{{ serviceTip.name }}</span>
-      <span class="block text-muted">{{ serviceTip.detail }}</span>
-    </div>
-    <div
-      v-if="tooltip"
-      role="tooltip"
-      class="hive-tooltip pointer-events-none fixed z-50 rounded-lg bg-ink px-3 py-2 text-center text-xs text-surface shadow-lg"
-      :style="{ left: `${tooltip.x}px`, top: `${tooltip.y}px`, transform: `translate(-50%, ${tooltip.below ? '0' : '-100%'})` }"
-    >
-      {{ tooltipText(tooltip.day) }}
-    </div>
-  </Teleport>
 </template>
 
 <style scoped>

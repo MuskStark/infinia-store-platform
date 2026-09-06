@@ -25,8 +25,11 @@ store-platform/
 ├── store-infrastructure/   # JPA persistence, Flyway, local blob store, outbox relay, cache
 ├── store-scanner/          # Safe unpacking, manifest validation for all 5 classes,
 │                           #   secret/malicious-content scanning, SBOM, Ed25519
-├── store-application/      # The single deployable Spring Boot app (API + auth server)
+├── store-application/      # The store Spring Boot app (API + auth server + embedded SPA)
+├── store-monitor/          # Standalone status monitor (ADR-011): probes + mirrors the
+│                           #   store, serves the status page when the store is down
 ├── store-web/              # Vue 3 store / publisher / review SPA
+├── monitor-web/            # Vue 3 status-page SPA (embedded in the monitor jar)
 └── ui/magic-ui-vue/        # @infinia/magic-ui-vue — controlled Magic UI port (MIT)
 ```
 
@@ -133,6 +136,29 @@ java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar
 
 Secrets come from the environment (`STORE_TICKET_SECRET`, `STORE_ROLLOUT_SECRET`,
 `STORE_CLI_CLIENT_SECRET`, key material under `store.key-dir` → KMS in production).
+
+### Standalone status monitor (two-server deployments, ADR-011)
+
+The public status page runs as its own application on a second host, so it stays
+reachable when the store is not. The monitor polls the store's anonymous status
+API and mirrors the last snapshot; during a store outage it renders the frozen
+internals plus a live red `external` component, auto-opens the outage incident
+and (optionally) alerts a webhook.
+
+```bash
+./build-monitor-jar.sh
+MONITOR_TARGET_BASE_URL=https://store.example.com \
+MONITOR_ALERT_WEBHOOK=https://hooks.example/… \
+java -jar store-monitor/target/store-monitor-0.1.0-SNAPSHOT.jar   # :8090
+```
+
+All settings live under `monitor.*` / `MONITOR_*`; `target-base-url` is the one
+root config (re-point at a moved store and restart). Put the store behind
+`store.example.com`, the monitor behind `status.example.com`, keep
+`/api/v1/status` out of any CDN cache in front of the store, and give the
+monitor its own TLS via nginx. The store SPA's `/status` link redirects to the
+monitor (`VITE_MONITOR_BASE_URL` at build time). A cheap third-party ping on the
+monitor itself is recommended — it is the one component nothing else watches.
 
 ## The publishing pipeline
 

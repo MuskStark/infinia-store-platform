@@ -12,13 +12,19 @@ import dev.infinia.store.domain.port.StatusRepositories.IncidentRepository;
 import dev.infinia.store.domain.port.StatusRepositories.UptimeRepository;
 import dev.infinia.store.domain.service.UuidV7;
 import dev.infinia.store.app.config.StoreProperties;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.zaxxer.hikari.HikariDataSource;
 import javax.sql.DataSource;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryUsage;
+import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -60,7 +66,12 @@ public class StatusService {
 
     private record Component(String key, boolean probed, String displayName) {}
 
-    /** Display order of the page; probed components also open/close incidents. */
+    /**
+     * Display order of the page; probed components also open/close incidents.
+     * The five infrastructure/runtime components (host-disk … http-quality) keep
+     * the store observable from the outside only through this API — the mirror
+     * on the monitor server renders whatever this list reports.
+     */
     private static final List<Component> COMPONENTS = List.of(
             new Component("api", false, "Store API"),
             new Component("web", false, "Store Web"),
@@ -69,7 +80,12 @@ public class StatusService {
             new Component("database", true, "Database"),
             new Component("blob", true, "Artifact storage"),
             new Component("scanner", false, "Security scanning"),
-            new Component("upstream", true, "Upstream sync"));
+            new Component("upstream", true, "Upstream sync"),
+            new Component("host-disk", true, "Host storage capacity"),
+            new Component("host-memory", true, "Host memory"),
+            new Component("runtime-jvm", true, "Java runtime"),
+            new Component("db-pool", true, "Database connection pool"),
+            new Component("http-quality", true, "HTTP response quality"));
 
     /** Probes run off the request thread so a hung database cannot pile up requests. */
     private static final ExecutorService PROBES = Executors.newSingleThreadExecutor(r -> {
@@ -83,11 +99,15 @@ public class StatusService {
     private final UpstreamSourceRepository upstreams;
     private final UptimeRepository uptimeRepo;
     private final IncidentRepository incidentRepo;
+    private final MeterRegistry registry;
 
     /** Serializes sample/incident persistence so concurrent requests cannot race an upsert. */
     private final Object recordLock = new Object();
 
     private LocalDate lastPruneDay = null;
+
+    /** Previous http.server.requests counters; window deltas judge HTTP quality. */
+    private volatile HttpCounters lastHttpCounters = null;
 
     private final boolean seedEnabled;
     /** Demo history variety is opt-in per profile: tests keep the honest empty comb. */
@@ -95,7 +115,7 @@ public class StatusService {
 
     public StatusService(DataSource dataSource, StoreProperties properties,
             UpstreamSourceRepository upstreams, UptimeRepository uptimeRepo,
-            IncidentRepository incidentRepo,
+            IncidentRepository incidentRepo, MeterRegistry registry,
             @Value("${store.seed.enabled:false}") boolean seedEnabled,
             @Value("${store.seed.status-history:false}") boolean statusHistorySeeded) {
         this.dataSource = dataSource;
@@ -103,6 +123,7 @@ public class StatusService {
         this.upstreams = upstreams;
         this.uptimeRepo = uptimeRepo;
         this.incidentRepo = incidentRepo;
+        this.registry = registry;
         this.seedEnabled = seedEnabled;
         this.statusHistorySeeded = statusHistorySeeded;
     }
@@ -257,6 +278,11 @@ public class StatusService {
                 case "delivery" -> worst(List.of(probeDatabase(), probeBlobStorage()));
                 case "auth" -> probeDatabase();
                 case "upstream" -> probeUpstream();
+                case "host-disk" -> probeHostDisk();
+                case "host-memory" -> probeHostMemory();
+                case "runtime-jvm" -> probeJvmHeap();
+                case "db-pool" -> probeDbPool();
+                case "http-quality" -> probeHttpQuality();
                 default -> OPERATIONAL;
             };
         } catch (Exception e) {
@@ -295,6 +321,191 @@ public class StatusService {
             return MAJOR_OUTAGE;
         }
     }
+
+    /**
+     * Remaining capacity of the filesystem holding the blob directory — the
+     * volume whose exhaustion kills uploads, downloads and the blob probe at
+     * once. Unquotable filesystems (total ≤ 0) report operational rather than
+     * failing the page on a platform quirk.
+     */
+    private String probeHostDisk() throws Exception {
+        Path dir = Path.of(properties.blobDir());
+        Files.createDirectories(dir);
+        FileStore store = Files.getFileStore(dir);
+        long total = store.getTotalSpace();
+        if (total <= 0) {
+            return OPERATIONAL;
+        }
+        double freePercent = 100.0 * store.getUsableSpace() / total;
+        return classifyFreePercent(freePercent,
+                properties.monitoring().diskCriticalFreePercent(),
+                properties.monitoring().diskWarnFreePercent());
+    }
+
+    /**
+     * Host memory headroom. On Linux the JDK's free-physical counter is
+     * {@code MemFree} — near-zero on any healthy box because the kernel uses
+     * spare RAM for page cache — so /proc/meminfo's {@code MemAvailable} is
+     * authoritative when present; elsewhere (macOS, Windows) the free-size
+     * counter is the best available signal.
+     */
+    private String probeHostMemory() {
+        var os = (com.sun.management.OperatingSystemMXBean)
+                ManagementFactory.getOperatingSystemMXBean();
+        long total = os.getTotalPhysicalMemorySize();
+        if (total <= 0) {
+            return OPERATIONAL;
+        }
+        long available = linuxMemAvailable();
+        if (available < 0) {
+            available = os.getFreePhysicalMemorySize();
+        }
+        double freePercent = 100.0 * available / total;
+        return classifyFreePercent(freePercent,
+                properties.monitoring().memoryCriticalFreePercent(),
+                properties.monitoring().memoryWarnFreePercent());
+    }
+
+    /** {@code MemAvailable} from /proc/meminfo in bytes; −1 when not Linux. */
+    private static long linuxMemAvailable() {
+        try {
+            for (String line : Files.readAllLines(Path.of("/proc/meminfo"))) {
+                if (line.startsWith("MemAvailable:")) {
+                    return Long.parseLong(line.replaceAll("\\D", "")) * 1024L;
+                }
+            }
+        } catch (Exception ignored) {
+            // not Linux, or unreadable — caller falls back to the MXBean counter
+        }
+        return -1;
+    }
+
+    private String probeJvmHeap() {
+        MemoryUsage heap = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage();
+        if (heap.getMax() <= 0) {
+            return OPERATIONAL;
+        }
+        double usedPercent = 100.0 * heap.getUsed() / heap.getMax();
+        return usedPercent >= properties.monitoring().heapWarnUsedPercent()
+                ? DEGRADED : OPERATIONAL;
+    }
+
+    /**
+     * Hikari pool saturation. A non-Hikari datasource (tests, exotic setups)
+     * reports operational — an unknown pool must not paint the page red.
+     */
+    private String probeDbPool() throws Exception {
+        HikariDataSource pool;
+        if (dataSource instanceof HikariDataSource hikari) {
+            pool = hikari;
+        } else if (dataSource.isWrapperFor(HikariDataSource.class)) {
+            pool = dataSource.unwrap(HikariDataSource.class);
+        } else {
+            return OPERATIONAL;
+        }
+        var metrics = pool.getHikariPoolMXBean();
+        if (metrics == null) {
+            return OPERATIONAL; // pool not started yet
+        }
+        return classifyPool(metrics.getActiveConnections(), metrics.getTotalConnections(),
+                metrics.getThreadsAwaitingConnection(), properties.monitoring());
+    }
+
+    /**
+     * 5xx ratio and p95 latency over the http.server.requests counters observed
+     * since the previous check. Windows with too little traffic skip the ratio
+     * so a single error on a quiet instance cannot flash a false outage.
+     */
+    private String probeHttpQuality() {
+        HttpCounters current = httpCounters();
+        HttpCounters previous = lastHttpCounters;
+        lastHttpCounters = current;
+        if (previous == null || current.total() < previous.total()) {
+            return OPERATIONAL; // first window after boot, or a registry reset
+        }
+        return classifyHttpWindow(current.total() - previous.total(),
+                current.errors() - previous.errors(), httpP95Millis(),
+                properties.monitoring());
+    }
+
+    private HttpCounters httpCounters() {
+        long total = 0;
+        long errors = 0;
+        for (Timer timer : registry.find("http.server.requests").timers()) {
+            long count = timer.count();
+            String status = timer.getId().getTag("status");
+            total += count;
+            if (status != null && status.startsWith("5")) {
+                errors += count;
+            }
+        }
+        return new HttpCounters(total, errors);
+    }
+
+    /**
+     * Count-weighted mean of per-route p95 values — an approximation that needs
+     * no second histogram; the value is published by the
+     * {@code management.metrics.distribution.percentiles} config on the timer
+     * and is absent (−1) when that config is missing.
+     */
+    private double httpP95Millis() {
+        long weightedCount = 0;
+        double weightedSum = 0;
+        for (Timer timer : registry.find("http.server.requests").timers()) {
+            long count = timer.count();
+            double p95Nanos = -1;
+            for (var valueAtPercentile : timer.takeSnapshot().percentileValues()) {
+                if (valueAtPercentile.percentile() == 0.95) {
+                    p95Nanos = valueAtPercentile.value(); // timer snapshots report nanos
+                }
+            }
+            if (count > 0 && p95Nanos > 0) {
+                weightedCount += count;
+                weightedSum += p95Nanos / 1_000_000.0 * count;
+            }
+        }
+        return weightedCount == 0 ? -1 : weightedSum / weightedCount;
+    }
+
+    /** Below critical free space is an outage, below warn is degraded; unit: percent. */
+    public static String classifyFreePercent(double freePercent, int criticalBelow, int warnBelow) {
+        if (freePercent <= criticalBelow) {
+            return MAJOR_OUTAGE;
+        }
+        return freePercent <= warnBelow ? DEGRADED : OPERATIONAL;
+    }
+
+    public static String classifyPool(int active, int total, int awaiting,
+            StoreProperties.Monitoring thresholds) {
+        if (awaiting >= thresholds.poolAwaitingOutageThreads()) {
+            return MAJOR_OUTAGE;
+        }
+        if (awaiting > 0 || (total > 0
+                && 100.0 * active / total >= thresholds.poolWarnActivePercent())) {
+            return DEGRADED;
+        }
+        return OPERATIONAL;
+    }
+
+    public static String classifyHttpWindow(long windowTotal, long windowErrors, double p95Millis,
+            StoreProperties.Monitoring thresholds) {
+        if (windowTotal >= 10) {
+            double errorPercent = 100.0 * windowErrors / windowTotal;
+            if (errorPercent >= thresholds.http5xxCriticalPercent()) {
+                return MAJOR_OUTAGE;
+            }
+            if (errorPercent >= thresholds.http5xxWarnPercent()) {
+                return PARTIAL_OUTAGE;
+            }
+        }
+        if (p95Millis > 0 && p95Millis >= thresholds.httpP95WarnMillis()) {
+            return DEGRADED;
+        }
+        return OPERATIONAL;
+    }
+
+    /** http.server.requests counters feeding the HTTP-quality window deltas. */
+    private record HttpCounters(long total, long errors) {}
 
     /**
      * Upstream health rides the sync ledger: an enabled source whose last sync

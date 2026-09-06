@@ -31,6 +31,11 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      # The status page's http-quality probe reads the published p95 percentile.
+      percentiles:
+        http.server.requests: 0.95
 
 store:
   app-coordinate: ${STORE_APP_COORDINATE:infinia://app/official/fengyu-host}
@@ -57,6 +62,19 @@ store:
     defaults:
       enabled: ${STORE_UPSTREAM_DEFAULTS_ENABLED:true}
       skillhub-url: ${STORE_UPSTREAM_SKILLHUB_URL:https://api.skillhub.cn/api/skills?pages=1}
+  # Comprehensive-monitoring probe thresholds; the standalone monitor mirrors
+  # these indicators, it never re-derives them.
+  monitoring:
+    disk-warn-free-percent: ${STORE_MONITOR_DISK_WARN_PERCENT:15}
+    disk-critical-free-percent: ${STORE_MONITOR_DISK_CRITICAL_PERCENT:5}
+    memory-warn-free-percent: ${STORE_MONITOR_MEMORY_WARN_PERCENT:10}
+    memory-critical-free-percent: ${STORE_MONITOR_MEMORY_CRITICAL_PERCENT:3}
+    heap-warn-used-percent: ${STORE_MONITOR_HEAP_WARN_PERCENT:85}
+    pool-warn-active-percent: ${STORE_MONITOR_POOL_WARN_PERCENT:80}
+    pool-awaiting-outage-threads: ${STORE_MONITOR_POOL_AWAITING_OUTAGE:5}
+    http-5xx-warn-percent: ${STORE_MONITOR_HTTP_5XX_WARN_PERCENT:1.0}
+    http-5xx-critical-percent: ${STORE_MONITOR_HTTP_5XX_CRITICAL_PERCENT:5.0}
+    http-p95-warn-millis: ${STORE_MONITOR_HTTP_P95_WARN_MS:1500}
 
 ---
 spring:

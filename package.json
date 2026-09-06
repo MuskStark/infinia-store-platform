@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "store-web",
+    "monitor-web",
     "ui/*"
   ],
   "packageManager": "yarn@4.18.0",
@@ -13,7 +14,11 @@
     "web": "yarn workspace @infinia/store-web dev",
     "web:build": "yarn workspace @infinia/store-web build",
     "web:test": "yarn workspace @infinia/store-web test",
+    "monitor": "yarn workspace @infinia/monitor-web dev",
+    "monitor:build": "yarn workspace @infinia/monitor-web build",
+    "monitor:test": "yarn workspace @infinia/monitor-web test",
     "ui:test": "yarn workspace @infinia/magic-ui-vue test",
-    "jar": "./build-jar.sh"
+    "jar": "./build-jar.sh",
+    "monitor-jar": "./build-monitor-jar.sh"
   }
 }

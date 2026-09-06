@@ -36,6 +36,7 @@
         <module>store-infrastructure</module>
         <module>store-scanner</module>
         <module>store-application</module>
+        <module>store-monitor</module>
     </modules>
 
     <properties>
@@ -78,6 +79,11 @@
             <dependency>
                 <groupId>dev.infinia.store</groupId>
                 <artifactId>store-scanner</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.infinia.store</groupId>
+                <artifactId>store-monitor</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

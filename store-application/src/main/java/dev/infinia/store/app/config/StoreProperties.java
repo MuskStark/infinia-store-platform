@@ -20,7 +20,8 @@ public record StoreProperties(
         String cliClientSecret,
         String appCoordinate,
         String appMinimumSupportedVersion,
-        String remoteDatasourceFile) {
+        String remoteDatasourceFile,
+        Monitoring monitoring) {
 
     public StoreProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8080" : baseUrl;
@@ -66,10 +67,48 @@ public record StoreProperties(
         }
         remoteDatasourceFile = RemoteDataSourceOverride.overridePath(remoteDatasourceFile)
                 .toString();
+        monitoring = monitoring == null
+                ? new Monitoring(null, null, null, null, null, null, null, null, null, null)
+                : monitoring;
     }
 
     /** Product sign-in page derived from the configured Store Web callback origin. */
     public String webSignInUri() {
         return java.net.URI.create(webRedirectUri).resolve("/signin").toString();
+    }
+
+    /**
+     * Comprehensive-monitoring thresholds for the in-process probes the status
+     * page runs (host disk/memory, JVM heap, DB pool, HTTP quality). Absent
+     * values fall back to their defaults, so operators only override what they
+     * care about; an explicit zero stays zero (e.g. "never alarm").
+     */
+    public record Monitoring(
+            Integer diskWarnFreePercent,
+            Integer diskCriticalFreePercent,
+            Integer memoryWarnFreePercent,
+            Integer memoryCriticalFreePercent,
+            Integer heapWarnUsedPercent,
+            Integer poolWarnActivePercent,
+            Integer poolAwaitingOutageThreads,
+            Double http5xxWarnPercent,
+            Double http5xxCriticalPercent,
+            Long httpP95WarnMillis) {
+
+        public Monitoring {
+            // Heap pressure deliberately never escalates past degraded: a full
+            // heap often self-heals on the next GC cycle, and a false outage
+            // tier would repaint the whole page for a transient spike.
+            if (diskWarnFreePercent == null) diskWarnFreePercent = 15;
+            if (diskCriticalFreePercent == null) diskCriticalFreePercent = 5;
+            if (memoryWarnFreePercent == null) memoryWarnFreePercent = 10;
+            if (memoryCriticalFreePercent == null) memoryCriticalFreePercent = 3;
+            if (heapWarnUsedPercent == null) heapWarnUsedPercent = 85;
+            if (poolWarnActivePercent == null) poolWarnActivePercent = 80;
+            if (poolAwaitingOutageThreads == null) poolAwaitingOutageThreads = 5;
+            if (http5xxWarnPercent == null) http5xxWarnPercent = 1.0;
+            if (http5xxCriticalPercent == null) http5xxCriticalPercent = 5.0;
+            if (httpP95WarnMillis == null) httpP95WarnMillis = 1500L;
+        }
     }
 }

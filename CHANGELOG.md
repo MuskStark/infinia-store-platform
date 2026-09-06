@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Standalone status monitor (ADR-011: the status page survives the store)
+
+- New `store-monitor` module: a second Spring Boot deployable for the monitoring host. It
+  polls the store's public status API (`monitor.target-base-url`, one root config — every
+  probe target derives from it), mirrors the last snapshot in a local H2 file store, keeps
+  its own external-reachability day buckets and incidents, and serves the merged page at
+  `GET /api/v1/status` (+ `mirroredAt`/`stale` mirror metadata) and `GET /api/v1/status/incidents`.
+  When the store is unreachable the frozen snapshot keeps rendering: internals hold their
+  last-known indicators, the external component goes red from blackbox probes, an incident
+  opens automatically, and past the stale window the page shows a "store unreachable —
+  data as of …" banner. Indicator transitions alert through an optional webhook
+  (`monitor.alert-webhook`, per-component throttle). Covered by 13 tests: probe ladder,
+  mirror freeze/restore across restart, cold-start honesty, incident lifecycle, alert
+  throttle, and a full healthy → outage → recovery integration sequence.
+- New `monitor-web` workspace: the hive status page migrated 1:1 from the store SPA and
+  generalized to a 19-slot honeycomb (center overall + two rings), now rendering 14
+  components including External reachability, with the frozen-view banner in en/zh-CN.
+  Served embedded from the monitor jar (`build-monitor-jar.sh`), same single-origin
+  pattern as the store.
+- The store's own status page grew five comprehensive in-process probes — host storage
+  capacity, host memory (Linux reads /proc/meminfo `MemAvailable`; the JDK's MemFree
+  counter is near-zero on any healthy Linux box), JVM heap, Hikari pool saturation, and
+  HTTP quality (5xx ratio + count-weighted p95 from the published percentile) — taking
+  `GET /api/v1/status` from 8 to 13 components. Thresholds live under `store.monitoring.*`
+  (`STORE_MONITOR_*` env), each defaulting sanely and overridable per deployment.
+- The store SPA's `/status` route now redirects to the standalone monitor
+  (`VITE_MONITOR_BASE_URL` at build time); the in-SPA StatusView and its locale slice were
+  removed in favor of the monitor's page. The store's status API itself is unchanged and
+  remains the monitor's data source.
+
 ### Public service-status page (需求：store 服务监控页, modeled on the npm status page)
 
 - New anonymous status page at `/status` (footer link added) backed by two public API endpoints:

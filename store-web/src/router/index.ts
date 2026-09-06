@@ -67,7 +67,7 @@ const router = createRouter({
     {
       path: '/status',
       name: 'status',
-      component: () => import('../views/StatusView.vue'),
+      component: () => import('../views/StatusRedirectView.vue'),
     },
     {
       path: '/signin',
