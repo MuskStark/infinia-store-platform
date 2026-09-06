@@ -85,6 +85,20 @@ describe('StatusView (monitor)', () => {
     expect(legend.text()).toContain('HTTP response quality');
   });
 
+  it('fits the complete hive without any scroll container', async () => {
+    const wrapper = mount(StatusView, { global: { plugins: [i18n] } });
+    await flushPromises();
+
+    // No overflow container anywhere: the hive scales to the page width instead.
+    expect(wrapper.find('.hive-scroll').exists()).toBe(false);
+    const hive = wrapper.find('.hive');
+    expect(hive.exists()).toBe(true);
+    expect(hive.attributes('style')).toContain('transform');
+    // jsdom reports zero client width, so the scale gracefully holds at 1 —
+    // real browsers measure and shrink; both keep all 19 cells rendered.
+    expect(wrapper.findAll('.hive-cell')).toHaveLength(19);
+  });
+
   it('stays quiet when the mirror is fresh', async () => {
     const wrapper = mount(StatusView, { global: { plugins: [i18n] } });
     await flushPromises();

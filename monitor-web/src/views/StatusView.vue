@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api, type ServiceIncident, type ServiceStatus, type StatusDayUptime, type StatusIndicator } from '../api/client';
 import { formatDate, formatDateTime } from '../utils/format';
@@ -42,6 +42,7 @@ onMounted(() => {
   tickTimer = setInterval(() => (nowTick.value = Date.now()), 1_000);
   window.addEventListener('scroll', hideTooltip, true);
   window.addEventListener('resize', hideTooltip);
+  window.addEventListener('resize', measureHiveScale);
 });
 
 onBeforeUnmount(() => {
@@ -49,6 +50,7 @@ onBeforeUnmount(() => {
   clearInterval(tickTimer);
   window.removeEventListener('scroll', hideTooltip, true);
   window.removeEventListener('resize', hideTooltip);
+  window.removeEventListener('resize', measureHiveScale);
 });
 
 const indicatorKeys: Record<StatusIndicator, string> = {
@@ -214,6 +216,32 @@ const hive = computed(() => {
     width: HIVE_LEFT * 2 + columns * CELL_W,
     height: HIVE_TOP * 2 + (HIVE_RADIUS * 2) * ROW_STEP + CELL_H,
   };
+});
+
+/* The complete hive always stays on screen: no scroll containers, and it
+ * scales proportionally to fit BOTH the width and the height the page gives
+ * it (tooltips follow visual coordinates, so they stay accurate under the
+ * transform). */
+const hiveWrap = ref<HTMLElement | null>(null);
+const hiveScale = ref(1);
+
+/** Vertical reserve below the hive: indicator ladder row plus breathing room. */
+const BOTTOM_RESERVE_PX = 130;
+
+function measureHiveScale() {
+  const wrap = hiveWrap.value;
+  if (!wrap || wrap.clientWidth <= 0) {
+    hiveScale.value = 1; // jsdom / unmeasured: keep the natural 1:1 geometry
+    return;
+  }
+  const widthScale = wrap.clientWidth / hive.value.width;
+  const absoluteTop = wrap.getBoundingClientRect().top + window.scrollY;
+  const availableHeight = Math.max(200, window.innerHeight - absoluteTop - BOTTOM_RESERVE_PX);
+  hiveScale.value = Math.min(1, widthScale, availableHeight / hive.value.height);
+}
+
+watch(status, () => {
+  nextTick(measureHiveScale);
 });
 
 /** Legend rows: border color → service name, live indicator and 90-day uptime. */
@@ -383,8 +411,9 @@ function incidentDuration(incident: ServiceIncident): string | null {
 
       <section :aria-label="t('status.components')">
         <div class="flex flex-col items-center gap-8 lg:flex-row lg:items-center lg:justify-center">
-        <!-- Service legend: one swatch per border color, with live status. -->
-        <ul class="hive-legend order-first lg:order-none" data-testid="hive-legend">
+        <!-- Service legend: one swatch per border color, with live status.
+             On narrow screens it follows the hive so the comb sits near the top. -->
+        <ul class="hive-legend order-last w-full lg:order-none lg:w-auto" data-testid="hive-legend">
           <li v-for="entry in hiveLegend" :key="entry.key">
             <button
               type="button"
@@ -398,71 +427,88 @@ function incidentDuration(incident: ServiceIncident): string | null {
             </button>
           </li>
         </ul>
-        <div class="hive-scroll">
-        <div class="hive" :style="{ width: `${hive.width}px`, height: `${hive.height}px` }" @mouseleave="tooltip = null">
-          <article
-            v-for="cell in hive.cells"
-            :key="cell.key"
-            class="hive-cell"
-            :class="[
-              `hive-cell--${cell.kind}`,
-              selectedKey && cell.component?.key !== selectedKey ? 'hive-cell--dim' : '',
-              selectedKey && cell.component?.key === selectedKey ? 'hive-cell--focus' : '',
-            ]"
-            :style="{ '--cell-x': `${cell.x}px`, '--cell-y': `${cell.y}px`, width: `${CELL_W}px`, height: `${CELL_H}px` }"
-            :data-testid="cell.kind === 'service' ? 'status-component' : undefined"
+        <div ref="hiveWrap" class="w-full min-w-0" data-testid="hive-fit">
+          <div
+            :style="{
+              width: `${hive.width * hiveScale}px`,
+              height: `${hive.height * hiveScale}px`,
+              margin: '0 auto',
+            }"
           >
             <div
-              class="hive-cell__rim"
-              :class="cell.color ? '' : cell.kind === 'overall' ? indicatorColor(status.indicator) : 'bg-line'"
-              :style="cell.color ? { background: cell.color } : undefined"
-              @mouseenter="showServiceTip(cell, $event)"
-              @mousemove="moveServiceTip"
-              @mouseleave="serviceTip = null"
-              aria-hidden="true"
-            />
-            <div class="hive-cell__body">
-              <div class="hive-fill" aria-hidden="true">
-                <span
-                  v-for="(slot, index) in fillerSlots"
-                  :key="index"
-                  class="hive-fill__hex bg-slate-200 dark:bg-slate-700"
-                  :style="hexCellStyle(slot.x, slot.y)"
+              class="hive"
+              :style="{
+                width: `${hive.width}px`,
+                height: `${hive.height}px`,
+                transform: `scale(${hiveScale})`,
+                transformOrigin: 'top left',
+              }"
+              @mouseleave="tooltip = null"
+            >
+              <article
+                v-for="cell in hive.cells"
+                :key="cell.key"
+                class="hive-cell"
+                :class="[
+                  `hive-cell--${cell.kind}`,
+                  selectedKey && cell.component?.key !== selectedKey ? 'hive-cell--dim' : '',
+                  selectedKey && cell.component?.key === selectedKey ? 'hive-cell--focus' : '',
+                ]"
+                :style="{ '--cell-x': `${cell.x}px`, '--cell-y': `${cell.y}px`, width: `${CELL_W}px`, height: `${CELL_H}px` }"
+                :data-testid="cell.kind === 'service' ? 'status-component' : undefined"
+              >
+                <div
+                  class="hive-cell__rim"
+                  :class="cell.color ? '' : cell.kind === 'overall' ? indicatorColor(status.indicator) : 'bg-line'"
+                  :style="cell.color ? { background: cell.color } : undefined"
+                  @mouseenter="showServiceTip(cell, $event)"
+                  @mousemove="moveServiceTip"
+                  @mouseleave="serviceTip = null"
+                  aria-hidden="true"
                 />
-              </div>
-              <template v-if="cell.component">
-                <div class="hive-history" :aria-label="t('status.historyNote')">
-                  <button
-                    v-for="{ day, x, y } in dayCells(cell.component.history)"
-                    :key="day.date"
-                    type="button"
-                    class="hive-day"
-                    :class="indicatorColor(day.indicator)"
-                    :style="hexCellStyle(x, y)"
-                    :aria-label="tooltipText(day)"
-                    @mouseenter="showTooltip(day, $event)"
-                    @mouseleave="tooltip = null"
-                    @focus="showTooltip(day, $event)"
-                    @blur="tooltip = null"
-                    @click="showTooltip(day, $event)"
-                    @keydown.esc="tooltip = null"
-                  />
+                <div class="hive-cell__body">
+                  <div class="hive-fill" aria-hidden="true">
+                    <span
+                      v-for="(slot, index) in fillerSlots"
+                      :key="index"
+                      class="hive-fill__hex bg-slate-200 dark:bg-slate-700"
+                      :style="hexCellStyle(slot.x, slot.y)"
+                    />
+                  </div>
+                  <template v-if="cell.component">
+                    <div class="hive-history" :aria-label="t('status.historyNote')">
+                      <button
+                        v-for="{ day, x, y } in dayCells(cell.component.history)"
+                        :key="day.date"
+                        type="button"
+                        class="hive-day"
+                        :class="indicatorColor(day.indicator)"
+                        :style="hexCellStyle(x, y)"
+                        :aria-label="tooltipText(day)"
+                        @mouseenter="showTooltip(day, $event)"
+                        @mouseleave="tooltip = null"
+                        @focus="showTooltip(day, $event)"
+                        @blur="tooltip = null"
+                        @click="showTooltip(day, $event)"
+                        @keydown.esc="tooltip = null"
+                      />
+                    </div>
+                  </template>
+                  <div v-else-if="cell.kind === 'overall'" class="hive-overall">
+                    <h2 class="text-sm font-bold">{{ t('status.overall') }}</h2>
+                    <svg class="h-7 w-28" :class="banner.cls" viewBox="0 0 100 28" fill="none" aria-hidden="true">
+                      <path class="ekg-beat__trace" d="M0 18 H18 l5-7 5 12 5-16 5 9 5 2 H55 l5-7 5 12 5-16 5 9 5 2 H100" stroke="currentColor" stroke-width="2.5" />
+                    </svg>
+                    <span class="text-2xl font-bold tabular-nums" :class="banner.cls">
+                      {{ averageUptime != null ? `${averageUptime.toFixed(2)}%` : '—' }}
+                    </span>
+                    <span class="text-[10px] text-muted">{{ t('status.averageUptime') }}</span>
+                    <span class="text-[11px] font-semibold" :class="banner.cls">{{ indicatorText(status.indicator) }}</span>
+                  </div>
                 </div>
-              </template>
-              <div v-else-if="cell.kind === 'overall'" class="hive-overall">
-                <h2 class="text-sm font-bold">{{ t('status.overall') }}</h2>
-                <svg class="h-7 w-28" :class="banner.cls" viewBox="0 0 100 28" fill="none" aria-hidden="true">
-                  <path class="ekg-beat__trace" d="M0 18 H18 l5-7 5 12 5-16 5 9 5 2 H55 l5-7 5 12 5-16 5 9 5 2 H100" stroke="currentColor" stroke-width="2.5" />
-                </svg>
-                <span class="text-2xl font-bold tabular-nums" :class="banner.cls">
-                  {{ averageUptime != null ? `${averageUptime.toFixed(2)}%` : '—' }}
-                </span>
-                <span class="text-[10px] text-muted">{{ t('status.averageUptime') }}</span>
-                <span class="text-[11px] font-semibold" :class="banner.cls">{{ indicatorText(status.indicator) }}</span>
-              </div>
+              </article>
             </div>
-          </article>
-        </div>
+          </div>
         </div>
         </div>
 
@@ -554,11 +600,8 @@ function incidentDuration(incident: ServiceIncident): string | null {
   }
 }
 
-/* The honeycomb remains intact on narrow screens, with local horizontal scrolling. */
-.hive-scroll {
-  overflow-x: auto;
-  padding-bottom: 8px;
-}
+/* No scroll containers: the whole hive scales down to the page width, so the
+ * complete comb is always visible at any viewport size. */
 .hive {
   position: relative;
   margin: 0 auto;

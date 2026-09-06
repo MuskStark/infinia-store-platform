@@ -19,8 +19,10 @@
 - New `monitor-web` workspace: the hive status page migrated 1:1 from the store SPA and
   generalized to a 19-slot honeycomb (center overall + two rings), now rendering 14
   components including External reachability, with the frozen-view banner in en/zh-CN.
-  Served embedded from the monitor jar (`build-monitor-jar.sh`), same single-origin
-  pattern as the store.
+  The complete hive is always on screen — it scales proportionally to fit both the
+  width and the remaining height of the viewport, with no internal scroll containers
+  (verified cell-by-cell at 1280×900 and 375×812). Served embedded from the monitor jar
+  (`build-monitor-jar.sh`), same single-origin pattern as the store.
 - The store's own status page grew five comprehensive in-process probes — host storage
   capacity, host memory (Linux reads /proc/meminfo `MemAvailable`; the JDK's MemFree
   counter is near-zero on any healthy Linux box), JVM heap, Hikari pool saturation, and
