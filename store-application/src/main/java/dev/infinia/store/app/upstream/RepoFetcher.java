@@ -57,7 +57,6 @@ public class RepoFetcher {
     }
 
     public JsonNode fetchJson(String url) throws IOException, InterruptedException {
-        SourceFetchGuard.validate(url);
         byte[] body = fetch(url, MAX_JSON_BYTES);
         return mapper.readTree(body);
     }
@@ -151,18 +150,19 @@ public class RepoFetcher {
     /**
      * Downloads to a file following up to five redirects manually — registries
      * such as SkillHub answer 302 to signed object-storage URLs. Every hop is
-     * re-validated against the SSRF guard before it is requested.
+     * re-resolved and re-validated against the SSRF guard (DNS-rebinding
+     * pinning, audit 3.6) before it is requested, and redirect targets resolve
+     * against the LOGICAL URL so a pinned-address hop cannot skew relative
+     * Location headers onto the validated IP.
      */
     public void fetchFileFollowingRedirects(String url, Path target, long maxBytes)
             throws IOException, InterruptedException {
         String current = url;
         for (int hop = 0; hop < 5; hop++) {
-            SourceFetchGuard.validate(current);
+            SourceFetchGuard.GuardedFetch guarded =
+                    SourceFetchGuard.resolveValidated(current);
             HttpResponse<InputStream> response = http.send(
-                    HttpRequest.newBuilder(URI.create(current))
-                            .timeout(Duration.ofSeconds(60))
-                            .header("User-Agent", "Infinia-Store-Download")
-                            .GET().build(),
+                    request(guarded, "Infinia-Store-Download"),
                     HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() / 100 == 3) {
                 String location = response.headers().firstValue("Location").orElse(null);
@@ -226,14 +226,12 @@ public class RepoFetcher {
     }
 
     private byte[] fetch(String url, long maxBytes) throws IOException, InterruptedException {
-        // Guard here — the single choke point — so no caller (repoFiles included,
-        // whose URL comes from upstream-controlled marketplace metadata) can route
-        // around the SSRF policy.
-        SourceFetchGuard.validate(url);
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(60))
-                .header("User-Agent", "Infinia-Store-Sync")
-                .GET().build();
+        // Resolve + validate here — the single choke point — so no caller
+        // (repoFiles included, whose URL comes from upstream-controlled
+        // marketplace metadata) can route around the SSRF policy, and the
+        // connection pins the validated address (DNS-rebinding, audit 3.6).
+        SourceFetchGuard.GuardedFetch guarded = SourceFetchGuard.resolveValidated(url);
+        HttpRequest request = request(guarded, "Infinia-Store-Sync");
         HttpResponse<byte[]> response = null;
         for (int attempt = 0; attempt < 3; attempt++) {
             response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
@@ -257,11 +255,8 @@ public class RepoFetcher {
 
     private void fetchToFile(String url, Path target, long maxBytes)
             throws IOException, InterruptedException {
-        SourceFetchGuard.validate(url);
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(60))
-                .header("User-Agent", "Infinia-Store-Download")
-                .GET().build();
+        SourceFetchGuard.GuardedFetch guarded = SourceFetchGuard.resolveValidated(url);
+        HttpRequest request = request(guarded, "Infinia-Store-Download");
         for (int attempt = 0; attempt < 3; attempt++) {
             HttpResponse<InputStream> response = http.send(request,
                     HttpResponse.BodyHandlers.ofInputStream());
@@ -282,6 +277,44 @@ public class RepoFetcher {
         }
         throw new IOException("GET " + url + " failed");
     }
+
+    /**
+     * Builds one guarded GET: it connects to the address the guard validated and,
+     * when that differs from the URL's own authority, pins the original authority
+     * in the Host header so virtual hosting keeps working. If the JVM's HttpClient
+     * was initialized before the guard could unlock the Host header, the request
+     * degrades to the hostname URL (still range-validated) — once, loudly.
+     */
+    private HttpRequest request(SourceFetchGuard.GuardedFetch guarded, String userAgent) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(guarded.requestUri())
+                .timeout(Duration.ofSeconds(60))
+                .header("User-Agent", userAgent)
+                .GET();
+        if (!guarded.requestUri().equals(guarded.uri())) {
+            try {
+                return builder.header("Host", guarded.hostHeader()).build();
+            } catch (IllegalArgumentException restrictedHostHeader) {
+                warnHostPinningUnavailableOnce();
+                return HttpRequest.newBuilder(guarded.uri())
+                        .timeout(Duration.ofSeconds(60))
+                        .header("User-Agent", userAgent)
+                        .GET().build();
+            }
+        }
+        return builder.build();
+    }
+
+    private static void warnHostPinningUnavailableOnce() {
+        if (!hostPinningWarningIssued) {
+            hostPinningWarningIssued = true;
+            System.getLogger(RepoFetcher.class.getName()).log(System.Logger.Level.WARNING,
+                    "jdk.httpclient.allowRestrictedHeaders was read before the SSRF guard"
+                            + " could set it — plain-HTTP upstream fetches fall back to"
+                            + " hostname connections (validated, but not address-pinned)");
+        }
+    }
+
+    private static volatile boolean hostPinningWarningIssued;
 
     /** Copies one open response body to {@code target} under a hard size cap. */
     private static void streamToFile(InputStream in, String url, Path target, long maxBytes)

@@ -45,16 +45,32 @@ public class CatalogController {
                 throw new DomainException(StoreErrorCode.VALIDATION_FAILED, e.getMessage());
             }
         }
+        // Friendly parses (audit 3.6): ListingType.valueOf / ListingSort.valueOf
+        // turn bad query input into raw "No enum constant" errors; the parse
+        // variants keep every enum parameter on the same actionable-400 footing
+        // as the channel above.
+        ListingType requestedType;
+        try {
+            requestedType = type == null || type.isBlank() ? null
+                    : ListingType.parse(type);
+        } catch (IllegalArgumentException e) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED, e.getMessage());
+        }
+        ListingQuery.ListingSort requestedSort;
+        try {
+            requestedSort = sort == null ? null : ListingQuery.ListingSort.parse(sort);
+        } catch (IllegalArgumentException e) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED, e.getMessage());
+        }
         CatalogDtos.CatalogPageDto page = catalog.browse(new CatalogService.BrowseQuery(
-                type == null || type.isBlank() ? null
-                        : ListingType.valueOf(type.trim().toUpperCase()),
+                requestedType,
                 query,
                 category,
                 requestedChannel,
                 hostVersion,
                 os,
                 arch,
-                sort == null ? null : ListingQuery.ListingSort.valueOf(sort.trim().toUpperCase()),
+                requestedSort,
                 featured,
                 cursor,
                 Math.min(Math.max(limit, 1), 100)));

@@ -11,8 +11,9 @@ import java.util.Map;
 /**
  * Upstream aggregation SPI. Discovery is metadata-only: it may read an upstream
  * catalog/manifest, but must not download the referenced repository/archive.
- * Payload materialization is a separate operation invoked only by a user-initiated
- * download.
+ * Payload materialization is a separate operation invoked by the sync (which
+ * persists the packed payload as a store blob) and, for legacy rows, by the
+ * pass-through download path.
  */
 public interface UpstreamAdapter {
 

@@ -1,13 +1,18 @@
 package dev.infinia.store.contract.api;
 
-import java.util.List;
-
-/** DTOs for artifact delivery and the signed app update feed (design §8.4). */
+/** DTOs for artifact delivery (design §8.4, §10.2). */
 public final class DeliveryDtos {
 
     private DeliveryDtos() {}
 
-    /** Short-lived, purpose-limited CDN download ticket (design §10.2). */
+    /**
+     * Short-lived, purpose-limited CDN download ticket (design §10.2).
+     *
+     * <p>The historic app-update feed DTOs were removed with the RESERVED
+     * marking of {@code GET /api/v1/updates/app} (audit 3.5) — no shipped
+     * client consumed that shape; the live update surfaces are the
+     * electron-updater deb feed and the compat GitHub-releases mirror.
+     */
     public record DownloadTicketDto(
             String releaseId,
             String artifactId,
@@ -17,37 +22,5 @@ public final class DeliveryDtos {
             String signature,
             String keyId,
             long size) {
-    }
-
-    public record AppUpdateArtifactDto(
-            String url,
-            String filename,
-            String sha256,
-            String signature,
-            String keyId,
-            long size,
-            String platform,
-            String arch,
-            String kind,
-            String variant,
-            String mimeType) {
-    }
-
-    /**
-     * Response of {@code GET /api/v1/updates/app}; field-compatible with the FengYu
-     * host {@code UpdateInfo} model (design §8.4).
-     */
-    public record AppUpdateDto(
-            String latestVersion,
-            boolean mandatory,
-            int rollout,
-            String releaseNotes,
-            List<AppUpdateArtifactDto> artifacts,
-            String sha256,
-            String signature,
-            String keyId,
-            String publishedAt,
-            String minimumSupportedVersion,
-            String channel) {
     }
 }

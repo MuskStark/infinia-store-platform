@@ -123,8 +123,12 @@ public class CompatFengYuController {
     /**
      * FengYu SkillCatalogEntry-compatible skill catalog (anonymous), consumed via the
      * host property {@code fengyu.skills.catalog-url}. Same shape as the plugin
-     * catalog minus category/permissions/integrity fields — the skill install path
-     * only reads id/name/description/version/author/icon/homepage/downloadUrl/official.
+     * catalog minus category/permissions. Integrity mirrors the host's
+     * SkillCatalogEntry contract: sha256 is mandatory for install (the host
+     * refuses unattested downloads), signature/keyId carry the platform
+     * signature the host verifies when {@code fengyu.store.require-signature}
+     * is on (its default). Entries whose digest is genuinely unknown (legacy
+     * pre-materialization upstream rows) omit all three rather than faking one.
      * The official flag stays false: the host treats it as "shipped by the FengYu
      * team", which no store publisher qualifies for.
      */
@@ -150,6 +154,8 @@ public class CompatFengYuController {
             if (artifact == null) {
                 continue;
             }
+            boolean live = artifact.blobKey() != null
+                    && artifact.blobKey().startsWith("upstream/");
             entries.add(new FengYuSkillEntryDto(
                     listing.namespace + "." + listing.slug,
                     listing.name("en"),
@@ -159,7 +165,10 @@ public class CompatFengYuController {
                     null,
                     null,
                     directDownloadUrl(artifact),
-                    false));
+                    false,
+                    live ? null : artifact.sha256(),
+                    live ? null : artifact.signature(),
+                    live ? null : artifact.keyId()));
         }
         entries.sort(Comparator.comparing(FengYuSkillEntryDto::name, Comparator.nullsLast(
                 Comparator.naturalOrder())));
@@ -308,6 +317,9 @@ public class CompatFengYuController {
             String icon,
             String homepage,
             String downloadUrl,
-            boolean official) {
+            boolean official,
+            String sha256,
+            String signature,
+            String keyId) {
     }
 }

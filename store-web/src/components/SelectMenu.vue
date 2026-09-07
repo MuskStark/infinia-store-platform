@@ -23,6 +23,9 @@ const props = defineProps<{
   options: SelectOption[];
   ariaLabel?: string;
   disabled?: boolean;
+  /** Summary for the closed trigger; defaults to the selected option's label.
+   *  Keeps option rows free of a repeated prefix like “Sort by: …”. */
+  triggerLabel?: string;
 }>();
 
 const emit = defineEmits<{ (e: 'update:modelValue', value: string | number): void }>();
@@ -147,7 +150,7 @@ onBeforeUnmount(() => {
       :aria-expanded="open"
       @click="toggle"
     >
-      <span class="truncate">{{ current?.label ?? '—' }}</span>
+      <span class="truncate">{{ triggerLabel ?? current?.label ?? '—' }}</span>
       <svg
         class="shrink-0 text-muted transition-transform dark:text-slate-400"
         :class="open ? 'rotate-180' : ''"

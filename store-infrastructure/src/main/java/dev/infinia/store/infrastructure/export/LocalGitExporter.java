@@ -25,22 +25,35 @@ import java.util.zip.DeflaterOutputStream;
  * source type, whose installer git-clones each entry (JGit, scheme restricted to
  * http/https/file). The store therefore exports every eligible listing as a tiny
  * local git repo under {@code store.export-dir}; the marketplace points at it with
- * a {@code file://} URL (same-machine deployments). Content-addressed exports keep
- * updates meaningful: unchanged content keeps the commit, changed content gets a
- * child commit the host picks up on its next clone.
+ * a {@code file://} URL (same-machine deployments) or, when
+ * {@code store.export.git-public-base} is configured, with an http(s) URL served by
+ * the store's read-only GitServlet mount at {@code /git/**} (remote deployments —
+ * file:// clone URLs never leave the machine, audit 3.4). Content-addressed
+ * exports keep updates meaningful: unchanged content keeps the commit, changed
+ * content gets a child commit the host picks up on its next clone.
  */
 @Component
 public class LocalGitExporter {
 
     private final Path baseDir;
+    private final String gitPublicBase;
 
-    public LocalGitExporter(@Value("${store.export-dir:data/git-exports}") String exportDir) {
+    public LocalGitExporter(@Value("${store.export-dir:data/git-exports}") String exportDir,
+            @Value("${store.export.git-public-base:}") String gitPublicBase) {
         this.baseDir = Path.of(exportDir).toAbsolutePath();
+        this.gitPublicBase = gitPublicBase == null ? "" : gitPublicBase.trim();
     }
 
-    /** Absolute file:// URL of the exported repository for the given key. */
+    /**
+     * Clone URL of the exported repository for the given key: {@code file://} by
+     * default, or {@code <git-public-base>/<repo>.git} when a public base is
+     * configured (empty default keeps the historical file:// behavior).
+     */
     public String repoUrl(String key) {
-        return repoDir(key).toUri().toString();
+        if (gitPublicBase.isEmpty()) {
+            return repoDir(key).toUri().toString();
+        }
+        return gitPublicBase.replaceAll("/+$", "") + "/" + dirName(key);
     }
 
     /**
@@ -74,8 +87,13 @@ public class LocalGitExporter {
         return repo;
     }
 
+    /** Sanitized on-disk directory name for a repo key ("<key>.git"). */
+    private String dirName(String key) {
+        return key.replaceAll("[^a-zA-Z0-9._-]", "_") + ".git";
+    }
+
     private Path repoDir(String key) {
-        return baseDir.resolve(key.replaceAll("[^a-zA-Z0-9._-]", "_") + ".git");
+        return baseDir.resolve(dirName(key));
     }
 
     private String readHead(Path repo) throws IOException {

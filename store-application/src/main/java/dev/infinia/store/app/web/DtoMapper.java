@@ -54,7 +54,7 @@ public final class DtoMapper {
                         upstream.sourcePath(), upstream.ref(), upstream.commitSha(),
                         upstream.upstreamVersion(), upstream.contentSha256(),
                         upstream.firstSeenAt().toString(), upstream.lastSeenAt().toString(),
-                        "LIVE_NO_RETENTION"));
+                        "MATERIALIZED_BLOB"));
     }
 
     public static ListingDtos.ListingReleaseDto release(Release release) {
@@ -84,7 +84,7 @@ public final class DtoMapper {
     public static ListingDtos.ArtifactDto artifact(Release.ArtifactInfo a) {
         boolean live = a.blobKey() != null && a.blobKey().startsWith("upstream/");
         return new ListingDtos.ArtifactDto(
-                a.id() == null ? null : a.id().toString(),
+                a.artifactId(),
                 a.kind().name(),
                 a.platform().name().toLowerCase(),
                 a.arch().name().toLowerCase(),

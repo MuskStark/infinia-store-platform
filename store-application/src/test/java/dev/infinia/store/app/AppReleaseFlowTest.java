@@ -19,8 +19,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Main-application (ListingType.APP) releases: the installed + portable
- * distribution matrix per platform, variant routing on the signed update feed
- * (design §8.4) and per-artifact download tickets.
+ * distribution matrix per platform, per-artifact download tickets and the
+ * admin app-release flow. (The historic JSON update feed at
+ * /api/v1/updates/app is RESERVED — audit 3.5; the desktop deb feed lives in
+ * FengYuUpdateFeedTest.)
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -42,111 +44,77 @@ class AppReleaseFlowTest {
         return headers;
     }
 
+    @Test
+    void publishingScriptCreatesListingBeforeDraftAndUploadsRc2() throws Exception {
+        java.nio.file.Path assets = java.nio.file.Files.createTempDirectory("rc2-publish-");
+        try {
+            java.nio.file.Files.writeString(assets.resolve("Infinia-4.0.0-rc.2-linux-x64.deb"),
+                    "script integration artifact");
+            java.nio.file.Path script = java.nio.file.Path.of("../scripts/publish-app-release.sh")
+                    .toAbsolutePath().normalize();
+            if (!java.nio.file.Files.exists(script)) {
+                script = java.nio.file.Path.of("scripts/publish-app-release.sh").toAbsolutePath();
+            }
+            ProcessBuilder builder = new ProcessBuilder("bash", script.toString(),
+                    "4.0.0-rc.2", assets.toString(), "rc").redirectErrorStream(true);
+            builder.environment().put("STORE_BASE", "http://localhost:" + port);
+            builder.environment().put("STORE_APP_NAMESPACE", "script-" + UUID.randomUUID().toString().substring(0, 8));
+            builder.environment().put("STORE_SUBMIT", "0");
+            java.nio.file.Path log = assets.resolve("publish.log");
+            builder.redirectOutput(log.toFile());
+            Process process = builder.start();
+            boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) process.destroyForcibly().waitFor();
+            String output = java.nio.file.Files.readString(log);
+            assertTrue(finished, output);
+            assertEquals(0, process.exitValue(), output);
+            assertTrue(output.contains("1 assets uploaded"), output);
+            assertTrue(output.contains("left in DRAFT"), output);
+        } finally {
+            try (var files = java.nio.file.Files.list(assets)) {
+                for (var file : files.toList()) java.nio.file.Files.deleteIfExists(file);
+            }
+            java.nio.file.Files.deleteIfExists(assets);
+        }
+    }
+
     /** The seeded FengYu host release must expose installer AND portable
      *  distributions for every desktop platform plus the universal variants. */
     @Test
     @SuppressWarnings("unchecked")
     void seededHostMatrixCoversInstallersAndPortablesPerPlatform() {
-        ResponseEntity<Map> feed = http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=windows&arch=x64"
-                        + "&installId=matrix-probe", Map.class, null);
-        assertEquals(200, feed.getStatusCode().value());
-        assertEquals("4.1.0", feed.getBody().get("latestVersion"));
-        List<Map<String, Object>> artifacts = (List<Map<String, Object>>) feed.getBody()
+        ResponseEntity<Map> detail = http().getJson("/api/v1/listings/official/fengyu-host",
+                Map.class, null);
+        assertEquals(200, detail.getStatusCode().value());
+        Map<String, Object> release = ((List<Map<String, Object>>) detail.getBody()
+                .get("releases")).stream()
+                .filter(r -> "4.1.0".equals(r.get("version")))
+                .findFirst().orElseThrow(() -> new AssertionError("seeded 4.1.0 missing"));
+        assertEquals("PUBLISHED", release.get("status"));
+        List<Map<String, Object>> artifacts = (List<Map<String, Object>>) release
                 .get("artifacts");
-        assertTrue(artifacts.stream().anyMatch(a -> "installer".equals(a.get("kind"))
+        assertTrue(artifacts.stream().anyMatch(a -> "INSTALLER".equals(a.get("kind"))
                 && "windows".equals(a.get("platform")) && "lite".equals(a.get("variant"))),
                 "windows installer expected: " + artifacts);
-        assertTrue(artifacts.stream().anyMatch(a -> "portable".equals(a.get("kind"))
+        assertTrue(artifacts.stream().anyMatch(a -> "PORTABLE".equals(a.get("kind"))
                 && "windows".equals(a.get("platform")) && "lite".equals(a.get("variant"))),
                 "windows portable expected: " + artifacts);
-
-        for (String[] osArch : new String[][] {{"macos", "arm64"}, {"linux", "x64"}}) {
-            ResponseEntity<Map> osFeed = http().getJson(
-                    "/api/v1/updates/app?current=4.0.0&channel=stable&os=" + osArch[0]
-                            + "&arch=" + osArch[1] + "&installId=matrix-probe", Map.class, null);
-            List<Map<String, Object>> osArtifacts = (List<Map<String, Object>>) osFeed.getBody()
-                    .get("artifacts");
-            assertTrue(osArtifacts.stream().anyMatch(a -> "installer".equals(a.get("kind"))),
-                    osArch[0] + " installer expected: " + osArtifacts);
-            assertTrue(osArtifacts.stream().anyMatch(a -> "portable".equals(a.get("kind"))),
-                    osArch[0] + " portable expected: " + osArtifacts);
-        }
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void updateFeedFiltersByModeAndVariant() {
-        // Installer-only feed for macOS ARM64.
-        ResponseEntity<Map> installer = http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=macos&arch=arm64"
-                        + "&mode=installer&installId=filter-probe", Map.class, null);
-        List<Map<String, Object>> installerArtifacts =
-                (List<Map<String, Object>>) installer.getBody().get("artifacts");
-        assertFalse(installerArtifacts.isEmpty());
-        assertTrue(installerArtifacts.stream().allMatch(a -> "installer".equals(a.get("kind"))),
-                "mode=installer must not mix in portables: " + installerArtifacts);
-
-        // Portable-only feed, same platform.
-        ResponseEntity<Map> portable = http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=macos&arch=arm64"
-                        + "&mode=portable&installId=filter-probe", Map.class, null);
-        List<Map<String, Object>> portableArtifacts =
-                (List<Map<String, Object>>) portable.getBody().get("artifacts");
-        assertTrue(portableArtifacts.stream().allMatch(a -> "portable".equals(a.get("kind"))),
-                "mode=portable must not mix in installers: " + portableArtifacts);
-
-        // variant=jre selects the bundled-JRE macOS dmg only.
-        ResponseEntity<Map> jre = http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=macos&arch=arm64"
-                        + "&mode=installer&variant=jre&installId=filter-probe", Map.class, null);
-        List<Map<String, Object>> jreArtifacts =
-                (List<Map<String, Object>>) jre.getBody().get("artifacts");
-        assertEquals(1, jreArtifacts.size(), "exactly one JRE dmg expected: " + jreArtifacts);
-        assertEquals("jre", jreArtifacts.get(0).get("variant"));
-        assertEquals("installer", jreArtifacts.get(0).get("kind"));
-
-        // Universal portable web archive and fat-JAR variants.
-        ResponseEntity<Map> web = http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=linux&arch=x64"
-                        + "&mode=portable&variant=web&installId=filter-probe", Map.class, null);
-        List<Map<String, Object>> webArtifacts =
-                (List<Map<String, Object>>) web.getBody().get("artifacts");
-        assertEquals(1, webArtifacts.size(), "universal web archive matches any os: "
-                + webArtifacts);
-        assertEquals("web", webArtifacts.get(0).get("variant"));
-        assertEquals("universal", webArtifacts.get(0).get("platform"));
-
-        ResponseEntity<Map> jar = http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=windows&arch=x64"
-                        + "&mode=portable&variant=jar&installId=filter-probe", Map.class, null);
-        assertEquals("Infinia.jar",
-                ((List<Map<String, Object>>) jar.getBody().get("artifacts")).get(0)
-                        .get("filename"));
-
-        // Unknown mode is rejected, not silently treated as "any".
-        assertEquals(400, http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=macos&arch=arm64"
-                        + "&mode=flavor&installId=filter-probe", Map.class, null)
-                .getStatusCode().value());
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void feedArtifactUrlServesSignedBytes() {
-        ResponseEntity<Map> feed = http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=linux&arch=x64"
-                        + "&mode=portable&variant=web&installId=download-probe", Map.class, null);
-        Map<String, Object> artifact = ((List<Map<String, Object>>) feed.getBody()
-                .get("artifacts")).get(0);
-        String url = (String) artifact.get("url");
-        assertTrue(url.startsWith("http://"), "feed urls are absolute: " + url);
-        String pathAndQuery = url.replaceFirst("^http://[^/]+", "");
-        ResponseEntity<byte[]> bytes = http().getBytes(pathAndQuery);
-        assertEquals(200, bytes.getStatusCode().value());
-        assertTrue(bytes.getBody().length > 0);
-        assertEquals(dev.infinia.store.scanner.Ed25519Signer.sha256Hex(bytes.getBody()),
-                artifact.get("sha256"), "served bytes must match the advertised digest");
+        // macOS ships installers only (lite + bundled-JRE dmg); the portable
+        // fallbacks for it are the universal web archive / fat JAR below.
+        assertTrue(artifacts.stream().anyMatch(a -> "INSTALLER".equals(a.get("kind"))
+                && "macos".equals(a.get("platform")) && "lite".equals(a.get("variant"))),
+                "macos installer expected: " + artifacts);
+        assertTrue(artifacts.stream().anyMatch(a -> "INSTALLER".equals(a.get("kind"))
+                && "macos".equals(a.get("platform")) && "jre".equals(a.get("variant"))),
+                "macos bundled-JRE installer expected: " + artifacts);
+        assertTrue(artifacts.stream().anyMatch(a -> "INSTALLER".equals(a.get("kind"))
+                && "linux".equals(a.get("platform"))), "linux installer expected: " + artifacts);
+        assertTrue(artifacts.stream().anyMatch(a -> "PORTABLE".equals(a.get("kind"))
+                && "linux".equals(a.get("platform"))), "linux portable expected: " + artifacts);
+        assertTrue(artifacts.stream().anyMatch(a -> "web".equals(a.get("variant"))),
+                "universal web archive variant expected: " + artifacts);
+        assertTrue(artifacts.stream().anyMatch(a -> "jar".equals(a.get("variant"))),
+                "fat-JAR variant expected: " + artifacts);
     }
 
     /** A publisher pushes the full FengYu release matrix through the normal
@@ -268,19 +236,6 @@ class AppReleaseFlowTest {
                 (String) ticket.getBody().get("url"));
         assertEquals("app-binary:Infinia-4.5.0-win-x64-portable.zip",
                 new String(bytes.getBody(), StandardCharsets.UTF_8));
-    }
-
-    /** The feed advertises the operator-configured support floor, not a code constant. */
-    @Test
-    void feedAdvertisesConfiguredMinimumSupportedVersion() {
-        ResponseEntity<Map> feed = http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=windows&arch=x64"
-                        + "&installId=floor-probe", Map.class, null);
-        assertEquals(200, feed.getStatusCode().value());
-        assertEquals("3.9.0", feed.getBody().get("minimumSupportedVersion"),
-                "minimumSupportedVersion must come from store.app-minimum-supported-version");
-        // Even below the floor the update stays non-mandatory (design §8.4).
-        assertEquals(false, feed.getBody().get("mandatory"));
     }
 
     /** Every published release serves a sha256sum-compatible checksums.txt

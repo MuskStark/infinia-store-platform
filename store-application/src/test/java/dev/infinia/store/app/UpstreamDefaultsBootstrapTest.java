@@ -14,6 +14,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
@@ -85,8 +86,9 @@ class UpstreamDefaultsBootstrapTest {
         int requestsAfterBoot = metadataRequests.get();
         assertTrue(requestsAfterBoot >= 1, "boot must have indexed the catalog");
 
-        // The WorkBuddy skill is live on the host-facing catalog under its
-        // dedicated namespace, versioned from the upstream catalog row.
+        // The WorkBuddy skill is materialized at boot and live on the host-facing
+        // catalog under its dedicated namespace, versioned from the upstream
+        // catalog row — with a real, verifiable digest.
         List<Map<String, Object>> skills = (List<Map<String, Object>>) http()
                 .getJson("/api/v1/compat/fengyu/skills-catalog", List.class, null).getBody();
         Map<String, Object> entry = skills.stream()
@@ -94,6 +96,8 @@ class UpstreamDefaultsBootstrapTest {
                 .orElseThrow(() -> new AssertionError("skill missing: " + skills));
         assertEquals("1.0.0", entry.get("version"));
         assertEquals("skillhub", entry.get("author"));
+        assertEquals(64, String.valueOf(entry.get("sha256")).length(),
+                "the boot sync materializes the payload: " + entry);
 
         // A second boot cycle (re-invoked listener) neither duplicates the row
         // nor re-indexes the already-successful source.
@@ -121,6 +125,31 @@ class UpstreamDefaultsBootstrapTest {
                 exchange.sendResponseHeaders(200, catalog.length);
                 try (InputStream ignored = exchange.getRequestBody()) {
                     exchange.getResponseBody().write(catalog);
+                }
+                exchange.close();
+            });
+            // Materialization downloads the referenced skill zip (302 → storage).
+            server.createContext("/api/v1/download", exchange -> {
+                exchange.getResponseHeaders().set("Location", "http://127.0.0.1:"
+                        + server.getAddress().getPort() + "/storage/wb-boot-skill.zip");
+                try (InputStream ignored = exchange.getRequestBody()) {
+                    exchange.sendResponseHeaders(302, -1);
+                }
+                exchange.close();
+            });
+            server.createContext("/storage/wb-boot-skill.zip", exchange -> {
+                ByteArrayOutputStream zip = new ByteArrayOutputStream();
+                try (var out = new java.util.zip.ZipOutputStream(zip)) {
+                    out.putNextEntry(new java.util.zip.ZipEntry("wb-boot-skill/SKILL.md"));
+                    out.write("---\nname: wb-boot-skill\ndescription: Seeded at boot\n---\n"
+                            .getBytes(StandardCharsets.UTF_8));
+                    out.closeEntry();
+                }
+                byte[] body = zip.toByteArray();
+                exchange.getResponseHeaders().set("Content-Type", "application/zip");
+                exchange.sendResponseHeaders(200, body.length);
+                try (InputStream ignored = exchange.getRequestBody()) {
+                    exchange.getResponseBody().write(body);
                 }
                 exchange.close();
             });

@@ -19,7 +19,6 @@ public record StoreProperties(
         String cliClientId,
         String cliClientSecret,
         String appCoordinate,
-        String appMinimumSupportedVersion,
         String remoteDatasourceFile,
         Monitoring monitoring) {
 
@@ -63,11 +62,6 @@ public record StoreProperties(
                 ? "dev-only-cli-secret" : cliClientSecret;
         appCoordinate = appCoordinate == null || appCoordinate.isBlank()
                 ? "infinia://app/official/fengyu-host" : appCoordinate;
-        // Floor advertised on the update feed (design §8.4): hosts below this line
-        // are told to upgrade, but the feed itself stays mandatory=false.
-        if (appMinimumSupportedVersion == null || appMinimumSupportedVersion.isBlank()) {
-            appMinimumSupportedVersion = "4.0.0";
-        }
         remoteDatasourceFile = RemoteDataSourceOverride.overridePath(remoteDatasourceFile)
                 .toString();
         monitoring = monitoring == null

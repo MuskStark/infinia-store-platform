@@ -7,6 +7,7 @@ import { BlurFade, NumberTicker } from '@infinia/magic-ui-vue';
 import ListingCard from '../components/ListingCard.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
 import ErrorState from '../components/ErrorState.vue';
+import { formatNumber } from '../utils/format';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -89,13 +90,13 @@ const types = ['APP', 'PLUGIN', 'SKILL', 'MCP', 'FLOW'] as const;
           <div class="mt-6 flex gap-8">
             <div>
               <div class="text-2xl font-bold text-ink dark:text-slate-100">
-                <NumberTicker :value="totalListings" />
+                <NumberTicker :value="totalListings" :format="formatNumber" />
               </div>
               <div class="mt-0.5 text-xs text-muted dark:text-slate-400">{{ t('discover.statsListings') }}</div>
             </div>
             <div>
               <div class="text-2xl font-bold text-ink dark:text-slate-100">
-                <NumberTicker :value="totalDownloads" />
+                <NumberTicker :value="totalDownloads" :format="formatNumber" />
               </div>
               <div class="mt-0.5 text-xs text-muted dark:text-slate-400">{{ t('discover.statsDownloads') }}</div>
             </div>

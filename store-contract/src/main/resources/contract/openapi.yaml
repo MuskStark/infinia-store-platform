@@ -423,23 +423,22 @@ paths:
     get:
       operationId: appUpdateFeed
       tags: [Updates]
-      summary: Signed app update feed (design §8.4)
+      summary: RESERVED — deliberately unimplemented (audit 3.5)
+      description: |
+        No shipped client consumes this endpoint: the desktop deb updater reads the
+        electron-updater generic feed at `/fengyu-updates/deb/latest-linux.yml`, the
+        Windows portable updater reads the compat GitHub-releases mirror, and the
+        portable-web backend checks GitHub directly. The historic response fields
+        never matched any of those contracts, so the endpoint answers 501 until it
+        is wired to a real client contract.
       security:
         - {}
-      parameters:
-        - { name: current, in: query, required: true, schema: { type: string } }
-        - { name: channel, in: query, schema: { $ref: '#/components/schemas/Channel' }, default: stable }
-        - { name: os, in: query, required: true, schema: { $ref: '#/components/schemas/Platform' } }
-        - { name: arch, in: query, required: true, schema: { $ref: '#/components/schemas/Arch' } }
-        - { name: mode, in: query, schema: { type: string, enum: [installer, portable, any] }, description: Select installed or portable application distributions }
-        - { name: variant, in: query, schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,31}$' }, description: Build variant such as lite, jre, uos or jar }
-        - { name: installId, in: query, required: true, schema: { type: string }, description: Opaque random id used for stable rollout bucketing }
       responses:
-        '200':
-          description: Update feed entry; latestVersion=null when up to date
+        '501':
+          description: Endpoint reserved; no consumer exists
           content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AppUpdate' }
+            application/problem+json:
+              schema: { type: object }
 
   /auth/register:
     post:
@@ -1704,7 +1703,9 @@ components:
 
     UpstreamProvenance:
       type: object
-      description: Metadata provenance for a live, non-retained upstream artifact.
+      description: Metadata provenance for an aggregated upstream artifact. The sync
+        materializes the payload into the store's blob storage, so the entry ships
+        like any publisher upload with a real, platform-signed digest.
       properties:
         sourceName: { type: string }
         externalId: { type: string }
@@ -1716,7 +1717,7 @@ components:
         metadataSha256: { type: string }
         firstSeenAt: { type: string, format: date-time }
         lastSeenAt: { type: string, format: date-time }
-        deliveryMode: { type: string, enum: [LIVE_NO_RETENTION] }
+        deliveryMode: { type: string, enum: [MATERIALIZED_BLOB] }
 
     ClientEnvironment:
       type: object
@@ -1783,36 +1784,6 @@ components:
         signature: { type: string }
         keyId: { type: string }
         size: { type: integer, format: int64 }
-
-    AppUpdateArtifact:
-      type: object
-      properties:
-        url: { type: string, format: uri }
-        filename: { type: string }
-        sha256: { type: string }
-        signature: { type: string }
-        keyId: { type: string }
-        size: { type: integer, format: int64 }
-        platform: { $ref: '#/components/schemas/Platform' }
-        arch: { $ref: '#/components/schemas/Arch' }
-        kind: { type: string, enum: [installer, portable] }
-        variant: { type: string }
-        mimeType: { type: string }
-
-    AppUpdate:
-      type: object
-      properties:
-        latestVersion: { type: string, nullable: true }
-        mandatory: { type: boolean }
-        rollout: { type: integer, minimum: 0, maximum: 100 }
-        releaseNotes: { type: string }
-        artifacts: { type: array, items: { $ref: '#/components/schemas/AppUpdateArtifact' } }
-        sha256: { type: string }
-        signature: { type: string }
-        keyId: { type: string }
-        publishedAt: { type: string, format: date-time }
-        minimumSupportedVersion: { type: string }
-        channel: { $ref: '#/components/schemas/Channel' }
 
     RegisterRequest:
       type: object

@@ -244,11 +244,20 @@ class CompatFengYuApiTest {
         Map<String, Object> pdf = findByEntryId(entries, "official.pdf-tools");
         assertEquals("1.3.0", pdf.get("version"));
         assertEquals(false, pdf.get("official"), "seeded skill is not fan.summer. official");
-        // Host skill install: GET downloadUrl, ≤10MB zip — no sha256 field consumed.
+        // Host skill install contract: mandatory SHA-256 plus the platform
+        // Ed25519 signature the host verifies (fengyu.store.require-signature
+        // defaults to true on the host).
+        String sha256 = (String) pdf.get("sha256");
+        assertEquals(64, sha256.length(), "entry: " + pdf);
+        assertNotNull(pdf.get("signature"), "seeded artifacts are platform-signed");
+        assertNotNull(pdf.get("keyId"));
         ResponseEntity<byte[]> body = http().getBytes(rewrite((String) pdf.get("downloadUrl")));
         assertEquals(200, body.getStatusCode().value());
         assertTrue(body.getBody().length > 0 && body.getBody().length <= 10 * 1024 * 1024);
         assertEquals("PK", new String(body.getBody(), 0, 2, "UTF-8"), "zip magic");
+        assertEquals(sha256, HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(body.getBody())),
+                "downloaded bytes match the advertised sha256");
     }
 
     @Test

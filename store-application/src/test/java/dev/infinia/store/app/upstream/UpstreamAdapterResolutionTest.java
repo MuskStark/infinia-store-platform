@@ -23,7 +23,7 @@ class UpstreamAdapterResolutionTest {
             null, null, null, null,
             List.of(new ClaudeMarketplaceAdapter(), new SkillRepositoryAdapter(),
                     new McpRegistryAdapter(), new SkillHubAdapter()),
-            null);
+            null, null, null, null, null);
 
     @Test
     void persistedAdapterTypeWinsOverSourceProbing() {

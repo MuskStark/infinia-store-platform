@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRoute } from 'vue-router';
 import { api, ApiRequestError, type DownloadTicket, type Library, type ListingDetail, type RatingsPage, type ResolveResponse } from '../api/client';
 import { Badge, MagicCard, ProgressBar } from '@infinia/magic-ui-vue';
 import StateChip from '../components/StateChip.vue';
@@ -18,6 +19,7 @@ import { useAuthStore } from '../stores/auth';
  */
 const props = defineProps<{ namespace: string; slug: string }>();
 const { t, locale } = useI18n();
+const route = useRoute();
 const auth = useAuthStore();
 
 const detail = ref<ListingDetail | null>(null);
@@ -46,7 +48,7 @@ const reportError = ref<string | null>(null);
 
 const latestRelease = computed(() => detail.value?.releases?.[0] ?? null);
 const upstream = computed(() => detail.value?.upstream ?? null);
-const isLiveUpstream = computed(() => upstream.value?.deliveryMode === 'LIVE_NO_RETENTION');
+const isUpstreamAggregated = computed(() => upstream.value?.deliveryMode === 'MATERIALIZED_BLOB');
 
 /** Locale-aware localization (zh-CN matches zh first, then en, then anything). */
 const localization = computed(() => {
@@ -79,7 +81,7 @@ const sourceUrl = computed(() => upstream.value?.sourceUrl ?? latestRelease.valu
 function displayVersion(version?: string | null): string {
   const declared = upstream.value?.upstreamVersion?.trim();
   if (declared) return `v${declared}`;
-  if (!version || (isLiveUpstream.value && version === '0.0.0')) {
+  if (!version || (isUpstreamAggregated.value && version === '0.0.0')) {
     return t('listing.versionUnspecified');
   }
   return `v${version}`;
@@ -336,7 +338,7 @@ const installLabel = computed(() => {
           <div class="mt-3 flex flex-wrap items-center gap-2">
             <Badge tone="muted">{{ t(`type.${detail.type}`) }}</Badge>
             <Badge v-if="latestRelease" tone="muted">{{ displayVersion(latestRelease.version) }}</Badge>
-            <Badge v-if="isLiveUpstream" tone="accent">{{ t('listing.liveDelivery') }}</Badge>
+            <Badge v-if="isUpstreamAggregated" tone="accent">{{ t('listing.aggregatedUpstream') }}</Badge>
             <BeeLevelBadge v-if="detail.minBeeLevel && detail.minBeeLevel > 0" :level="detail.minBeeLevel" demands />
             <Badge v-if="detail.defaultChannel !== 'stable'" tone="accent">
               {{ t(`channel.${detail.defaultChannel}`) }}
@@ -468,10 +470,10 @@ const installLabel = computed(() => {
         >
           <div class="flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-semibold">{{ t('listing.upstreamMetadata') }}</h3>
-            <Badge v-if="isLiveUpstream" tone="success">{{ t('listing.noRetention') }}</Badge>
+            <Badge v-if="isUpstreamAggregated" tone="success">{{ t('listing.storedDelivery') }}</Badge>
           </div>
-          <p v-if="isLiveUpstream" class="mt-2 text-sm leading-6 text-muted dark:text-slate-400">
-            {{ t('listing.liveDeliveryHint') }}
+          <p v-if="isUpstreamAggregated" class="mt-2 text-sm leading-6 text-muted dark:text-slate-400">
+            {{ t('listing.storedDeliveryHint') }}
           </p>
           <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div>
@@ -552,7 +554,7 @@ const installLabel = computed(() => {
 
     <section v-if="tab === 'versions'" class="space-y-3">
       <div
-        v-if="isLiveUpstream && !upstream?.upstreamVersion"
+        v-if="isUpstreamAggregated && !upstream?.upstreamVersion"
         class="rounded-lg border border-accent/30 bg-accent/5 p-4 text-sm text-muted dark:text-slate-300"
       >
         <p class="font-semibold text-fg dark:text-white">{{ t('listing.versionUnspecified') }}</p>
@@ -618,9 +620,9 @@ const installLabel = computed(() => {
       <div v-else class="card p-5">
         <h2 class="font-semibold">{{ t('listing.noPermissionsDeclared') }}</h2>
         <p class="mt-2 text-sm leading-6 text-muted dark:text-slate-400">
-          {{ isLiveUpstream ? t('listing.noPermissionsDeclaredUpstream') : t('listing.noPermissionsDeclaredLocal') }}
+          {{ isUpstreamAggregated ? t('listing.noPermissionsDeclaredUpstream') : t('listing.noPermissionsDeclaredLocal') }}
         </p>
-        <p v-if="isLiveUpstream" class="mt-3 rounded-xl bg-surface-muted p-3 text-sm dark:bg-slate-800/60">
+        <p v-if="isUpstreamAggregated" class="mt-3 rounded-xl bg-surface-muted p-3 text-sm dark:bg-slate-800/60">
           {{ t('listing.permissionDownloadScan') }}
         </p>
       </div>
@@ -641,18 +643,18 @@ const installLabel = computed(() => {
       <div v-else class="card p-5">
         <h2 class="font-semibold">{{ t('listing.noDependenciesDeclared') }}</h2>
         <p class="mt-2 text-sm leading-6 text-muted dark:text-slate-400">
-          {{ isLiveUpstream ? t('listing.noDependenciesDeclaredUpstream') : t('listing.noDependenciesDeclaredLocal') }}
+          {{ isUpstreamAggregated ? t('listing.noDependenciesDeclaredUpstream') : t('listing.noDependenciesDeclaredLocal') }}
         </p>
       </div>
     </section>
 
     <section v-if="tab === 'compatibility'" class="space-y-3">
       <p class="text-sm text-muted dark:text-slate-400">{{ t('listing.compatHint') }}</p>
-      <div v-if="isLiveUpstream" class="grid gap-3 sm:grid-cols-2">
+      <div v-if="isUpstreamAggregated" class="grid gap-3 sm:grid-cols-2">
         <div class="card p-4">
           <p class="text-xs text-muted dark:text-slate-400">{{ t('listing.deliveryMode') }}</p>
-          <p class="mt-1 font-semibold">{{ t('listing.liveDelivery') }}</p>
-          <p class="mt-1 text-sm text-muted dark:text-slate-400">{{ t('listing.noRetention') }}</p>
+          <p class="mt-1 font-semibold">{{ t('listing.aggregatedUpstream') }}</p>
+          <p class="mt-1 text-sm text-muted dark:text-slate-400">{{ t('listing.storedDelivery') }}</p>
         </div>
         <div class="card p-4">
           <p class="text-xs text-muted dark:text-slate-400">{{ t('listing.targetPlatform') }}</p>
@@ -685,14 +687,14 @@ const installLabel = computed(() => {
     </section>
 
     <section v-if="tab === 'security'" class="space-y-4 text-sm">
-      <div v-if="isLiveUpstream" class="rounded-lg border border-accent/30 bg-accent/5 p-5">
-        <h2 class="font-semibold">{{ t('listing.liveSecurityTitle') }}</h2>
+      <div v-if="isUpstreamAggregated" class="rounded-lg border border-accent/30 bg-accent/5 p-5">
+        <h2 class="font-semibold">{{ t('listing.upstreamSecurityTitle') }}</h2>
         <ol class="mt-3 grid gap-3 sm:grid-cols-2">
           <li v-for="(item, index) in [
-            t('listing.securityMetadataOnly'),
-            t('listing.securityOnDemand'),
+            t('listing.securitySyncFetch'),
+            t('listing.securityPackaging'),
             t('listing.securityScan'),
-            t('listing.securityNoRetention'),
+            t('listing.securityStoredSigned'),
           ]" :key="item" class="flex gap-3 rounded-xl bg-surface/70 p-3 dark:bg-slate-900/70">
             <span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-white">{{ index + 1 }}</span>
             <span class="leading-6">{{ item }}</span>
@@ -725,7 +727,7 @@ const installLabel = computed(() => {
             </Badge>
             <span class="font-mono text-xs">{{ artifact.filename }}</span>
             <span class="text-muted dark:text-slate-400">
-              {{ artifact.platform }}/{{ artifact.arch }} · {{ isLiveUpstream && !artifact.size ? t('listing.generatedOnDemand') : formatSize(artifact.size) }}
+              {{ artifact.platform }}/{{ artifact.arch }} · {{ isUpstreamAggregated && !artifact.size ? t('listing.generatedOnDemand') : formatSize(artifact.size) }}
             </span>
             <button
               v-if="artifact.artifactId"
@@ -742,17 +744,17 @@ const installLabel = computed(() => {
           </p>
           <p class="break-all">
             <span class="text-muted dark:text-slate-400">{{ t('listing.sha256') }}:</span>
-            <code>{{ artifact.sha256 || (isLiveUpstream ? t('listing.checksumAtDownload') : '—') }}</code>
+            <code>{{ artifact.sha256 || (isUpstreamAggregated ? t('listing.checksumAtDownload') : '—') }}</code>
           </p>
           <p v-if="artifact.keyId" class="break-all">
             <span class="text-muted dark:text-slate-400">{{ t('listing.signature') }}:</span>
             <code>{{ artifact.keyId }}</code>
           </p>
         </div>
-        <p v-if="!isLiveUpstream" class="text-muted dark:text-slate-400">
+        <p v-if="!isUpstreamAggregated" class="text-muted dark:text-slate-400">
           {{ t('listing.signatureNote') }}
         </p>
-        <p v-else class="text-muted dark:text-slate-400">{{ t('listing.liveChecksumNote') }}</p>
+        <p v-else class="text-muted dark:text-slate-400">{{ t('listing.storedChecksumNote') }}</p>
       </template>
     </section>
 
@@ -808,7 +810,12 @@ const installLabel = computed(() => {
           <span v-if="ratingSaved" class="text-sm text-success dark:text-emerald-400">{{ t('listing.reviewSaved') }}</span>
         </div>
       </form>
-      <p v-else class="text-sm text-muted">{{ t('listing.signInToReview') }}</p>
+      <p v-else class="text-sm text-muted">
+        <RouterLink
+          class="text-accent hover:underline"
+          :to="{ name: 'signin', query: { redirect: route.fullPath } }"
+        >{{ t('listing.signInToReview') }}</RouterLink>
+      </p>
     </section>
   </div>
 

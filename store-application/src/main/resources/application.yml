@@ -39,7 +39,6 @@ management:
 
 store:
   app-coordinate: ${STORE_APP_COORDINATE:infinia://app/official/fengyu-host}
-  app-minimum-supported-version: ${STORE_APP_MINIMUM_SUPPORTED_VERSION:4.0.0}
   base-url: http://localhost:8080
   # Absolute by default: a relative path silently splits blob storage across
   # working directories, and LocalFsBlobStorage refuses it at boot anyway.

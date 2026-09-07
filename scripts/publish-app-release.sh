@@ -59,21 +59,6 @@ TOKEN=$(curl -sS -X POST "$STORE_BASE/oauth2/token" \
 [ -n "$TOKEN" ] || die "client_credentials grant failed"
 log "token acquired"
 
-# ---- draft release -----------------------------------------------------------
-DRAFT=$(api POST "/api/v1/publisher/listings/$LISTING_ID/releases" "$(jq -n \
-  --arg v "$VERSION" --arg ch "$CHANNEL" --arg cl "Infinia host release $VERSION" \
-  '{version:$v, channel:$ch, license:"GPL-3.0", changelogMarkdown:$cl}')")
-RELEASE_ID=$(echo "$DRAFT" | jq -r '.releaseId // empty')
-[ -n "$RELEASE_ID" ] || die "draft creation failed: $DRAFT"
-# A failure past this point leaves the draft (and any uploaded assets) behind —
-# tell the operator instead of letting a half-published release rot invisibly.
-# EXIT + flag (not ERR): `cmd || die` chains never fire ERR traps.
-FINISHED=0
-trap 'if [ "$FINISHED" != 1 ] && [ -n "${RELEASE_ID:-}" ]; then
-  printf "\033[1;33mwarn:\033[0m draft release %s (%s) left in DRAFT — resume or delete it in the publisher console\n" "$RELEASE_ID" "$VERSION" >&2
-fi' EXIT
-log "draft release $VERSION created ($RELEASE_ID)"
-
 # ---- find or create the APP listing -----------------------------------------
 LISTING_ID=$(curl -sS -o /dev/null -w '%{http_code}' \
   "$STORE_BASE/api/v1/listings/$NAMESPACE/$SLUG")
@@ -93,6 +78,21 @@ else
   [ -n "$LISTING_ID" ] || die "listing creation failed: $CREATED"
   log "listing created ($LISTING_ID)"
 fi
+
+# ---- draft release -----------------------------------------------------------
+DRAFT=$(api POST "/api/v1/publisher/listings/$LISTING_ID/releases" "$(jq -n \
+  --arg v "$VERSION" --arg ch "$CHANNEL" --arg cl "Infinia host release $VERSION" \
+  '{version:$v, channel:$ch, license:"GPL-3.0", changelogMarkdown:$cl}')")
+RELEASE_ID=$(echo "$DRAFT" | jq -r '.releaseId // empty')
+[ -n "$RELEASE_ID" ] || die "draft creation failed: $DRAFT"
+# A failure past this point leaves the draft (and any uploaded assets) behind —
+# tell the operator instead of letting a half-published release rot invisibly.
+# EXIT + flag (not ERR): `cmd || die` chains never fire ERR traps.
+FINISHED=0
+trap 'if [ "$FINISHED" != 1 ] && [ -n "${RELEASE_ID:-}" ]; then
+  printf "\033[1;33mwarn:\033[0m draft release %s (%s) left in DRAFT — resume or delete it in the publisher console\n" "$RELEASE_ID" "$VERSION" >&2
+fi' EXIT
+log "draft release $VERSION created ($RELEASE_ID)"
 
 # ---- upload every release asset ----------------------------------------------
 shopt -s nullglob
@@ -138,4 +138,4 @@ else
   FINISHED=1
   log "STORE_SUBMIT=0 — release $VERSION left in DRAFT"
 fi
-log "update feed (after approval): $STORE_BASE/api/v1/updates/app?current=<old>&channel=$CHANNEL&os=<os>&arch=<arch>&installId=<id>"
+log "release processing complete at $STORE_BASE — updates require approval and a supported channel"

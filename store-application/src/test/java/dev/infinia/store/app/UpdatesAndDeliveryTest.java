@@ -13,7 +13,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Update feed rollout bucketing and delivery tickets (design §8.4, §10.2).
+ * Update-feed surfaces and delivery tickets (design §8.4, §10.2).
+ *
+ * <p>The JSON feed {@code GET /api/v1/updates/app} is deliberately RESERVED
+ * (audit 3.5) — the desktop client consumes the electron-updater deb feed at
+ * {@code /fengyu-updates/deb} instead, which FengYuUpdateFeedTest covers.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -28,61 +32,26 @@ class UpdatesAndDeliveryTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void feedReturnsSignedStableUpdate() {
+    void reservedAppFeedAnswers501WithHonestProblemDetail() {
         ResponseEntity<Map> feed = http().getJson(
-                "/api/v1/updates/app?current=4.0.0&channel=stable&os=macos&arch=arm64"
+                "/api/v1/updates/app?current=4.0.0&channel=stable&os=linux&arch=x64"
                         + "&installId=fixed-install-id", Map.class, null);
-        assertEquals(200, feed.getStatusCode().value());
+        assertEquals(501, feed.getStatusCode().value());
         Map<String, Object> body = feed.getBody();
-        assertEquals("4.1.0", body.get("latestVersion"));
-        assertEquals(false, body.get("mandatory"), "forced updates must stay non-mandatory");
-        List<Map<String, Object>> artifacts = (List<Map<String, Object>>) body.get("artifacts");
-        assertTrue(artifacts.stream()
-                .anyMatch(a -> "macos".equals(a.get("platform")) && "arm64".equals(a.get("arch"))));
-        assertNotNull(body.get("keyId"), "feed must carry the platform signing key id");
-        assertNotNull(body.get("sha256"));
-    }
-
-    @Test
-    void feedReturnsNullWhenUpToDate() {
-        ResponseEntity<Map> feed = http().getJson(
-                "/api/v1/updates/app?current=4.1.0&channel=stable&os=macos&arch=arm64"
-                        + "&installId=whatever", Map.class, null);
-        assertEquals(200, feed.getStatusCode().value());
-        assertNull(feed.getBody().get("latestVersion"));
-    }
-
-    @Test
-    void betaRolloutPartitionsInstallIdsStably() {
-        boolean sawUpdate = false;
-        boolean sawHold = false;
-        for (int i = 0; i < 200 && !(sawUpdate && sawHold); i++) {
-            String installId = "bucket-probe-" + i;
-            ResponseEntity<Map> feed = http().getJson(
-                    "/api/v1/updates/app?current=4.1.0&channel=beta&os=macos&arch=arm64"
-                            + "&installId=" + installId, Map.class, null);
-            if ("4.2.0-beta.1".equals(feed.getBody().get("latestVersion"))) {
-                sawUpdate = true;
-            } else {
-                sawHold = true;
-            }
-            ResponseEntity<Map> again = http().getJson(
-                    "/api/v1/updates/app?current=4.1.0&channel=beta&os=macos&arch=arm64"
-                            + "&installId=" + installId, Map.class, null);
-            assertEquals(feed.getBody().get("latestVersion"),
-                    again.getBody().get("latestVersion"), "cohort must be stable per installId");
-        }
-        assertTrue(sawUpdate, "some install ids must be inside the 25% beta rollout");
-        assertTrue(sawHold, "some install ids must be outside the 25% beta rollout");
+        assertEquals("reserved", body.get("code"), "body: " + body);
+        String detail = String.valueOf(body.get("detail"));
+        assertTrue(detail.contains("/fengyu-updates/deb"),
+                "the problem must point at the live feed: " + detail);
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void downloadTicketServesBlobBytes() {
+    void downloadTicketServesBlobBytes() throws Exception {
         ResponseEntity<Map> detail = http().getJson("/api/v1/listings/official/markdown",
                 Map.class, null);
         Map<String, Object> release = ((List<Map<String, Object>>) detail.getBody()
                 .get("releases")).get(0);
+        long downloadsBefore = ((Number) detail.getBody().get("downloads")).longValue();
         ResponseEntity<Map> ticket = http().exchangeJson(HttpMethod.POST,
                 "/api/v1/releases/" + release.get("releaseId")
                         + "/download-ticket?os=universal&arch=universal",
@@ -96,12 +65,32 @@ class UpdatesAndDeliveryTest {
                 byte[].class); // url is server-relative; Http.url() absolutizes
         assertEquals(200, blob.getStatusCode().value());
         assertTrue(blob.getBody().length > 0, "blob bytes must be served");
+        assertEquals(blob.getBody().length, Integer.parseInt(
+                        blob.getHeaders().getFirst("Content-Length")),
+                "blob downloads must carry Content-Length (Files.size / S3 HEAD)");
+
+        // A completed artifact download increments the listing counter (the
+        // increment runs on the streaming thread; give it a brief grace period).
+        assertTrue(awaitDownloads(downloadsBefore + 1),
+                "successful downloads must be counted");
 
         // Tampering with the signature must fail closed.
         String tampered = url.substring(0, url.length() - 4) + "beef";
         ResponseEntity<byte[]> rejected = http().exchangeJson(HttpMethod.GET, tampered, null,
                 null, byte[].class);
         assertEquals(403, rejected.getStatusCode().value());
+    }
+
+    private boolean awaitDownloads(long expected) throws InterruptedException {
+        for (int i = 0; i < 50; i++) {
+            ResponseEntity<Map> detail = http().getJson("/api/v1/listings/official/markdown",
+                    Map.class, null);
+            if (((Number) detail.getBody().get("downloads")).longValue() >= expected) {
+                return true;
+            }
+            Thread.sleep(100);
+        }
+        return false;
     }
 
     @Test

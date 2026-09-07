@@ -1,10 +1,15 @@
 package dev.infinia.store.app.upstream;
 
+import dev.infinia.store.app.config.StoreProperties;
+import dev.infinia.store.app.service.PlatformSigningService;
 import dev.infinia.store.app.upstream.UpstreamAdapter.NormalizedItem;
+import dev.infinia.store.domain.model.Release;
 import dev.infinia.store.domain.model.UpstreamItem;
 import dev.infinia.store.domain.model.UpstreamRelease;
 import dev.infinia.store.domain.model.UpstreamSource;
+import dev.infinia.store.domain.port.BlobStorage;
 import dev.infinia.store.domain.port.PublishingRepositories;
+import dev.infinia.store.domain.port.ReleaseRepository;
 import dev.infinia.store.domain.port.UpstreamRepositories;
 import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
@@ -17,16 +22,20 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Request-scoped upstream delivery: catalog metadata is replayed, the selected
- * payload alone is fetched, scanned and compatibility-packed through a bounded
- * request workspace. The workspace is deleted after streaming; nothing enters
- * durable blob storage.
+ * Upstream payload delivery. Sync materializes every imported item into the
+ * durable content-addressed blob store (audit 3.1: download tickets must carry
+ * a real, verifiable digest), so the normal ticketed blob path serves upstream
+ * artifacts like any publisher upload. Two legacy paths remain: pass-through
+ * downloads for {@code upstream/<uuid>} URLs minted before materialization, and
+ * an on-demand upgrade that converts such a row into a stored, platform-signed
+ * artifact when a download ticket is requested for it.
  */
 @Service
 public class UpstreamArtifactService {
@@ -41,19 +50,32 @@ public class UpstreamArtifactService {
     private final RepoFetcher fetcher;
     private final List<UpstreamAdapter> adapters;
     private final UpstreamPackageBuilder builder;
+    private final BlobStorage blobs;
+    private final ReleaseRepository releaseRows;
+    private final PlatformSigningService signing;
+    private final StoreProperties properties;
 
     public UpstreamArtifactService(UpstreamRepositories.UpstreamItemRepository items,
             UpstreamRepositories.UpstreamReleaseRepository releases,
             PublishingRepositories.UpstreamSourceRepository sources,
             RepoFetcher fetcher, List<UpstreamAdapter> adapters,
-            UpstreamPackageBuilder builder) {
+            UpstreamPackageBuilder builder, BlobStorage blobs,
+            ReleaseRepository releaseRows, PlatformSigningService signing,
+            StoreProperties properties) {
         this.items = items;
         this.releases = releases;
         this.sources = sources;
         this.fetcher = fetcher;
         this.adapters = adapters;
         this.builder = builder;
+        this.blobs = blobs;
+        this.releaseRows = releaseRows;
+        this.signing = signing;
+        this.properties = properties;
     }
+
+    /** A payload persisted as a durable, content-addressed store blob. */
+    public record StoredPayload(String blobKey, long size, String sha256) {}
 
     /** A request-owned file that is deleted together with its workspace on close. */
     public record PreparedArtifact(Path file, Path workspace, long size, String sha256)
@@ -67,32 +89,115 @@ public class UpstreamArtifactService {
     /** itemId is the UUID encoded in the virtual blobKey (upstream/<uuid>). */
     public PreparedArtifact prepare(UUID itemId, String releaseVersion) throws IOException,
             InterruptedException {
+        UpstreamItem item = items.findById(itemId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown upstream artifact: " + itemId));
+        UpstreamSource source = sources.findById(item.sourceId())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Upstream source missing: " + item.sourceId()));
+
+        UpstreamAdapter adapter = resolve(source, item);
+        NormalizedItem discovered = discoverCached(source, adapter).stream()
+                .filter(n -> item.externalId().equals(n.externalId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Upstream no longer exposes " + item.externalId()));
+
+        String metadataDigest = builder.metadataDigest(discovered);
+        if (!metadataDigest.equalsIgnoreCase(item.contentSha256())) {
+            throw new UpstreamDriftedException(item.externalId(), metadataDigest,
+                    item.contentSha256());
+        }
+        String effectiveVersion = releaseVersion == null
+                ? baseVersion(discovered) : releaseVersion;
+        return buildArtifact(source, discovered, adapter, effectiveVersion);
+    }
+
+    /**
+     * Discovery with a short-lived per-source cache (audit 3.6): every download
+     * of a legacy pass-through artifact re-fetched the whole upstream catalog —
+     * one discovery round is shared for a brief window, so bursts of download
+     * tickets collapse into one upstream request. The TTL bounds how long a
+     * drifted upstream can go unnoticed by re-verification.
+     */
+    private List<NormalizedItem> discoverCached(UpstreamSource source, UpstreamAdapter adapter)
+            throws IOException, InterruptedException {
+        CachedDiscovery cached = discoveryCache.get(source.id());
+        if (cached != null
+                && System.currentTimeMillis() - cached.fetchedAt() < DISCOVERY_CACHE_TTL_MILLIS) {
+            return cached.items();
+        }
+        List<NormalizedItem> discovered = List.copyOf(adapter.discover(source, fetcher));
+        discoveryCache.put(source.id(),
+                new CachedDiscovery(discovered, System.currentTimeMillis()));
+        return discovered;
+    }
+
+    private static final long DISCOVERY_CACHE_TTL_MILLIS = 30_000;
+
+    private record CachedDiscovery(List<NormalizedItem> items, long fetchedAt) {}
+
+    private final java.util.Map<UUID, CachedDiscovery> discoveryCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Sync-time materialization (audit 3.1): fetch, scan and compatibility-pack
+     * the just-discovered item, then persist it as a content-addressed store
+     * blob. Returns unsigned metadata — the regular review approval signs the
+     * stored bytes, exactly like a publisher upload.
+     */
+    public StoredPayload storePayload(UpstreamSource source, NormalizedItem discovered,
+            UpstreamAdapter adapter, String releaseVersion) throws IOException,
+            InterruptedException {
+        try (PreparedArtifact prepared = buildArtifact(source, discovered, adapter,
+                releaseVersion == null ? baseVersion(discovered) : releaseVersion)) {
+            String blobKey = blobs.put(Files.newInputStream(prepared.file()),
+                    properties.maxUploadBytes(), prepared.sha256());
+            return new StoredPayload(blobKey, prepared.size(), prepared.sha256());
+        }
+    }
+
+    /**
+     * On-demand upgrade for rows persisted by the pre-materialization sync
+     * (virtual {@code upstream/<uuid>} blob keys): fetches, scans, stores and
+     * platform-signs the artifact, rewrites the release row to the stored blob
+     * and returns the upgraded artifact info. Drift/scan failures surface as
+     * {@link UpstreamDriftedException} / {@link UpstreamPayloadRejectedException}
+     * so callers can fail closed instead of serving unverifiable bytes.
+     */
+    public Release.ArtifactInfo materializeVirtualArtifact(Release release,
+            Release.ArtifactInfo virtual) throws IOException, InterruptedException {
+        UUID itemId;
+        try {
+            itemId = UUID.fromString(virtual.blobKey().substring("upstream/".length()));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Malformed upstream artifact key");
+        }
+        try (PreparedArtifact prepared = prepare(itemId, release.version.toString())) {
+            String blobKey = blobs.put(Files.newInputStream(prepared.file()),
+                    properties.maxUploadBytes(), prepared.sha256());
+            Release.ArtifactInfo stored = new Release.ArtifactInfo(virtual.id(),
+                    virtual.kind(), virtual.platform(), virtual.arch(), virtual.variant(),
+                    virtual.filename(), prepared.size(), prepared.sha256(),
+                    signing.sign(blobs.open(blobKey)), signing.currentKeyId(), blobKey,
+                    virtual.mimeType());
+            release.artifacts = new ArrayList<>(release.artifacts.stream()
+                    .map(a -> a.id() != null && a.id().equals(stored.id()) ? stored : a)
+                    .toList());
+            releaseRows.save(release);
+            return stored;
+        }
+    }
+
+    /** Workspace-scoped fetch → scan → compatibility-pack of one payload. */
+    private PreparedArtifact buildArtifact(UpstreamSource source, NormalizedItem discovered,
+            UpstreamAdapter adapter, String effectiveVersion) throws IOException,
+            InterruptedException {
         Path workspace = Files.createTempDirectory(TEMP_PREFIX + PROCESS_ID + "-");
         try {
-            UpstreamItem item = items.findById(itemId)
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            "Unknown upstream artifact: " + itemId));
-            UpstreamSource source = sources.findById(item.sourceId())
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            "Upstream source missing: " + item.sourceId()));
-
-            UpstreamAdapter adapter = resolve(source, item);
-            NormalizedItem discovered = adapter.discover(source, fetcher).stream()
-                    .filter(n -> item.externalId().equals(n.externalId()))
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException(
-                            "Upstream no longer exposes " + item.externalId()));
-
-            String metadataDigest = builder.metadataDigest(discovered);
-            if (!metadataDigest.equalsIgnoreCase(item.contentSha256())) {
-                throw new UpstreamDriftedException(item.externalId(), metadataDigest,
-                        item.contentSha256());
-            }
             UpstreamAdapter.MaterializedPayload payload = adapter.materializeToDirectory(
                     source, discovered, fetcher, workspace);
             NormalizedItem materialized = payload.metadata();
-            String effectiveVersion = releaseVersion == null
-                    ? baseVersion(materialized) : releaseVersion;
             Path artifact;
             if ("MCP".equals(materialized.kind())) {
                 artifact = payload.mcpTemplate();
@@ -111,7 +216,7 @@ public class UpstreamArtifactService {
             var scan = new dev.infinia.store.scanner.PackageScanner()
                     .scan(materialized.kind(), effectiveVersion, artifact);
             if (scan.hasBlockingFindings()) {
-                throw new UpstreamPayloadRejectedException(item.externalId(),
+                throw new UpstreamPayloadRejectedException(discovered.externalId(),
                         scan.findings.stream()
                                 .map(dev.infinia.store.scanner.ScanResult.Finding::rule)
                                 .distinct().toList());

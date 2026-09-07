@@ -379,9 +379,16 @@ public class SeedData {
                 new Listing.Localization("en", name, summary, "# " + name + "\n\n" + summary
                         + "\n\nSeeded demo listing for the Infinia Store.", null),
                 new Listing.Localization("zh-CN", name, summary + "（中文摘要）",
-                        "# " + name + "\n\n" + summary + "。这是 Infinia 商店的演示商品。", null)));
+                        "# " + name + "\n\n" + stripTrailingSentenceEnd(summary)
+                                + "。这是 Infinia 商店的演示商品。", null)));
         listings.save(listing);
         return listing;
+    }
+
+    /** English demo summaries usually end with a period; drop it so the joined
+     *  Chinese sentence never renders a doubled “。。”. */
+    private static String stripTrailingSentenceEnd(String text) {
+        return text.replaceAll("[.。\\s]+$", "");
     }
 
     private Release publish(Listing listing, String version, Channel channel, String requiresHost,

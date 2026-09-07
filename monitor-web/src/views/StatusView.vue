@@ -6,7 +6,7 @@ import { formatDate, formatDateTime } from '../utils/format';
 import ErrorState from '../components/ErrorState.vue';
 import PageHeader from '../components/PageHeader.vue';
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const status = ref<ServiceStatus | null>(null);
 const incidents = ref<ServiceIncident[]>([]);
 const loading = ref(true);
@@ -116,6 +116,22 @@ const averageUptime = computed(() => {
 
 function componentText(key: string): string {
   return t(`status.component.${key}`, key);
+}
+
+/**
+ * Backend incident titles are persisted in English ("<Component> is
+ * unavailable"); rebuild them from the component key + impact so the timeline
+ * follows the page language, falling back to the stored title for unknown
+ * components or hand-written titles.
+ */
+function incidentTitle(incident: ServiceIncident): string {
+  const componentKey = `status.component.${incident.component}`;
+  if (!te(componentKey)) return incident.title;
+  const suffix
+    = incident.impact === 'outage'
+      ? t('status.incidentUnavailable')
+      : t('status.incidentDegraded');
+  return t(componentKey) + suffix;
 }
 
 const updatedAgo = computed(() => {
@@ -525,7 +541,7 @@ function incidentDuration(incident: ServiceIncident): string | null {
                   >
                     {{ incident.status === 'resolved' ? t('status.incidentResolved') : t('status.incidentInvestigating') }}
                   </span>
-                  <span class="font-semibold">{{ incident.title }}</span>
+                  <span class="font-semibold">{{ incidentTitle(incident) }}</span>
                   <span class="text-xs text-muted dark:text-slate-400">
                     · {{ componentText(incident.component) }}
                   </span>

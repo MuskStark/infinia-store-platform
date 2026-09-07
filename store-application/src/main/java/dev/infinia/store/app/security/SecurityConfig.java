@@ -128,15 +128,29 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health/**", "/login", "/error", "/web/**", "/",
                                 "/oauth2/session-login", "/oauth2/session-login/csrf")
                         .permitAll()
-                        // Read-only git smart-HTTP endpoints (planned): anonymous clone/
-                        // fetch of the exported ecosystem repos. The servlet itself is
-                        // served by a later change; the rule is in place so it ships
-                        // anonymous-read by design, and writes stay unauthenticated-free.
+                        // Read-only git smart-HTTP endpoints (GitHttpConfig): anonymous
+                        // clone/fetch of the exported ecosystem repos. The smart
+                        // protocol POSTs git-upload-pack per fetch — that stays
+                        // anonymous; git-receive-pack (push) is denied here and, in
+                        // depth, refused by the servlet's receive-pack factory.
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/git/**")
+                        .permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST,
+                                "/git/*/git-upload-pack")
+                        .permitAll()
+                        .requestMatchers("/git/*/git-receive-pack").denyAll()
+                        // The desktop deb update feed (electron-updater generic
+                        // provider) is anonymous by design — same as GitHub
+                        // release assets (FengYuUpdateFeedController).
+                        .requestMatchers(org.springframework.http.HttpMethod.GET,
+                                "/fengyu-updates/**")
                         .permitAll()
                         // Non-health actuator endpoints stay behind a session (unchanged).
                         .requestMatchers("/actuator/**").authenticated()
                         .anyRequest().permitAll())
+                // Git smart-HTTP POSTs are git-client traffic, never browser
+                // forms; CSRF tokens cannot apply to them.
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/git/**"))
                 // Store Web renders the credential UI. This internal POST endpoint only
                 // establishes the browser session needed to resume a saved OAuth request.
                 .formLogin(form -> form

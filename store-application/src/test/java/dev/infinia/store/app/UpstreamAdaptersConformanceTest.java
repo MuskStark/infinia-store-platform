@@ -16,6 +16,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -82,14 +84,18 @@ class UpstreamAdaptersConformanceTest {
         String upstreamId = (String) created.get("upstreamId");
         assertEquals(Boolean.TRUE, created.get("lastSyncOk"), "body: " + created);
 
-        // The MCP entry is live with a direct template download + provenance recorded.
+        // The MCP entry is materialized into a stored, digest-carrying template.
         List<Map<String, Object>> mcp = (List<Map<String, Object>>) http()
                 .getJson("/api/v1/compat/fengyu/mcp-catalog", List.class, null).getBody();
         Map<String, Object> entry = mcp.stream()
                 .filter(e -> String.valueOf(e.get("id")).startsWith(ns + ".")).findFirst()
                 .orElseThrow(() -> new AssertionError("mcp missing: " + mcp));
         assertEquals("1.4.0", entry.get("version"));
-        assertTrue(String.valueOf(entry.get("downloadUrl")).contains("/api/v1/blobs/"));
+        String downloadUrl = String.valueOf(entry.get("downloadUrl"));
+        assertTrue(downloadUrl.contains("/api/v1/blobs/"));
+        assertTrue(downloadUrl.contains("/sha256/"), "stored blob key: " + downloadUrl);
+        assertEquals(64, String.valueOf(entry.get("sha256")).length(),
+                "the catalog must expose the materialized digest: " + entry);
         assertFalse((Boolean) entry.get("official"));
         assertEquals(1, upstreamItems.findBySource(java.util.UUID.fromString(upstreamId)).size(),
                 "provenance row recorded");
@@ -101,18 +107,14 @@ class UpstreamAdaptersConformanceTest {
         assertEquals(0, ((Number) second.get("imported")).intValue());
         assertEquals(1, ((Number) second.get("skipped")).intValue(), "body: " + second);
 
-        // Pass-through: the artifact is virtual — no blob is persisted locally.
-        String dl = String.valueOf(entry.get("downloadUrl"));
-        assertTrue(dl.contains("/api/v1/blobs/upstream/"),
-                "virtual key in URL: " + dl);
-        var dlResp = http().get(dl.replaceFirst("^http://[^/]+", ""), null);
+        // Downloads serve the immutable stored blob; the bytes carry the template.
+        var dlResp = http().get(downloadUrl.replaceFirst("^http://[^/]+", ""), null);
         assertEquals(200, dlResp.getStatusCode().value());
         assertTrue(dlResp.getBody() != null && dlResp.getBody().contains("STREAMABLE_HTTP"),
-                "template streamed from rebuild: " + dlResp.getBody());
+                "template served from the stored blob: " + dlResp.getBody());
 
-        // Upstream drift: change the served server.json, download must fail 409
-        // instead of serving bytes that no longer match the recorded digest.
-        // Same port, changed content — a real drift, not a dead endpoint.
+        // Upstream drift: the stored release stays valid (immutable bytes), and
+        // the next sync detects the changed metadata and publishes a new version.
         int registryPort = registry.getAddress().getPort();
         registry.stop(0);
         registry = startRegistry(registryPort, """
@@ -120,12 +122,26 @@ class UpstreamAdaptersConformanceTest {
                  "version":"1.4.0",
                  "remotes":[{"transport_type":"streamable-http",
                              "url":"https://mcp.example.com/mcp",
-                             "headers":{"authorization":""}}]}
+                             "headers":{"authorization":""}}],
+                 "packages":[{"registry_type":"npm","identifier":"@example/mcp-everything",
+                              "version":"1.4.0",
+                              "checksum":"sha256-a1b2c3d4e5f60718293a4b5c6d7e8f90"}]}
                 """);
-        var drifted = http().get(dl.replaceFirst("^http://[^/]+", ""), null);
-        assertEquals(409, drifted.getStatusCode().value(), "body: " + drifted.getBody());
-        assertTrue(String.valueOf(drifted.getBody()).contains("upstream_drifted"),
-                drifted.getBody());
+        var stillServed = http().get(downloadUrl.replaceFirst("^http://[^/]+", ""), null);
+        assertEquals(200, stillServed.getStatusCode().value(),
+                "published bytes are immutable — drift must not break existing downloads");
+        Map resync = (Map) http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/upstreams/" + upstreamId + "/sync", jsonAuth(admin), null,
+                Map.class).getBody();
+        assertEquals(1, ((Number) resync.get("imported")).intValue(),
+                "drifted metadata must publish a new release: " + resync);
+        List<Map<String, Object>> refreshed = (List<Map<String, Object>>) http()
+                .getJson("/api/v1/compat/fengyu/mcp-catalog", List.class, null).getBody();
+        Map<String, Object> updated = refreshed.stream()
+                .filter(e -> String.valueOf(e.get("id")).startsWith(ns + ".")).findFirst()
+                .orElseThrow();
+        assertNotEquals((String) entry.get("sha256"), updated.get("sha256"),
+                "the drifted content ships under a new digest");
     }
 
     @Test
@@ -221,11 +237,12 @@ class UpstreamAdaptersConformanceTest {
                         "adapterType", "SKILLHUB_REGISTRY"),
                 Map.class).getBody();
         assertEquals(Boolean.TRUE, created.get("lastSyncOk"), "body: " + created);
-        assertEquals(0, skillhubPayloadRequests.get(),
-                "catalog indexing must not download any skill zip");
+        assertEquals(2, skillhubPayloadRequests.get(),
+                "the sync materializes each referenced skill zip exactly once");
 
         // Both WorkBuddy skills surface on the host catalog with upstream versions;
-        // the Chinese description wins per the adapter's locale preference.
+        // the Chinese description wins per the adapter's locale preference, and
+        // each entry carries the digest of its stored, platform-signed package.
         List<Map<String, Object>> skills = (List<Map<String, Object>>) http()
                 .getJson("/api/v1/compat/fengyu/skills-catalog", List.class, null).getBody();
         Map<String, Object> docWriter = skills.stream()
@@ -233,8 +250,12 @@ class UpstreamAdaptersConformanceTest {
                 .orElseThrow(() -> new AssertionError("skill missing: " + skills));
         assertEquals("1.2.0", docWriter.get("version"));
         assertEquals("写出精致文档", docWriter.get("description"));
-        assertTrue(String.valueOf(docWriter.get("downloadUrl")).contains(
-                "/api/v1/blobs/upstream/"), "virtual pass-through key in URL");
+        assertEquals(64, String.valueOf(docWriter.get("sha256")).length(),
+                "materialized digest on the entry: " + docWriter);
+        assertNotNull(docWriter.get("signature"));
+        String dl = String.valueOf(docWriter.get("downloadUrl"));
+        assertTrue(dl.contains("/api/v1/blobs/") && dl.contains("/sha256/"),
+                "stored blob key in URL: " + dl);
         assertEquals(2, upstreamItems.findBySource(java.util.UUID.fromString(
                         (String) created.get("upstreamId"))).size(),
                 "provenance rows recorded for both skills");
@@ -246,14 +267,16 @@ class UpstreamAdaptersConformanceTest {
         assertEquals(0, ((Number) second.get("imported")).intValue(), "body: " + second);
         assertEquals(2, ((Number) second.get("skipped")).intValue());
 
-        // The payload download follows the 302 to object storage, scans, and
-        // compatibility-packs on demand without persisting anything.
-        String dl = String.valueOf(docWriter.get("downloadUrl"));
+        // The payload download serves the stored, scanned, compatibility-packed
+        // blob — verified against the advertised digest, without refetching.
         var dlResp = http().getBytes(dl.replaceFirst("^http://[^/]+", ""));
         assertEquals(200, dlResp.getStatusCode().value(),
                 "body: " + new String(dlResp.getBody(), StandardCharsets.UTF_8));
-        assertEquals(1, skillhubPayloadRequests.get(),
-                "download hits the redirecting endpoint exactly once");
+        assertEquals(2, skillhubPayloadRequests.get(),
+                "downloads serve the stored blob — the redirecting endpoint is not hit");
+        assertEquals(docWriter.get("sha256"), HexFormat.of().formatHex(
+                        MessageDigest.getInstance("SHA-256").digest(dlResp.getBody())),
+                "downloaded bytes match the catalog digest");
         Map<String, dev.infinia.store.scanner.SafeZip.ExtractedFile> packed =
                 dev.infinia.store.scanner.SafeZip.extract(
                         new java.io.ByteArrayInputStream(dlResp.getBody()),
@@ -262,8 +285,8 @@ class UpstreamAdaptersConformanceTest {
         assertTrue(packed.containsKey("SKILL.md"), "SKILL.md retained");
         assertTrue(packed.containsKey("scripts/helper.py"), "skill resources retained");
 
-        // Upstream drift (version bump in the catalog): download must fail 409
-        // instead of serving a payload that no longer matches the synced digest.
+        // Upstream drift (version bump in the catalog): stored bytes stay valid,
+        // and the next sync publishes the changed content as a new release.
         registry.stop(0);
         registry = startSkillHub(skillhubPort, """
                 {"code":0,"message":"success","data":{"total":1,"skills":[
@@ -272,10 +295,16 @@ class UpstreamAdaptersConformanceTest {
                    "version":"1.3.0","homepage":"http://127.0.0.1:0/wb-doc-writer",
                    "tags":["latest"],"downloads":9001}]}}
                 """);
-        var drifted = http().get(dl.replaceFirst("^http://[^/]+", ""), null);
-        assertEquals(409, drifted.getStatusCode().value(), "body: " + drifted.getBody());
-        assertTrue(String.valueOf(drifted.getBody()).contains("upstream_drifted"),
-                drifted.getBody());
+        var stillServed = http().get(dl.replaceFirst("^http://[^/]+", ""), null);
+        assertEquals(200, stillServed.getStatusCode().value(),
+                "published bytes are immutable — drift must not break existing downloads");
+        Map resync = (Map) http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/upstreams/" + created.get("upstreamId") + "/sync",
+                jsonAuth(admin), null, Map.class).getBody();
+        assertEquals(1, ((Number) resync.get("imported")).intValue(),
+                "drifted skill must re-publish: " + resync);
+        assertEquals(3, skillhubPayloadRequests.get(),
+                "the re-published payload is fetched exactly once more");
     }
 
     private final java.util.concurrent.atomic.AtomicInteger skillhubPayloadRequests =

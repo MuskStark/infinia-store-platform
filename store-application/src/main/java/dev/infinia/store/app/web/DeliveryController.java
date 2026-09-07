@@ -74,18 +74,39 @@ public class DeliveryController {
         // so it must never be minted for a viewer below the listing's level.
         listings.findById(release.listingId).ifPresent(beeLevels::requireListingAccess);
         Release.ArtifactInfo artifact = catalog.pickArtifact(release, artifactId, os, arch);
+        if (artifact.blobKey() != null && artifact.blobKey().startsWith("upstream/")) {
+            // Legacy pre-materialization row: fetch, scan, store and platform-sign
+            // the payload now, so the ticket carries a real digest — the FengYu
+            // client rejects digest-less tickets (audit 3.1). Failures surface as
+            // upstream errors instead of unverifiable bytes.
+            try {
+                artifact = upstreamArtifacts.materializeVirtualArtifact(release, artifact);
+            } catch (RuntimeException e) {
+                String message = String.valueOf(e.getMessage());
+                if (message.contains("changed since sync")) {
+                    throw new DomainException(StoreErrorCode.UPSTREAM_DRIFTED, message);
+                }
+                if (e instanceof dev.infinia.store.app.upstream.UpstreamArtifactService
+                        .UpstreamPayloadRejectedException) {
+                    throw new DomainException(StoreErrorCode.SCAN_FAILED, message);
+                }
+                throw new DomainException(StoreErrorCode.INTERNAL_ERROR,
+                        "Upstream materialization failed: " + message);
+            } catch (IOException | InterruptedException e) {
+                throw new DomainException(StoreErrorCode.INTERNAL_ERROR,
+                        "Upstream fetch failed: " + e.getMessage());
+            }
+        }
         Instant expiresAt = Instant.now().plusSeconds(properties.downloadTicketTtlSeconds());
         String signature = tickets.sign("download", artifact.blobKey(), expiresAt);
         // Server-relative URL: clients resolve it against the API host (design §10.2).
         String url = "/api/v1/blobs/" + artifact.blobKey() + "?"
                 + TicketService.encodeTicketParams("download", artifact.blobKey(), expiresAt,
                         signature);
-        boolean live = artifact.blobKey() != null && artifact.blobKey().startsWith("upstream/");
         return new DeliveryDtos.DownloadTicketDto(release.id.toString(),
-                artifact.id() == null ? null : artifact.id().toString(), url,
-                expiresAt.toString(), live ? null : artifact.sha256(),
-                live ? null : artifact.signature(), live ? null : artifact.keyId(),
-                live ? 0 : artifact.size());
+                artifact.artifactId(), url,
+                expiresAt.toString(), artifact.sha256(), artifact.signature(),
+                artifact.keyId(), artifact.size());
     }
 
     /** Ticketed blob download; anonymous by design (ticket IS the authorization). */
@@ -100,8 +121,9 @@ public class DeliveryController {
             throw new DomainException(StoreErrorCode.TICKET_INVALID,
                     "Download ticket is invalid or expired");
         }
-        // Pass-through upstream artifacts (aggregation plan §5.2): rebuild from the
-        // upstream, verify against the recorded content digest, stream — no blob.
+        // Pass-through for URLs minted by pre-materialization syncs (aggregation
+        // plan §5.2): rebuild from the upstream, verify against the recorded
+        // content digest, stream — no blob. New syncs store real blobs.
         if (key.startsWith("upstream/")) {
             java.util.UUID upstreamItemId;
             try {
@@ -112,10 +134,10 @@ public class DeliveryController {
                         "Malformed upstream artifact key");
             }
             dev.infinia.store.app.upstream.UpstreamArtifactService.PreparedArtifact prepared;
+            // The rebuilt package embeds the release version — resolve the owning
+            // release so pass-through bytes match the recorded sha.
+            Release owner = releases.findByArtifactBlobKey(key).orElse(null);
             try {
-                // The rebuilt package embeds the release version — resolve the
-                // owning release so pass-through bytes match the recorded sha.
-                Release owner = releases.findByArtifactBlobKey(key).orElse(null);
                 prepared = upstreamArtifacts.prepare(upstreamItemId,
                         owner == null ? null : owner.version.toString());
             } catch (RuntimeException e) {
@@ -133,20 +155,40 @@ public class DeliveryController {
                 throw new DomainException(StoreErrorCode.INTERNAL_ERROR,
                         "Upstream fetch failed: " + e.getMessage());
             }
-            byte[] digest = java.util.HexFormat.of().parseHex(prepared.sha256());
-            StreamingResponseBody body = out -> {
-                try (prepared; InputStream in = java.nio.file.Files
-                        .newInputStream(prepared.file())) {
-                    in.transferTo(out);
+            // From here the streaming body owns {prepared} — but only once it
+            // actually runs. Anything failing BEFORE Spring receives the entity
+            // must close the workspace, or every such request leaks a temp
+            // directory (audit 3.6 leak fix).
+            try {
+                byte[] digest = java.util.HexFormat.of().parseHex(prepared.sha256());
+                StreamingResponseBody body = out -> {
+                    try (prepared; InputStream in = java.nio.file.Files
+                            .newInputStream(prepared.file())) {
+                        in.transferTo(out);
+                    }
+                    // A completed pass-through stream is still a listing download.
+                    if (owner != null) {
+                        listings.incrementDownloads(owner.listingId);
+                    }
+                };
+                return ResponseEntity.ok()
+                        .header(HttpHeaders.CONTENT_TYPE,
+                                MediaType.APPLICATION_OCTET_STREAM_VALUE)
+                        .header(HttpHeaders.CONTENT_LENGTH,
+                                String.valueOf(prepared.size()))
+                        .header("Digest",
+                                "sha-256=" + Base64.getEncoder().encodeToString(digest))
+                        .header("X-Checksum-SHA256", prepared.sha256())
+                        .header("Cache-Control", "no-store")
+                        .body(body);
+            } catch (RuntimeException e) {
+                try {
+                    prepared.close();
+                } catch (IOException cleanup) {
+                    e.addSuppressed(cleanup);
                 }
-            };
-            return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE)
-                    .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(prepared.size()))
-                    .header("Digest", "sha-256=" + Base64.getEncoder().encodeToString(digest))
-                    .header("X-Checksum-SHA256", prepared.sha256())
-                    .header("Cache-Control", "no-store")
-                    .body(body);
+                throw e;
+            }
         }
         // Opened inside writeTo: if the async body never executes (client abort,
         // dispatch failure) there is no leaked stream — S3-backed streams hold
@@ -155,10 +197,17 @@ public class DeliveryController {
             try (InputStream in = blobs.open(key)) {
                 in.transferTo(out);
             }
+            // A fully streamed body is a successful artifact download (audit 3.1:
+            // the counter had no callers). Client aborts never reach this line.
+            releases.findByArtifactBlobKey(key)
+                    .ifPresent(owner -> listings.incrementDownloads(owner.listingId));
         };
+        // Content-Length via the port: Files.size locally, an S3 HEAD remotely —
+        // clients get progress and the FengYu host's size budget check is honest.
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_TYPE,
                         MediaType.APPLICATION_OCTET_STREAM_VALUE)
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(blobs.size(key)))
                 .body(body);
     }
 

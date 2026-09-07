@@ -105,10 +105,11 @@ public class EcosystemExportService {
                 continue;
             }
             ArtifactInfo selected = packageArtifact(e.getValue());
-            // Never materialize an upstream payload just to build a compatibility
-            // index, and never retain it as a local git object. Upstream entries
-            // remain visible through the FengYu catalogs and are packed on GET.
-            if (selected != null && isUpstreamVirtual(selected)) {
+            // Aggregated upstream entries never enter the local git mirror — they
+            // ship through the store's signed blob delivery, and their content
+            // must not be retained on a second, unsigned surface.
+            if (selected != null && (isUpstreamVirtual(selected)
+                    || listing.tags.contains("upstream"))) {
                 continue;
             }
             try {
@@ -211,7 +212,7 @@ public class EcosystemExportService {
         return files;
     }
 
-    /** Local publisher-owned blobs only; upstream virtual artifacts never export. */
+    /** Local publisher-owned blobs only; aggregated upstream entries never export. */
     private byte[] artifactBytes(ArtifactInfo artifact, String releaseVersion) {
         String key = artifact.blobKey();
         if (isUpstreamVirtual(artifact)) {
@@ -228,10 +229,23 @@ public class EcosystemExportService {
         return artifact.blobKey() != null && artifact.blobKey().startsWith("upstream/");
     }
 
-    private ArtifactInfo packageArtifact(Release release) {
+    /**
+     * The installable PACKAGE artifact, or null when the release has none — the
+     * export skips the listing instead of surfacing a bogus package (audit 3.4:
+     * the old {@code artifacts.get(0)} fallback could pick a CHECKSUMS/SBOM row,
+     * or an arbitrary entry of a multi-artifact release). Selection is
+     * deterministic across multi-artifact releases: ecosystem packages are
+     * platform-neutral, so UNIVERSAL wins and the rest order by filename.
+     */
+    static ArtifactInfo packageArtifact(Release release) {
         return release.artifacts.stream()
                 .filter(a -> a.kind() == ArtifactKind.PACKAGE)
-                .findFirst()
-                .orElse(release.artifacts.isEmpty() ? null : release.artifacts.get(0));
+                .min(java.util.Comparator
+                        .comparing((ArtifactInfo a) ->
+                                a.platform() == dev.infinia.store.contract.type.Platform.UNIVERSAL
+                                        ? 0 : 1)
+                        .thenComparing(a -> a.filename() == null ? "" : a.filename(),
+                                java.util.Comparator.naturalOrder()))
+                .orElse(null);
     }
 }

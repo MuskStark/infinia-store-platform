@@ -83,6 +83,16 @@ body {
   @apply border-b border-black/60 bg-[#19191c] text-white;
 }
 
+/* The primary nav scrolls horizontally when the labels overflow (narrow
+   viewports / English locale), but its scrollbar strip must not render as a
+   hard line inside the header bar — keep it scrollable yet visually clean. */
+.nav-scroll {
+  scrollbar-width: none;
+}
+.nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 /* Visible focus for keyboard users (design §12.6). */
 :focus-visible {
   outline: 2px solid var(--color-accent);

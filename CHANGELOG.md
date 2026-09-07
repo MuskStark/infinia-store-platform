@@ -2,6 +2,122 @@
 
 ## Unreleased
 
+### Overflow & occlusion pass
+
+- Primary navigation: overflow is now legible. Gradient fades mark the clipped
+  edges whenever the labels overflow (English locale, narrow viewports), and
+  the active link is scrolled into view on route changes — previously the nav
+  could stay parked wherever an earlier focus scroll left it, clipping the
+  first item to a meaningless "over…" with no visible scrollbar.
+- The browse sort dropdown no longer repeats the "Sort by:" prefix on every
+  option row; the trigger keeps the summary and the list shows plain labels
+  (`SelectMenu` gains an optional `triggerLabel`).
+
+### Real-environment UI walkthrough fixes
+
+- Publisher center: parse `infinia://type/namespace/slug` coordinates correctly
+  (the `://` separator leaves an empty first path segment, which both
+  `selectListing` and `createRelease` destructured off by one). Selecting a
+  listing now resolves its UUID, so the release history and draft-resume
+  wizard appear, and creating a release hits the right listing instead of a
+  404 that died silently; API failures now surface as the page's status
+  message with localized problem text.
+- Account popover: the header bar's `text-white` leaked into the white light-
+  mode panel, rendering the display name plus the user-center/library items
+  invisible; the panel now sets its own text color (dark mode unchanged).
+- Primary navigation: on narrow viewports the flex row collapsed the nav to
+  zero width (no way to reach Discover/Browse on a phone). It now wraps onto
+  its own scrollable row under the brand, and its scrollbar strip stays hidden
+  while the labels overflow (English locale at desktop widths).
+- Session: the access-token sessionStorage bridge is no longer dev-only, so a
+  full page reload (F5, shared link) keeps the user signed in in production
+  builds instead of silently logging out.
+- Sign-in UX: the header sign-in button carries a `redirect` so login returns
+  to the page you came from, and the listing detail's "sign in to write a
+  review" hint is now that link.
+- Discover hero: the animated listing/download counters render through the
+  locale number formatter (thousands separators), matching every other number
+  in the store; `NumberTicker` accepts an optional `format` prop.
+- Status page (monitor-web): persisted incident titles are English-only in the
+  database, so the zh timeline showed mixed languages; titles are now rebuilt
+  from the component key + impact through the locale catalogs, falling back to
+  the stored title for unknown components.
+- Demo seed: the zh localization of seeded demo listings no longer renders a
+  doubled "。。" when the English summary ends with a period.
+
+### RC2 readiness fixes
+
+- Fix `publish-app-release.sh` creating a draft before resolving its listing ID;
+  cover first-time listing creation and rc2 artifact upload against a real HTTP server.
+- Serve ARM64 Debian metadata at `latest-linux-arm64.yml`; restrict each CPU feed
+  to lite packages so JRE/UOS or another architecture cannot be selected.
+- Remove the publishing script's link to the reserved (501) update endpoint;
+  document rc2 host ranges and Base64 X.509 DER trust-key provisioning.
+
+
+### Distribution integrity (audit wave 2)
+
+- Upstream aggregation now materializes every imported payload at sync time:
+  the skill/MCP package is fetched, security-scanned, compatibility-packed and
+  stored as a regular content-addressed blob, then platform-signed by the
+  review approval like any publisher upload. Download tickets therefore carry
+  a real sha256/size/signature — the FengYu client refuses digest-less
+  tickets. Downloads serve the stored, immutable blob; upstream drift is
+  handled at the next sync (changed metadata publishes a new version) instead
+  of failing individual downloads with 409. Legacy pass-through rows are
+  converted by the next sync, and requesting a download ticket for one
+  upgrades it on demand (fetch → scan → store → sign); entries whose digest is
+  genuinely unknown omit the integrity fields rather than faking a digest.
+- The FengYu skill catalog (`/api/v1/compat/fengyu/skills-catalog`) mirrors
+  the host's `SkillCatalogEntry` integrity contract: entries expose `sha256`
+  (mandatory for host-side install), plus the platform `signature`/`keyId` the
+  host verifies under its default `fengyu.store.require-signature=true`.
+- Ticketed blob downloads carry `Content-Length` (local `Files.size`, S3
+  `HEAD`), and completed artifact downloads increment the listing's download
+  counter, which previously had no callers.
+
+### Desktop update channel & git export (audit wave 2)
+
+- The Debian desktop client can now update entirely from a store deployment:
+  `GET /fengyu-updates/deb/latest-linux.yml` serves an electron-updater
+  generic-feed document (`version`, `files[]` with `url`/`sha512`/`size`,
+  `releaseDate`, `path`) for the newest fully rolled-out stable APP release
+  shipping a `…-linux-<arch>.deb` installer, and the deb artifacts are served
+  from the same directory. `sha512` is the Base64 of the SHA-512 over the
+  stored blob (cached per immutable blob key) — never a fabricated value — and
+  asset naming follows electron-builder's `Infinia-<version>-linux-<arch>.deb`.
+- The CLAUDE marketplace export supports remote deployments: the exported
+  bare repositories are served read-only over git smart HTTP at `/git/**`
+  (JGit `GitServlet`, upload-pack only — push is refused at both the servlet
+  and the security chain), and the new `store.export.git-public-base` property
+  makes marketplace entries carry http(s) clone URLs instead of `file://`
+  (unset keeps the historical `file://` behavior).
+- `GET /api/v1/updates/app` is now RESERVED and deliberately returns 501: no
+  shipped client ever consumed its JSON shape (the deb updater reads the
+  generic yml feed, the Windows portable updater the GitHub-releases mirror),
+  and the previously claimed field-compatibility with the host `UpdateInfo`
+  model never held. The dead feed plumbing and the unused
+  `store.app-minimum-supported-version` knob were removed.
+
+### Hardening (audit wave 2)
+
+- The upstream SSRF guard now pins DNS: hosts are resolved exactly once, every
+  resolved address is range-checked, and plain-HTTP fetches connect to the
+  validated address with the original authority pinned in the Host header —
+  closing the validate-then-connect rebinding window (HTTPS keeps the
+  hostname connection, where TLS endpoint verification already binds it).
+- Legacy upstream pass-through downloads share one discovery round per source
+  for a short window instead of re-fetching the whole upstream catalog per
+  download ticket, and a failure between payload preparation and response
+  streaming no longer leaks the request's temp workspace.
+- Ecosystem export artifact selection is deterministic (UNIVERSAL PACKAGE
+  first, stable filename order otherwise) and degrades to skipping the
+  listing instead of falling back to an arbitrary `artifacts.get(0)` row.
+- Bad `type`/`sort` catalog query parameters now return an actionable 400
+  problem detail listing the accepted values instead of a raw enum error, and
+  the artifact-id wire form is derived through a single helper shared by DTOs,
+  tickets and artifactId lookups.
+
 ### Scan pipeline resilience & production hardening
 
 - Scanning can no longer wedge or trample concurrent review decisions. A

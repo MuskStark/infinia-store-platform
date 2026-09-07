@@ -310,9 +310,10 @@ public class PublisherService {
     }
 
     /**
-     * Attaches a pass-through artifact for upstream-aggregated releases: provenance
-     * lives in upstream_item, bytes are rebuilt from the upstream at download time
-     * — nothing is persisted to blob storage (aggregation plan §5.2).
+     * Attaches a pre-built artifact for upstream-aggregated releases: the sync
+     * has already materialized and scanned the payload into blob storage, so
+     * this links the (already stored, unsigned) artifact to the release — the
+     * review approval signs it like any publisher upload.
      */
     @Transactional
     public Release attachVirtualArtifact(UUID publisherUserId, Release release,

@@ -48,6 +48,17 @@ public class Release {
         public ArtifactInfo {
             variant = variant == null || variant.isBlank() ? "default" : variant;
         }
+
+        /**
+         * The single wire form of this artifact's id — used by API DTOs and the
+         * {@code artifactId} query parameter of the download-ticket endpoint, so
+         * both sides derive it from one place instead of re-implementing the
+         * null-safe UUID-to-string mapping (audit 3.6). Null when the artifact
+         * has not been assigned an id yet.
+         */
+        public String artifactId() {
+            return id == null ? null : id.toString();
+        }
     }
 
     public record DependencyDecl(String coordinate, String range, boolean optional) {

@@ -14,9 +14,9 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 /**
- * Indexes enabled sources that have never populated the catalog. This only reads
- * upstream metadata; artifact repositories are still fetched exclusively by the
- * download path and are never persisted by the store.
+ * Indexes enabled sources that have never populated the catalog. The sync
+ * materializes every imported payload into the store's blob storage so
+ * downstream delivery surfaces real, verifiable digests (audit 3.1).
  *
  * <p>Before indexing, the store seeds its default upstream sources (SkillHub,
  * WorkBuddy's open skill platform) so a deployment aggregates them without a

@@ -130,6 +130,31 @@ class CatalogApiTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void badEnumParametersReturnFriendly400InsteadOf500() {
+        // Audit 3.6: ListingType.valueOf / ListingSort.valueOf turned bad query
+        // input into raw enum errors; the parse variants answer an actionable
+        // validation problem listing the accepted values.
+        ResponseEntity<Map> badType = http().getJson("/api/v1/catalog?type=bogus",
+                Map.class, null);
+        assertEquals(400, badType.getStatusCode().value());
+        assertEquals("validation_failed", badType.getBody().get("code"));
+        assertTrue(String.valueOf(badType.getBody().get("detail")).contains("app, plugin"),
+                "detail must list the accepted types: " + badType.getBody());
+
+        ResponseEntity<Map> badSort = http().getJson("/api/v1/catalog?sort=random",
+                Map.class, null);
+        assertEquals(400, badSort.getStatusCode().value());
+        assertEquals("validation_failed", badSort.getBody().get("code"));
+        assertTrue(String.valueOf(badSort.getBody().get("detail")).contains("relevance"),
+                "detail must list the accepted sorts: " + badSort.getBody());
+
+        // Case-insensitive parse still works for valid input.
+        assertEquals(200, http().getJson("/api/v1/catalog?type=plugin&sort=downloads",
+                String.class, null).getStatusCode().value());
+    }
+
+    @Test
     void resolvesFlowWithDependencyClosure() {
         String body = """
                 {

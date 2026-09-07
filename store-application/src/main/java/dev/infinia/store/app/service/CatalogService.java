@@ -1,16 +1,13 @@
 package dev.infinia.store.app.service;
 
 import tools.jackson.databind.ObjectMapper;
-import dev.infinia.store.app.config.StoreProperties;
 import dev.infinia.store.contract.api.CatalogDtos.CatalogItemDto;
 import dev.infinia.store.contract.api.CatalogDtos.CatalogPageDto;
 import dev.infinia.store.contract.coordinate.InfiniaCoordinate;
 import dev.infinia.store.contract.envelope.ArtifactRef;
 import dev.infinia.store.contract.envelope.ReleaseEnvelope;
 import dev.infinia.store.contract.error.StoreErrorCode;
-import dev.infinia.store.contract.semver.SemVer;
 import dev.infinia.store.contract.type.Channel;
-import dev.infinia.store.contract.type.ArtifactKind;
 import dev.infinia.store.contract.type.ListingType;
 import dev.infinia.store.contract.type.ReleaseStatus;
 import dev.infinia.store.domain.DomainException;
@@ -21,43 +18,27 @@ import dev.infinia.store.domain.port.ListingRepository;
 import dev.infinia.store.domain.port.ReleaseRepository;
 import dev.infinia.store.domain.service.CompatibilityEvaluator;
 import dev.infinia.store.domain.service.DependencySolver;
-import dev.infinia.store.domain.service.RolloutBucketer;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Catalog, resolution, delivery and update-feed logic (design §5.3, §8.4, §9.4).
+ * Catalog, resolution and delivery logic (design §5.3, §8.4, §9.4).
  */
 @Service
 public class CatalogService {
 
-    /**
-     * Long-lived ticket for URLs embedded in the app update feed — aligned with
-     * the compat catalogs' 24h direct-download tickets rather than the API's
-     * short-lived default (see CompatFengYuController.COMPAT_TICKET_TTL_SECONDS).
-     */
-    private static final long FEED_TICKET_TTL_SECONDS = 24 * 3600;
-
     private final ListingRepository listings;
     private final ReleaseRepository releases;
-    private final StoreProperties properties;
-    private final RolloutBucketer bucketer;
     private final ObjectMapper mapper;
-    private final TicketService tickets;
     private final BeeLevelService beeLevels;
 
     public CatalogService(ListingRepository listings, ReleaseRepository releases,
-            StoreProperties properties, ObjectMapper mapper, TicketService tickets,
-            BeeLevelService beeLevels) {
+            ObjectMapper mapper, BeeLevelService beeLevels) {
         this.listings = listings;
         this.releases = releases;
-        this.properties = properties;
-        this.bucketer = new RolloutBucketer(properties.rolloutSecret());
         this.mapper = mapper;
-        this.tickets = tickets;
         this.beeLevels = beeLevels;
     }
 
@@ -187,7 +168,7 @@ public class CatalogService {
             String os, String arch) {
         if (artifactId != null && !artifactId.isBlank()) {
             return release.artifacts.stream()
-                    .filter(a -> a.id() != null && artifactId.equals(a.id().toString()))
+                    .filter(a -> a.artifactId() != null && artifactId.equals(a.artifactId()))
                     .findFirst()
                     .orElseThrow(() -> new DomainException(StoreErrorCode.NOT_FOUND,
                             "Artifact not found: " + artifactId));
@@ -199,85 +180,12 @@ public class CatalogService {
                         "No artifact matches platform " + os + "/" + arch));
     }
 
-    // ---- app update feed (design §8.4) ----
-
-    public UpdateFeed appUpdate(String current, Channel channel, String os, String arch,
-            String mode, String variant, String installId) {
-        SemVer currentVersion = SemVer.parse(current);
-        ArtifactKind requestedMode = parseAppMode(mode);
-        dev.infinia.store.contract.type.Platform requestedPlatform =
-                CompatibilityEvaluator.parsePlatform(os);
-        dev.infinia.store.contract.type.Arch requestedArch =
-                CompatibilityEvaluator.parseArch(arch);
-        InfiniaCoordinate configured = InfiniaCoordinate.parse(properties.appCoordinate());
-        Listing appListing = listings.findByCoordinate(configured).orElse(null);
-        if (appListing == null || appListing.type != ListingType.APP
-                || !appListing.isPubliclyVisible()
-                // A bee-level gated APP listing is treated as absent here: the
-                // host updater has no user context and must serve an empty feed
-                // rather than 403 half-way through an update check (蜜蜂等级).
-                || (appListing.minBeeLevel > 0
-                        && appListing.minBeeLevel > beeLevels.viewerLevel())) {
-            return new UpdateFeed(null, null, null, 0, null, List.of());
-        }
-        Release best = null;
-        for (Release release : releases.findVisibleByListingId(appListing.id)) {
-            if (release.status != ReleaseStatus.PUBLISHED || release.channel != channel) {
-                continue;
-            }
-            if (!CompatibilityEvaluator.hostCompatible(release, current)) {
-                continue;
-            }
-            if (CompatibilityEvaluator.appArtifacts(release, requestedPlatform, requestedArch,
-                    requestedMode, variant).isEmpty()) {
-                continue;
-            }
-            if (!bucketer.included(installId, release.rolloutPercent)) {
-                continue;
-            }
-            if (best == null || release.version.compareTo(best.version) > 0) {
-                best = release;
-            }
-        }
-        if (best == null || best.version.compareTo(currentVersion) <= 0) {
-            return new UpdateFeed(null, null, null, 0, null, List.of());
-        }
-        List<dev.infinia.store.contract.api.DeliveryDtos.AppUpdateArtifactDto> artifacts =
-                new ArrayList<>();
-        // Match the compat catalog's 24h direct-download tickets (audit P3): the
-        // feed is fetched at update-check time, but the user may click download
-        // much later — a 300s ticket turns that into a confusing 403.
-        Instant expiresAt = Instant.now().plusSeconds(FEED_TICKET_TTL_SECONDS);
-        for (Release.ArtifactInfo a : CompatibilityEvaluator.appArtifacts(best,
-                requestedPlatform, requestedArch, requestedMode, variant)) {
-            String ticketSignature = tickets.sign("download", a.blobKey(), expiresAt);
-            String relativeUrl = "/api/v1/blobs/" + a.blobKey() + "?"
-                    + TicketService.encodeTicketParams("download", a.blobKey(), expiresAt,
-                            ticketSignature);
-            artifacts.add(new dev.infinia.store.contract.api.DeliveryDtos.AppUpdateArtifactDto(
-                    properties.baseUrl().replaceAll("/+$", "") + relativeUrl, a.filename(), a.sha256(),
-                    a.signature(), a.keyId(), a.size(), a.platform().name().toLowerCase(),
-                    a.arch().name().toLowerCase(), a.kind().name().toLowerCase(), a.variant(),
-                    a.mimeType()));
-        }
-        return new UpdateFeed(appListing.coordinate().toString(), best.version.toString(),
-                best.channel, best.rolloutPercent, best, artifacts);
-    }
-
-    private static ArtifactKind parseAppMode(String mode) {
-        if (mode == null || mode.isBlank() || "any".equalsIgnoreCase(mode)) return null;
-        return switch (mode.trim().toLowerCase(java.util.Locale.ROOT)) {
-            case "installer", "installed", "install" -> ArtifactKind.INSTALLER;
-            case "portable" -> ArtifactKind.PORTABLE;
-            default -> throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
-                    "mode must be installer, portable or any");
-        };
-    }
-
-    /** Carrier for the update feed response; fields assembled in the controller. */
-    public record UpdateFeed(String listingCoordinate, String latestVersion, Channel channel,
-            int rolloutPercent, Release release,
-            List<dev.infinia.store.contract.api.DeliveryDtos.AppUpdateArtifactDto> artifacts) {}
+    // ---- app update feed ----
+    // The JSON app-update feed (historic design §8.4) was retired with the
+    // RESERVED marking of GET /api/v1/updates/app (audit 3.5): no shipped
+    // client consumed it. Live update surfaces are the electron-updater deb
+    // feed (FengYuUpdateFeedController) and the compat GitHub-releases mirror
+    // (CompatFengYuController.portableRelease).
 
     // ---- envelope ----
 

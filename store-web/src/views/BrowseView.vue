@@ -73,7 +73,8 @@ function submitSearch() {
       <SelectMenu
         :model-value="catalog.sort"
         class="w-44"
-        :options="sorts.map((sort) => ({ value: sort, label: `${t('common.sort')}: ${t(`sort.${sort}`)}` }))"
+        :options="sorts.map((sort) => ({ value: sort, label: t(`sort.${sort}`) }))"
+        :trigger-label="`${t('common.sort')}: ${t(`sort.${catalog.sort}`)}`"
         :aria-label="t('common.sort')"
         @update:model-value="catalog.sort = $event as SortKey"
       />

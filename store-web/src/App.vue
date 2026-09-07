@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from './stores/auth';
@@ -87,6 +87,42 @@ const isAdmin = computed(() => auth.roles.includes('PLATFORM_ADMIN'));
 const initial = computed(() =>
   (auth.user?.displayName ?? auth.user?.email ?? '?').charAt(0).toUpperCase(),
 );
+
+// The primary nav scrolls horizontally when the labels overflow (narrow
+// viewports, English locale). The scrollbar itself is hidden, so overflow is
+// signaled with gradient fades on the clipped edges instead, and the active
+// link is scrolled into view on route changes (the browser otherwise leaves
+// the nav parked wherever a previous focus scroll left it, e.g. first item
+// clipped to “over…”).
+const navEl = ref<HTMLElement | null>(null);
+const navFades = ref({ left: false, right: false });
+
+function updateNavFades() {
+  const el = navEl.value;
+  if (!el) return;
+  navFades.value = {
+    left: el.scrollLeft > 4,
+    right: el.scrollLeft + el.clientWidth < el.scrollWidth - 4,
+  };
+}
+
+function revealActiveLink() {
+  const el = navEl.value;
+  if (!el) return;
+  el.querySelector('[aria-current="page"], .font-semibold')
+    ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  updateNavFades();
+}
+
+watch(
+  () => [route.fullPath, auth.isAuthenticated, isPublisher.value, isStaff.value, isAdmin.value],
+  () => nextTick(revealActiveLink),
+);
+onMounted(() => {
+  window.addEventListener('resize', updateNavFades);
+  nextTick(revealActiveLink);
+});
+onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
 </script>
 
 <template>
@@ -94,7 +130,7 @@ const initial = computed(() =>
     <!-- Marketplace shell: the near-black bar is the signature element; it stays
          dark in both themes so the Infinia mark and white nav pop. -->
     <header class="header-bar sticky top-0 z-40">
-      <div class="mx-auto flex max-w-7xl items-center gap-4 px-4 py-2.5">
+      <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-4 py-2.5 max-md:gap-y-1">
         <RouterLink :to="{ name: 'discover' }" class="flex shrink-0 items-center gap-2">
           <!-- Official Infinia mark, shared with the FengYu host frontend. -->
           <img src="/infinia-logo.svg" alt="" class="h-8 w-8" />
@@ -104,10 +140,17 @@ const initial = computed(() =>
           </span>
         </RouterLink>
 
-        <nav
-          class="flex min-w-0 items-center gap-0.5 overflow-x-auto text-sm text-white/80"
-          aria-label="primary"
+        <!-- Overflow fades live on a wrapper so the nav keeps its flex sizing
+             while the gradients anchor to the nav's visual box. -->
+        <div
+          class="relative min-w-0 max-md:order-last max-md:w-full md:flex-1"
         >
+          <nav
+            ref="navEl"
+            class="nav-scroll flex w-full items-center gap-0.5 overflow-x-auto text-sm text-white/80"
+            aria-label="primary"
+            @scroll.passive="updateNavFades"
+          >
           <!-- inline-flex + items-center: the global 44px touch-target rule
                stretches these boxes taller than their text, so the label must
                center inside the box to sit level with the brand logo. -->
@@ -157,7 +200,18 @@ const initial = computed(() =>
           >
             {{ t('nav.admin') }}
           </RouterLink>
-        </nav>
+          </nav>
+          <span
+            v-if="navFades.left"
+            class="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-[#19191c] to-transparent"
+            aria-hidden="true"
+          />
+          <span
+            v-if="navFades.right"
+            class="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-[#19191c] to-transparent"
+            aria-hidden="true"
+          />
+        </div>
 
         <form
           class="ml-auto hidden w-full max-w-64 md:block"
@@ -235,7 +289,7 @@ const initial = computed(() =>
           <button
             v-if="!auth.isAuthenticated"
             class="btn btn-primary ml-1"
-            @click="router.push({ name: 'signin' })"
+            @click="router.push({ name: 'signin', query: route.fullPath === '/' ? {} : { redirect: route.fullPath } })"
           >
             {{ t('nav.signIn') }}
           </button>
@@ -268,7 +322,7 @@ const initial = computed(() =>
             </button>
             <div
               v-if="menuOpen"
-              class="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-line bg-surface shadow-xl shadow-slate-900/10 ring-1 ring-black/5 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/40 dark:ring-white/5"
+              class="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-line bg-surface text-ink shadow-xl shadow-slate-900/10 ring-1 ring-black/5 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:shadow-black/40 dark:ring-white/5"
               role="menu"
             >
               <div class="border-b border-line px-4 py-3 dark:border-slate-800">

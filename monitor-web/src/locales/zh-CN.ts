@@ -56,6 +56,8 @@ export default {
       external: '外部可达性',
     },
     incidentResolved: '已恢复',
+    incidentUnavailable: '不可用',
+    incidentDegraded: '已降级',
     incidentInvestigating: '排查中',
     durationMinutes: '持续 {n} 分钟',
     durationHours: '持续 {n} 小时',

@@ -271,7 +271,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Signed app update feed (design §8.4) */
+        /** RESERVED — deliberately unimplemented (audit 3.5) */
         get: operations["appUpdateFeed"];
         put?: never;
         post?: never;
@@ -924,6 +924,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/databases/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate the remote data-source override — PLATFORM_ADMIN
+         * @description Clears the data-source override file read at startup so the store boots from its configured local data source again (applied on restart). Equivalent to setting enabled=false, provided as an explicit escape hatch.
+         */
+        post: operations["deactivateRemoteDatabases"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/users": {
         parameters: {
             query?: never;
@@ -1209,7 +1229,7 @@ export interface components {
         /** @enum {string} */
         ListingType: "APP" | "PLUGIN" | "SKILL" | "MCP" | "FLOW";
         /** @enum {string} */
-        Channel: "stable" | "beta" | "alpha" | "nightly" | "private";
+        Channel: "stable" | "rc" | "beta" | "alpha" | "nightly" | "private";
         /** @enum {string} */
         Platform: "windows" | "macos" | "linux" | "universal";
         /** @enum {string} */
@@ -1341,7 +1361,7 @@ export interface components {
             releases?: components["schemas"]["ListingRelease"][];
             upstream?: components["schemas"]["UpstreamProvenance"];
         };
-        /** @description Metadata provenance for a live, non-retained upstream artifact. */
+        /** @description Metadata provenance for an aggregated upstream artifact. The sync materializes the payload into the store's blob storage, so the entry ships like any publisher upload with a real, platform-signed digest. */
         UpstreamProvenance: {
             sourceName?: string;
             externalId?: string;
@@ -1357,7 +1377,7 @@ export interface components {
             /** Format: date-time */
             lastSeenAt?: string;
             /** @enum {string} */
-            deliveryMode?: "LIVE_NO_RETENTION";
+            deliveryMode?: "MATERIALIZED_BLOB";
         };
         ClientEnvironment: {
             hostVersion: string;
@@ -1413,36 +1433,6 @@ export interface components {
             keyId?: string;
             /** Format: int64 */
             size?: number;
-        };
-        AppUpdateArtifact: {
-            /** Format: uri */
-            url?: string;
-            filename?: string;
-            sha256?: string;
-            signature?: string;
-            keyId?: string;
-            /** Format: int64 */
-            size?: number;
-            platform?: components["schemas"]["Platform"];
-            arch?: components["schemas"]["Arch"];
-            /** @enum {string} */
-            kind?: "installer" | "portable";
-            variant?: string;
-            mimeType?: string;
-        };
-        AppUpdate: {
-            latestVersion?: string | null;
-            mandatory?: boolean;
-            rollout?: number;
-            releaseNotes?: string;
-            artifacts?: components["schemas"]["AppUpdateArtifact"][];
-            sha256?: string;
-            signature?: string;
-            keyId?: string;
-            /** Format: date-time */
-            publishedAt?: string;
-            minimumSupportedVersion?: string;
-            channel?: components["schemas"]["Channel"];
         };
         RegisterRequest: {
             /** Format: email */
@@ -1825,7 +1815,7 @@ export interface components {
              * @description Inferred from the version's pre-release suffix when omitted
              * @enum {string}
              */
-            channel?: "stable" | "beta" | "alpha" | "nightly";
+            channel?: "stable" | "rc" | "beta" | "alpha" | "nightly";
             /** @description Optional release notes */
             changelog?: string;
             /** @description Package filename — version/channel/kind/platform/arch/variant are inferred from it */
@@ -2458,32 +2448,26 @@ export interface operations {
     };
     appUpdateFeed: {
         parameters: {
-            query: {
-                current: string;
-                /** @default stable */
-                channel?: components["schemas"]["Channel"];
-                os: components["schemas"]["Platform"];
-                arch: components["schemas"]["Arch"];
-                /** @description Select installed or portable application distributions */
-                mode?: "installer" | "portable" | "any";
-                /** @description Build variant such as lite */
-                variant?: string;
-                /** @description Opaque random id used for stable rollout bucketing */
-                installId: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Update feed entry; latestVersion=null when up to date */
-            200: {
+            /**
+             * @description Endpoint reserved; no consumer exists
+             *
+             * (RESERVED — audit 3.5: the desktop deb updater reads the
+             * electron-updater generic feed at /fengyu-updates/deb/latest-linux.yml,
+             * the Windows portable updater the compat GitHub-releases mirror)
+             */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppUpdate"];
+                    "application/problem+json": Record<string, never>;
                 };
             };
         };
@@ -3472,6 +3456,24 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RemoteDatabase"];
                 };
+            };
+        };
+    };
+    deactivateRemoteDatabases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Override deactivated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

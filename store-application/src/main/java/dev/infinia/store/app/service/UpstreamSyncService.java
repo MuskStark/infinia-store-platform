@@ -53,10 +53,11 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Metadata-only upstream catalog synchronizer. A sync reads catalog manifests
- * and publishes virtual entries, but never fetches repository/archive payloads.
- * The payload is materialized, scanned and compatibility-packed only when a
- * user downloads it; no upstream artifact is stored by the store.
+ * Upstream catalog synchronizer. A sync reads catalog manifests and publishes
+ * entries through the regular review pipeline; each imported payload is
+ * materialized, scanned and compatibility-packed into the store's blob
+ * storage, so every upstream artifact carries a real, verifiable digest
+ * (audit 3.1 — the FengYu client rejects digest-less download tickets).
  */
 @Service
 public class UpstreamSyncService {
@@ -78,6 +79,7 @@ public class UpstreamSyncService {
     private final RepoFetcher fetcher;
     private final dev.infinia.store.app.upstream.UpstreamPackageBuilder packageBuilder;
     private final List<UpstreamAdapter> adapters;
+    private final dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts;
 
     public UpstreamSyncService(PublishingRepositories.UpstreamSourceRepository upstreams,
             UpstreamRepositories.UpstreamItemRepository upstreamItems,
@@ -92,7 +94,8 @@ public class UpstreamSyncService {
             dev.infinia.store.app.upstream.UpstreamPackageBuilder packageBuilder,
             ClaudeMarketplaceAdapter claude,
             SkillRepositoryAdapter skillRepo, McpRegistryAdapter mcpRegistry,
-            SkillHubAdapter skillhub) {
+            SkillHubAdapter skillhub,
+            dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts) {
         this.upstreams = upstreams;
         this.upstreamItems = upstreamItems;
         this.upstreamReleases = upstreamReleases;
@@ -108,6 +111,7 @@ public class UpstreamSyncService {
         this.fetcher = fetcher;
         this.packageBuilder = packageBuilder;
         this.adapters = List.of(claude, skillRepo, mcpRegistry, skillhub);
+        this.upstreamArtifacts = upstreamArtifacts;
     }
 
     public record SyncResult(String upstream, int imported, int skipped, int failed,
@@ -142,14 +146,14 @@ public class UpstreamSyncService {
                     var exact = upstreamItems.findExact(source.id(), item.externalId(),
                             contentSha);
                     if (exact.isPresent()) {
-                        if (isVirtual(latestPublished(source, item))) {
+                        if (!isVirtual(latestPublished(source, item))) {
                             skipped++;
-                            continue; // unchanged and already pass-through
+                            continue; // unchanged and already stored as a real blob
                         }
-                        // Legacy blob-backed release with identical catalog metadata:
-                        // convert its latest view to pass-through without fetching it.
-                        Release published = publish(source, bot, reviewer, item, contentSha,
-                                exact.get().id(), adapterType);
+                        // Legacy pass-through row (pre-materialization sync): its
+                        // latest view is re-published as a stored, digest-carrying
+                        // release under the same provenance.
+                        Release published = publish(source, bot, reviewer, item, adapter);
                         upstreamReleases.save(new UpstreamRelease(UuidV7.generate(),
                                 exact.get().id(), published.id, exact.get().commitSha(),
                                 item.version(), contentSha, run.id(),
@@ -167,11 +171,10 @@ public class UpstreamSyncService {
                         skipped++;
                         continue;
                     }
-                    UUID virtualArtifactId = UuidV7.generate();
-                    Release published = publish(source, bot, reviewer, item, contentSha,
-                            virtualArtifactId, adapterType);
+                    UUID itemId = UuidV7.generate();
+                    Release published = publish(source, bot, reviewer, item, adapter);
                     recordProvenance(source, item, contentSha, published, run.id(),
-                            virtualArtifactId, adapterType, provenanceScope);
+                            itemId, adapterType, provenanceScope);
                     imported++;
                 } catch (Exception e) {
                     errors.add(item.slug() + ": " + e.getMessage());
@@ -231,12 +234,13 @@ public class UpstreamSyncService {
     // ---- publishing (plan §8: nothing bypasses scan → review → sign) ----
 
     /**
-     * Publishes one metadata-only pass-through entry. The placeholder hash is a
-     * catalog identity key, not a payload checksum; download-facing APIs suppress
-     * it and the actual payload is scanned and hashed only in the download request.
+     * Publishes one upstream entry with its payload materialized into blob
+     * storage, so the artifact carries a real SHA-256/size from the start and
+     * the review approval platform-signs the stored bytes exactly like a
+     * publisher upload (audit 3.1).
      */
     private Release publish(UpstreamSource source, StoreUser bot, StoreUser reviewer,
-            NormalizedItem item, String contentSha, UUID virtualArtifactId, String adapterType)
+            NormalizedItem item, UpstreamAdapter adapter)
             throws IOException, InterruptedException {
         boolean isSkill = "SKILL".equals(item.kind());
         ListingType type = isSkill ? ListingType.SKILL : ListingType.MCP;
@@ -256,16 +260,19 @@ public class UpstreamSyncService {
 
         Release release = allocateVersion(bot, listing, baseVersion(item), item.sourceUrl(),
                 source);
+        var stored = upstreamArtifacts.storePayload(source, item, adapter,
+                release.version.toString());
         publisher.attachVirtualArtifact(bot.id, release, new Release.ArtifactInfo(
                 UuidV7.generate(), ArtifactKind.PACKAGE, Platform.UNIVERSAL, Arch.UNIVERSAL,
-                "default", artifactName, 0, contentSha, null, null,
-                "upstream/" + virtualArtifactId, "application/octet-stream"));
+                "default", artifactName, stored.size(), stored.sha256(), null, null,
+                stored.blobKey(), "application/octet-stream"));
         return approveMetadataOnly(source, reviewer, release);
     }
 
     /**
-     * Metadata is reviewable without touching the payload. Payload security checks
-     * are deliberately deferred to UpstreamArtifactService in the download path.
+     * Catalog metadata is reviewed alongside the stored payload; payload
+     * security scanning already ran inside the materialization, and the review
+     * approval signs the stored artifact bytes like any other release.
      */
     private Release approveMetadataOnly(UpstreamSource source, StoreUser reviewer,
             Release release) {
@@ -288,7 +295,7 @@ public class UpstreamSyncService {
         releases.save(release);
         reviews.decide(reviewer.id, review.id,
                 new dev.infinia.store.contract.api.ReviewDtos.ReviewDecisionRequest("APPROVE",
-                        "Metadata-only upstream entry; payload scan is enforced at download ("
+                        "Upstream entry with scan-materialized payload ("
                                 + source.name() + ")"));
         return releases.findById(release.id).orElse(release);
     }

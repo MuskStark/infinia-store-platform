@@ -8,13 +8,23 @@ import { onMounted, ref, watch } from 'vue';
 import { useReducedMotion } from '../composables/useReducedMotion';
 
 const props = withDefaults(
-  defineProps<{ value: number; duration?: number; decimals?: number }>(),
+  defineProps<{
+    value: number;
+    duration?: number;
+    decimals?: number;
+    /** Formats each rendered frame; defaults to plain fixed-point digits. */
+    format?: (value: number) => string;
+  }>(),
   { duration: 1.6, decimals: 0 },
 );
 
 const reduced = useReducedMotion();
 const displayed = ref(0);
 let frame = 0;
+
+function render(value: number): string {
+  return props.format ? props.format(value) : value.toFixed(props.decimals);
+}
 
 function animateTo(target: number) {
   cancelAnimationFrame(frame);
@@ -40,5 +50,5 @@ watch(() => props.value, (value) => animateTo(value));
 </script>
 
 <template>
-  <span class="magic-number-ticker" aria-live="off">{{ displayed.toFixed(decimals) }}</span>
+  <span class="magic-number-ticker" aria-live="off">{{ render(displayed) }}</span>
 </template>

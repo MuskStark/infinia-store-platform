@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   api,
+  ApiRequestError,
   type CatalogItem,
   type ListingDetail,
   type PublisherRelease,
@@ -26,6 +27,16 @@ const { t } = useI18n();
 const store = usePublisherStore();
 const auth = useAuthStore();
 const message = ref('');
+
+/** RFC 9457 problems carry stable codes; prefer the localized text. */
+function problemText(e: unknown): string {
+  if (e instanceof ApiRequestError && e.code) {
+    const localized = t(`errors.${e.code}`);
+    if (localized !== `errors.${e.code}`) return localized;
+    return e.detail ?? e.message;
+  }
+  return e instanceof Error ? e.message : t('errors.server');
+}
 
 /** 命名空间下拉:我所在组织保留的命名空间(= 组织标识)。 */
 const orgNamespaces = ref<string[]>([]);
@@ -100,17 +111,26 @@ async function applyGate() {
   }
 }
 
+/**
+ * infinia://app/official/fengyu-host → { type: 'app', namespace: 'official',
+ * slug: 'fengyu-host' }. The protocol separator leaves an empty first path
+ * segment after the scheme, so split('/') must skip it before destructuring.
+ */
+function splitCoordinate(coordinate: string): { type: string; namespace: string; slug: string } {
+  const [type = '', namespace = '', slug = ''] = coordinate.replace(/^infinia:\/\//, '').split('/');
+  return { type, namespace, slug };
+}
+
 async function createRelease() {
   const selected = selectedListing.value;
   if (!selected?.coordinate) return;
   busy.value = true;
   try {
     // Resolve the listing UUID from the public detail endpoint.
-    const [, type, namespace, slug] = selected.coordinate.split('/');
+    const { namespace, slug } = splitCoordinate(selected.coordinate);
     const detail = await api.get<ListingDetail>(
       `/api/v1/listings/${namespace}/${slug}`,
     );
-    void type;
     const release = await api.post<PublisherRelease>(
       `/api/v1/publisher/listings/${detail.listingId}/releases`,
       releaseForm.value,
@@ -119,6 +139,8 @@ async function createRelease() {
     currentRelease.value = release;
     await store.loadReleases(detail.listingId);
     message.value = t('publisher.releaseCreated');
+  } catch (e) {
+    message.value = problemText(e);
   } finally {
     busy.value = false;
   }
@@ -173,7 +195,7 @@ async function selectListing(listing: CatalogItem) {
   // Resolve the listing UUID, then load its releases (incl. DRAFTs) so an
   // interrupted draft can be resumed — the upload area keys off currentRelease.
   try {
-    const [, , namespace, slug] = listing.coordinate.split('/');
+    const { namespace, slug } = splitCoordinate(listing.coordinate);
     const detail = await api.get<ListingDetail>(
       `/api/v1/listings/${namespace}/${slug}`,
     );
@@ -188,6 +210,7 @@ async function selectListing(listing: CatalogItem) {
     }
   } catch {
     /* detail load failure leaves the wizard usable for new releases */
+    message.value = t('publisher.releasesUnavailable');
   }
 }
 

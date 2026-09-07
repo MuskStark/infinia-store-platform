@@ -56,6 +56,8 @@ export default {
       external: 'External reachability',
     },
     incidentResolved: 'Resolved',
+    incidentUnavailable: ' is unavailable',
+    incidentDegraded: ' is degraded',
     incidentInvestigating: 'Investigating',
     durationMinutes: 'Lasted {n} minutes',
     durationHours: 'Lasted {n} hours',

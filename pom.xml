@@ -49,6 +49,11 @@
         <!-- S3-compatible artifact storage (MinIO in compose, any SigV4 endpoint). -->
         <aws-sdk.version>2.54.13</aws-sdk.version>
 
+        <!-- Smart-HTTP serving of the exported ecosystem git repos (audit 3.4).
+             Independent line from the Spring BOM; 7.x is the current Jakarta
+             Servlet (Boot 4 / Tomcat 11) generation of JGit. -->
+        <jgit.version>7.7.1.202607240634-r</jgit.version>
+
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.5.3</maven-surefire-plugin.version>
         <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
@@ -71,6 +76,13 @@
                 <version>${aws-sdk.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- JGit smart-HTTP server (outside the Boot BOM); the core bundle
+                 arrives transitively with matching version. -->
+            <dependency>
+                <groupId>org.eclipse.jgit</groupId>
+                <artifactId>org.eclipse.jgit.http.server</artifactId>
+                <version>${jgit.version}</version>
             </dependency>
             <!-- Reactor-internal modules -->
             <dependency>

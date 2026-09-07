@@ -93,9 +93,25 @@ Register native `.fyp` listings as a `FENGYU` source using
 
 Publisher-owned Skill/MCP blobs may also be exposed at
 `http://localhost:8080/api/v1/compat/fengyu/claude-marketplace.json`. Aggregated upstream
-entries are intentionally excluded from that disk-backed Git export: synchronization stores
-metadata only, and FengYu downloads cause a request-scoped fetch, security scan and compatible
-package build with `Cache-Control: no-store`.
+entries are intentionally excluded from that disk-backed Git export: their payloads ship
+through the store's signed blob delivery instead. Marketplace entries default to
+`file://` clone URLs (host on the same machine); set `store.export.git-public-base`
+(for example `https://store.example.com/git`) to serve the exported repositories to
+remote hosts through the read-only smart-HTTP mount at `/git/**` — clone/fetch only,
+push is refused. Synchronization materializes every
+imported upstream payload — fetch, security scan, compatible package build — into the
+content-addressed blob store, so tickets and catalogs carry a real, platform-signed
+digest and downloads serve the stored blob without re-touching the upstream.
+
+For rc2 clients, declare a compatible release range such as
+`requiresHost: ">=4.0.0-rc.1 <5.0.0"`; `>=4.0.0` intentionally excludes rc2.
+The native FengYu store client requires a trusted platform Ed25519 key. Provision
+`trusted-store-keys.json` in the host runtime root with
+`{"keys":[{"id":"<platform key ID>","publicKey":"<Base64 X.509 DER public key>"}],"revokedKeys":[]}`.
+Obtain the public key from the deployment operator through a trusted channel;
+never distribute the store's private `.b64` signing-key file. For a loopback/LAN
+store, also enable the host's private-network setting and configure its store API
+base. Production should use HTTPS and retain signature verification.
 
 ### Main-application (host) updates
 
@@ -115,20 +131,23 @@ STORE_CLI_CLIENT_SECRET=<secret> \
 
 The script authenticates with the store CLI client (CI service account), creates the
 `official/fengyu-host` APP listing on first use, uploads every asset through the presigned
-pipeline and submits for review. After reviewer approval, desktop hosts check for updates
-through the anonymous signed feed:
+pipeline and submits for review. Desktop hosts update through two anonymous surfaces:
 
-```
-GET /api/v1/updates/app?current=4.0.0&channel=stable&os=macos&arch=arm64
-                        &mode=installer&variant=jre&installId=<opaque-id>
-```
+- The Debian client (electron-updater generic provider, channel `latest`) fetches
+  `GET /fengyu-updates/deb/latest-linux.yml` (x64) or
+  `GET /fengyu-updates/deb/latest-linux-arm64.yml` (ARM64) — an electron-builder-format document
+  (`version`, `files[]` with `url`/`sha512`/`size`, `releaseDate`, `path`) announcing the
+  newest fully rolled-out stable release that ships a `…-linux-<arch>.deb` installer, with
+  the deb artifacts served from the same directory and digests derived from the stored
+  blobs. Each feed includes only its CPU architecture and the `lite` variant;
+  JRE and UOS packages are excluded. RC releases are downloadable from the catalog
+  after review, but these stable-only automatic update feeds do not announce them.
+- The Windows portable updater fetches the GitHub-releases-compatible mirror at
+  `GET /api/v1/compat/fengyu/fengyu-releases/api/releases/latest`.
 
-`mode` (`installer` | `portable` | `any`) and `variant` route the request to the matching
-distribution; rollout bucketing stays stable per `installId`. Every returned artifact URL
-is a short-lived HMAC ticket and the response carries the artifact SHA-256, the Ed25519
-platform signature and the `keyId` for client-side verification. The advertised
-`minimumSupportedVersion` floor is operator-configurable
-(`STORE_APP_MINIMUM_SUPPORTED_VERSION`), and every published release serves a
+`GET /api/v1/updates/app` is RESERVED and deliberately answers `501`: no shipped client
+consumed its historic JSON shape, so an accidental integration fails loudly instead of
+relying on an unmaintained contract. Every published release also serves a
 sha256sum-compatible manifest at `GET /api/v1/releases/{releaseId}/checksums.txt`
 (design §8.3).
 
