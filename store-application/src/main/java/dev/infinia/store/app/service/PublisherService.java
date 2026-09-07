@@ -134,8 +134,15 @@ public class PublisherService {
         listing.status = "ACTIVE";
         listing.category = request.category();
         listing.tags = request.tags() == null ? new ArrayList<>() : new ArrayList<>(request.tags());
-        listing.defaultChannel = request.defaultChannel() == null ? Channel.STABLE
-                : Channel.valueOf(request.defaultChannel().toUpperCase());
+        if (request.defaultChannel() != null && !request.defaultChannel().isBlank()) {
+            try {
+                listing.defaultChannel = Channel.parse(request.defaultChannel());
+            } catch (IllegalArgumentException e) {
+                throw new DomainException(StoreErrorCode.VALIDATION_FAILED, e.getMessage());
+            }
+        } else {
+            listing.defaultChannel = Channel.STABLE;
+        }
         listing.publisherUserId = publisherUserId;
         listing.organizationId = namespace.organizationId();
         listing.minBeeLevel = normalizeMinBeeLevel(request.minBeeLevel());
@@ -228,23 +235,32 @@ public class PublisherService {
                                 + "(>= <= > < = only; no ^ ~ x *)");
             }
         }
-        if (releases.existsByListingIdAndStatus(listing.id, request.version(),
-                List.of(ReleaseStatus.DRAFT, ReleaseStatus.UPLOADING, ReleaseStatus.SCANNING,
-                        ReleaseStatus.IN_REVIEW, ReleaseStatus.CHANGES_REQUESTED,
-                        ReleaseStatus.APPROVED, ReleaseStatus.PUBLISHED, ReleaseStatus.QUARANTINED,
-                        // Rejected versions keep the unique index slot too — the
-                        // publisher must re-submit under a new version, not clash on 500.
-                        ReleaseStatus.REJECTED))) {
+        // Duplicate-version gate aligned with the DB unique index (listing_id, version):
+        // EVERY status occupies its slot — yanked/deprecated/rejected included — so the
+        // application check never waves a row through that the index then rejects with
+        // a raw 500 (audit P2-9). SemVer equality also catches versions that differ
+        // only in build metadata (4.0.0 vs 4.0.0+build): the strings are distinct, so
+        // the index would allow them, but they tie on precedence and break "latest".
+        if (releases.findByListingId(listing.id).stream()
+                .anyMatch(existing -> existing.version.equals(version))) {
             throw new DomainException(StoreErrorCode.DUPLICATE_VERSION,
-                    "Version " + request.version() + " already exists for this listing");
+                    "Version " + version + " already exists for this listing"
+                            + " (build-metadata-only variants are not distinct)");
         }
         Release release = new Release();
         release.id = UuidV7.generate();
         release.listingId = listing.id;
         release.version = version;
         release.status = ReleaseStatus.DRAFT;
-        release.channel = request.channel() == null ? listing.defaultChannel
-                : Channel.valueOf(request.channel().toUpperCase());
+        Channel requestedChannel = listing.defaultChannel;
+        if (request.channel() != null && !request.channel().isBlank()) {
+            try {
+                requestedChannel = Channel.parse(request.channel());
+            } catch (IllegalArgumentException e) {
+                throw new DomainException(StoreErrorCode.VALIDATION_FAILED, e.getMessage());
+            }
+        }
+        release.channel = requestedChannel;
         release.createdAt = Instant.now();
         release.requiresHost = request.requiresHost();
         release.license = request.license();
@@ -253,6 +269,30 @@ public class PublisherService {
         release.rolloutPercent = request.rolloutPercent() == null ? 100
                 : Math.max(0, Math.min(100, request.rolloutPercent()));
         if (request.dependencies() != null) {
+            // Same host-compatibility gate as requiresHost: the FengYu host's range
+            // parser only accepts >= <= > < = comparators. A release shipping ^/~
+            // shorthands would resolve here but fail at install time on the host —
+            // approval must imply installability (audit P3).
+            for (dev.infinia.store.contract.api.ListingDtos.DependencyDto dep
+                    : request.dependencies()) {
+                if (dep.range() == null || dep.range().isBlank()) {
+                    continue;
+                }
+                try {
+                    SemVerRange.parse(dep.range());
+                } catch (IllegalArgumentException e) {
+                    throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                            "dependencies[" + dep.coordinate() + "].range is not a valid"
+                                    + " SemVer range: " + dep.range());
+                }
+                if (!dev.infinia.store.scanner.FengYuHostRules
+                        .hostCompatibleRange(dep.range())) {
+                    throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                            "dependencies[" + dep.coordinate() + "].range must use"
+                                    + " host-compatible syntax (>= <= > < = only;"
+                                    + " no ^ ~ x *): " + dep.range());
+                }
+            }
             release.dependencies = request.dependencies().stream()
                     .map(d -> new Release.DependencyDecl(d.coordinate(), d.range(), d.optional()))
                     .toList();
@@ -373,8 +413,22 @@ public class PublisherService {
         long size = blobs.size(blobKey);
         String sha256 = sha256Of(blobKey);
         String mimeType = mimeType(session.filename);
-        return transactions.execute(txStatus -> finalizeUpload(uploadId, blobKey, size, sha256,
-                mimeType));
+        // A declared size is a commitment: accepting a different body would let a
+        // client smuggle arbitrary sizes past the upload limit checks that ran at
+        // session creation (audit P3).
+        if (session.declaredSize > 0 && session.declaredSize != size) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "Uploaded size " + size + " does not match the declared size "
+                            + session.declaredSize + " — restart the upload session");
+        }
+        UploadSessionInfo completed = transactions.execute(txStatus -> finalizeUpload(uploadId,
+                blobKey, size, sha256, mimeType));
+        if ("VOIDED".equals(completed.status)) {
+            throw new DomainException(StoreErrorCode.INVALID_STATE_TRANSITION,
+                    "Upload session was voided: the release already left the editing"
+                            + " phase — create a new release for further changes");
+        }
+        return completed;
     }
 
     /** Recovers the digest from a content-addressed key ({@code sha256/<2>/<62>}). */
@@ -402,14 +456,58 @@ public class PublisherService {
 
         Release release = releases.findById(session.releaseId).orElseThrow(
                 () -> new DomainException(StoreErrorCode.RELEASE_NOT_FOUND, "Release missing"));
+        // State-machine gate (audit P1-2): uploads may only complete while the
+        // release is still being edited. A session issued before submit must not
+        // smuggle unscanned artifacts into a release that already entered the
+        // scan/review pipeline. The session is voided durably (throwing here would
+        // roll the claim back and leave it replayable); completeUpload translates
+        // the voided state into a 409 for the client.
+        if (release.status != ReleaseStatus.DRAFT
+                && release.status != ReleaseStatus.UPLOADING
+                && release.status != ReleaseStatus.REJECTED
+                && release.status != ReleaseStatus.CHANGES_REQUESTED) {
+            session.status = "VOIDED";
+            uploads.save(session);
+            return session;
+        }
+        if (release.status == ReleaseStatus.REJECTED
+                || release.status == ReleaseStatus.CHANGES_REQUESTED) {
+            // Explicit rework transition (audit P1-3): re-uploading moves the
+            // release back into the editing path so it can be submitted again.
+            ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.DRAFT);
+            release.status = ReleaseStatus.DRAFT;
+        }
         if (release.status == ReleaseStatus.DRAFT) {
             ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.UPLOADING);
             release.status = ReleaseStatus.UPLOADING;
         }
-        release.artifacts = new ArrayList<>(release.artifacts);
-        release.artifacts.add(new Release.ArtifactInfo(UuidV7.generate(), session.kind,
-                session.platform, session.arch, session.variant, session.filename, size, sha256,
-                null, null, blobKey, mimeType));
+        // Same-route replacement semantics (audit P1-3): a re-upload after
+        // CHANGES_REQUESTED targets the same (platform, arch, kind, variant) slot —
+        // replacing the row keeps the pk_release_artifact contract instead of
+        // dying on a duplicate-key 500 with no artifact-delete API to recover.
+        boolean replaced = false;
+        List<Release.ArtifactInfo> artifacts = new ArrayList<>();
+        for (Release.ArtifactInfo a : release.artifacts) {
+            if (a.platform() == session.platform && a.arch() == session.arch
+                    && a.kind() == session.kind
+                    && java.util.Objects.equals(a.variant(), session.variant)) {
+                if (!replaced) {
+                    artifacts.add(new Release.ArtifactInfo(UuidV7.generate(), session.kind,
+                            session.platform, session.arch, session.variant, session.filename,
+                            size, sha256, null, null, blobKey, mimeType));
+                    replaced = true;
+                }
+                // A duplicate legacy route drops out — one artifact per slot.
+            } else {
+                artifacts.add(a);
+            }
+        }
+        if (!replaced) {
+            artifacts.add(new Release.ArtifactInfo(UuidV7.generate(), session.kind,
+                    session.platform, session.arch, session.variant, session.filename, size,
+                    sha256, null, null, blobKey, mimeType));
+        }
+        release.artifacts = artifacts;
         releases.save(release);
 
         session.status = "COMPLETED";
@@ -454,7 +552,24 @@ public class PublisherService {
         audit.record("USER", publisherUserId.toString(), "release.submit", "RELEASE",
                 release.id.toString(), null, release.status.name(), null);
 
-        scanPipeline.runScan(release.id, review.id);
+        // The async scan must not race its own trigger: reading the new SCANNING
+        // row before this transaction commits made the pipeline wait on a 2s poll
+        // (or wedge forever when it lost the race). Registering an afterCommit
+        // synchronization hands the release+review over only once they are durable
+        // (audit P2-6); a scheduled watchdog still reconciles anything stuck.
+        if (org.springframework.transaction.support.TransactionSynchronizationManager
+                .isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                    .registerSynchronization(
+                            new org.springframework.transaction.support.TransactionSynchronization() {
+                                @Override
+                                public void afterCommit() {
+                                    scanPipeline.runScan(release.id, review.id);
+                                }
+                            });
+        } else {
+            scanPipeline.runScan(release.id, review.id);
+        }
         return review;
     }
 

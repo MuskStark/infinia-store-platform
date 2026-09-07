@@ -56,14 +56,29 @@ public class ResolutionController {
         Map<String, String> installed = new LinkedHashMap<>();
         if (body.client().installed() != null) {
             for (ResolutionDtos.InstalledRef ref : body.client().installed()) {
-                installed.put(ref.coordinate(), ref.version());
+                // Normalize to the solver's key form (lowercased listing coordinate):
+                // raw client strings like "Infinia://PLUGIN/Official/Tool" would
+                // never match and always reinstall (audit P2-3). Unparsable
+                // coordinates are ignored rather than failing the whole request.
+                try {
+                    InfiniaCoordinate coordinate = InfiniaCoordinate.parse(ref.coordinate());
+                    installed.put(coordinate.listingPart().toString(), ref.version());
+                } catch (IllegalArgumentException invalidCoordinate) {
+                    // telemetry-style input, not trusted — skip silently
+                }
+            }
+        }
+        Channel requestedChannel = null;
+        if (body.client().channel() != null && !body.client().channel().isBlank()) {
+            try {
+                requestedChannel = Channel.parse(body.client().channel());
+            } catch (IllegalArgumentException e) {
+                throw new DomainException(StoreErrorCode.VALIDATION_FAILED, e.getMessage());
             }
         }
         DependencySolver.Result result = catalog.resolve(root, body.range(),
                 body.client().hostVersion(), body.client().os(), body.client().arch(),
-                body.client().channel() == null ? null
-                        : Channel.valueOf(body.client().channel().toUpperCase()),
-                installed);
+                requestedChannel, installed);
 
         List<ResolutionDtos.ResolutionItemDto> plan = result.plan().stream()
                 .map(r -> new ResolutionDtos.ResolutionItemDto(

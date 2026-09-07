@@ -41,6 +41,7 @@ class UpstreamProvenanceAdapters {
             e.commitSha = item.commitSha();
             e.upstreamVersion = item.upstreamVersion();
             e.contentSha256 = item.contentSha256();
+            e.adapterType = item.adapterType();
             e.firstSeenAt = item.firstSeenAt();
             e.lastSeenAt = item.lastSeenAt();
             e.removedAt = item.removedAt();
@@ -80,7 +81,7 @@ class UpstreamProvenanceAdapters {
         private static UpstreamItem toDomain(UpstreamItemEntity e) {
             return new UpstreamItem(e.id, e.sourceId, e.externalId, e.listingId,
                     e.sourceUrl, e.sourcePath, e.ref, e.commitSha, e.upstreamVersion,
-                    e.contentSha256, e.firstSeenAt, e.lastSeenAt, e.removedAt);
+                    e.contentSha256, e.adapterType, e.firstSeenAt, e.lastSeenAt, e.removedAt);
         }
     }
 

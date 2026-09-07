@@ -29,6 +29,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,12 +74,14 @@ public class SeedData {
     private final boolean enabled;
     /** Demo listings/releases; accounts always seed (tests depend on the catalog). */
     private final boolean demoContent;
+    private final Environment environment;
 
     public SeedData(IdentityRepositories.UserRepository users,
             IdentityRepositories.CredentialRepository credentials,
             IdentityRepositories.NamespaceRepository namespaces,
             ListingRepository listings, ReleaseRepository releases, PasswordHasher hasher,
             BlobStorage blobs, CatalogService catalog, PlatformSigningService signing,
+            Environment environment,
             @Value("${store.seed.enabled:false}") boolean enabled,
             @Value("${store.seed.demo-content:false}") boolean demoContent) {
         this.users = users;
@@ -89,6 +93,7 @@ public class SeedData {
         this.blobs = blobs;
         this.catalog = catalog;
         this.signing = signing;
+        this.environment = environment;
         this.enabled = enabled;
         this.demoContent = demoContent;
     }
@@ -100,8 +105,16 @@ public class SeedData {
         if (!enabled) {
             return;
         }
+        // Demo credentials are PUBLIC knowledge (README/tests). Seeding outside a
+        // development profile would hand the admin account to anyone who read the
+        // repo — refuse to run instead (audit P1-8).
+        if (!environment.acceptsProfiles(Profiles.of("local", "dev", "test"))) {
+            throw new IllegalStateException("store.seed.enabled=true is only allowed with"
+                    + " the local/dev/test profiles — disable seeding or use a real"
+                    + " admin bootstrap in production-like deployments");
+        }
         if (users.findByEmailNormalized(ADMIN_EMAIL).isPresent()) {
-            repairDemoPasswords();
+            ensureDemoAccounts();
             return;
         }
         Instant now = Instant.now();
@@ -292,27 +305,32 @@ public class SeedData {
     // ---- helpers ----
 
     /**
-     * Existing local databases may predate a change to the hashing scheme; re-hash
-     * the five demo credentials when they no longer match DEMO_PASSWORD so direct
-     * login keeps working (idempotent, demo accounts only).
+     * Creates any of the five demo accounts that are still missing — and NEVER
+     * touches an existing credential (audit P1-8): the previous "repair" behavior
+     * reset the admin's changed password back to the publicly documented demo
+     * value on every boot, silently surrendering the admin account whenever seed
+     * was enabled on a real deployment.
      */
-    private void repairDemoPasswords() {
-        for (String email : List.of(ADMIN_EMAIL, REVIEWER_EMAIL, PUBLISHER_EMAIL, CI_EMAIL,
-                USER_EMAIL)) {
-            users.findByEmailNormalized(email).ifPresent(user -> {
-                Credential credential = credentials
-                        .findByUserIdAndType(user.id, Credential.CredentialType.PASSWORD)
-                        .orElse(null);
-                if (credential == null || !hasher.matches(DEMO_PASSWORD, credential.secretHash())) {
-                    credentials.save(new Credential(
-                            credential == null ? dev.infinia.store.domain.service.UuidV7.generate()
-                                    : credential.id(),
-                            user.id, Credential.CredentialType.PASSWORD,
-                            hasher.hash(DEMO_PASSWORD),
-                            credential == null ? Instant.now() : credential.createdAt()));
-                    log.info("Re-hashed demo credential for {}", email);
-                }
-            });
+    private void ensureDemoAccounts() {
+        Instant now = Instant.now();
+        if (users.findByEmailNormalized(ADMIN_EMAIL).isEmpty()) {
+            user(ADMIN_EMAIL, "Store Admin", Set.of(UserRole.USER, UserRole.PLATFORM_ADMIN),
+                    now);
+        }
+        if (users.findByEmailNormalized(REVIEWER_EMAIL).isEmpty()) {
+            user(REVIEWER_EMAIL, "Demo Reviewer", Set.of(UserRole.USER, UserRole.REVIEWER),
+                    now);
+        }
+        if (users.findByEmailNormalized(PUBLISHER_EMAIL).isEmpty()) {
+            user(PUBLISHER_EMAIL, "Infinia Official",
+                    Set.of(UserRole.USER, UserRole.PUBLISHER), BeeLevel.GUARD.level, now);
+        }
+        if (users.findByEmailNormalized(CI_EMAIL).isEmpty()) {
+            user(CI_EMAIL, "CI Service Account", Set.of(UserRole.USER, UserRole.PUBLISHER,
+                    UserRole.REVIEWER), now);
+        }
+        if (users.findByEmailNormalized(USER_EMAIL).isEmpty()) {
+            user(USER_EMAIL, "Demo User", Set.of(UserRole.USER), BeeLevel.WORKER.level, now);
         }
     }
 

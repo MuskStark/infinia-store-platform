@@ -38,8 +38,14 @@ public class UpdatesController {
             throw new DomainException(StoreErrorCode.INVALID_SEMVER,
                     "current must be a valid SemVer");
         }
+        Channel requestedChannel;
+        try {
+            requestedChannel = Channel.parse(channel);
+        } catch (IllegalArgumentException e) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED, e.getMessage());
+        }
         CatalogService.UpdateFeed feed = catalog.appUpdate(current,
-                Channel.valueOf(channel.trim().toUpperCase()), os, arch, mode, variant, installId);
+                requestedChannel, os, arch, mode, variant, installId);
         if (feed.latestVersion() == null) {
             return new DeliveryDtos.AppUpdateDto(null, false, 100, null, java.util.List.of(), null, null,
                     null, null, null, channel);

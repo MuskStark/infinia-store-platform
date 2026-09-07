@@ -57,8 +57,16 @@ public class ListingController {
                     "Listing not found: " + namespace + "/" + slug);
         }
         beeLevels.requireListingAccess(listing);
-        Channel channelFilter = channel == null ? null
-                : Channel.valueOf(channel.trim().toUpperCase());
+        Channel channelFilter = null;
+        if (channel != null) {
+            try {
+                channelFilter = Channel.parse(channel);
+            } catch (IllegalArgumentException e) {
+                throw new dev.infinia.store.domain.DomainException(
+                        dev.infinia.store.contract.error.StoreErrorCode.VALIDATION_FAILED,
+                        e.getMessage());
+            }
+        }
         List<Release> releases = catalog.visibleReleases(listing, channelFilter);
         var upstream = upstreamItems.findLatestByListingId(listing.id).orElse(null);
         var source = upstream == null ? null

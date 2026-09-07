@@ -259,17 +259,26 @@ public class ReviewService {
      * Admin cleanup for manually uploaded host update packages: hard-removes the
      * release row so it disappears from the app update feed and the compat
      * mirror immediately. Published releases do NOT need a yank first — removal
-     * is the stronger form of the same action. Audited as release.delete.
+     * is the stronger form of the same action. Audited as release.delete, and
+     * emits the same outbox event pattern as the other release lifecycle actions
+     * so webhook consumers and indexers learn about the removal (audit P3).
      */
     @Transactional
     public void deleteRelease(UUID adminUserId, UUID releaseId, String reason) {
         Release release = releases.findById(releaseId).orElseThrow(
                 () -> new DomainException(StoreErrorCode.RELEASE_NOT_FOUND,
                         "Release not found"));
+        Listing listing = listings.findById(release.listingId).orElse(null);
+        String coordinate = listing == null ? releaseId.toString()
+                : listing.coordinate().withVersion(release.version).toString();
         releases.deleteById(releaseId);
+        String effectiveReason = reason == null || reason.isBlank()
+                ? "admin manual upload cleanup" : reason;
+        enqueue(StoreEventPayloads.RELEASE_DELETED, release.id, toJson(
+                new StoreEventPayloads.ReleaseDeleted(coordinate, release.id.toString(),
+                        effectiveReason)));
         audit.record("USER", adminUserId.toString(), "release.delete", "RELEASE",
-                releaseId.toString(), release.status.name(),
-                reason == null || reason.isBlank() ? "admin manual upload cleanup" : reason, null);
+                releaseId.toString(), release.status.name(), effectiveReason, null);
     }
 
     // ---- security withdrawals (design §8.1) ----

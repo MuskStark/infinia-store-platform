@@ -31,6 +31,8 @@ public class UpstreamItemEntity {
     public String upstreamVersion;
     @Column(name = "content_sha256", nullable = false, length = 64)
     public String contentSha256;
+    @Column(name = "adapter_type", length = 40)
+    public String adapterType;
     @Column(name = "first_seen_at", nullable = false)
     public Instant firstSeenAt;
     @Column(name = "last_seen_at", nullable = false)

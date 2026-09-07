@@ -128,6 +128,12 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health/**", "/login", "/error", "/web/**", "/",
                                 "/oauth2/session-login", "/oauth2/session-login/csrf")
                         .permitAll()
+                        // Read-only git smart-HTTP endpoints (planned): anonymous clone/
+                        // fetch of the exported ecosystem repos. The servlet itself is
+                        // served by a later change; the rule is in place so it ships
+                        // anonymous-read by design, and writes stay unauthenticated-free.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/git/**")
+                        .permitAll()
                         // Non-health actuator endpoints stay behind a session (unchanged).
                         .requestMatchers("/actuator/**").authenticated()
                         .anyRequest().permitAll())
@@ -232,13 +238,18 @@ public class SecurityConfig {
                     .equals(context.getAuthorizationGrantType())) {
                 // The CLI acts as the seeded CI service account (design §7.2 PAT semantics:
                 // only the account id and roles live in the token, never secrets).
+                // When that account was never seeded, the token must NOT silently
+                // carry publisher+reviewer powers — refuse issuance instead (audit P3).
                 var ci = userRepository.findByEmailNormalized("ci@infinia.local");
                 if (ci.isPresent()) {
                     context.getClaims().claim("uid", ci.get().id.toString());
                     context.getClaims().claim("roles", ci.get().roles.stream()
                             .map(Enum::name).toList());
                 } else {
-                    context.getClaims().claim("roles", List.of("PUBLISHER", "REVIEWER", "USER"));
+                    throw new IllegalStateException(
+                            "client_credentials tokens require the seeded CI service account"
+                                    + " (ci@infinia.local) — enable store.seed.enabled in a"
+                                    + " development profile or provision the account");
                 }
                 return;
             }

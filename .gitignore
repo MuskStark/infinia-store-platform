@@ -16,8 +16,9 @@ dist/
 coverage/
 *.tsbuildinfo
 
-# --- Runtime data (local blob store, generated keys, logs) ---
+# --- Runtime data (local database, blob store, generated keys, logs) ---
 data/
+tmp/
 logs/
 *.log
 

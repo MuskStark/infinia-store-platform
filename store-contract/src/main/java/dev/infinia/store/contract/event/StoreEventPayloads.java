@@ -15,6 +15,7 @@ public final class StoreEventPayloads {
     public static final String RELEASE_REJECTED = "release.rejected";
     public static final String RELEASE_YANKED = "release.yanked";
     public static final String RELEASE_QUARANTINED = "release.quarantined";
+    public static final String RELEASE_DELETED = "release.deleted";
     public static final String LISTING_CREATED = "listing.created";
     public static final String USER_REGISTERED = "user.registered";
 
@@ -27,6 +28,8 @@ public final class StoreEventPayloads {
     public record ReleaseYanked(String coordinate, String releaseId, String reason) {}
 
     public record ReleaseQuarantined(String coordinate, String releaseId, String reason) {}
+
+    public record ReleaseDeleted(String coordinate, String releaseId, String reason) {}
 
     public record ListingCreated(String coordinate, String type, String name) {}
 }

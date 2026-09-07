@@ -83,7 +83,11 @@ public final class DependencySolver {
             Map<String, String> installed, int depth) {
         String key = coordinate.listingPart().toString();
         if (chosen.containsKey(key)) {
-            return true;
+            // A previously chosen version satisfies one branch's constraint but may
+            // violate another's (A wants B@^1, C wants B@^2): re-check the current
+            // constraint instead of silently reusing the pick — otherwise the plan
+            // installs a broken combination while reporting it resolvable.
+            return revalidateChosen(key, range, optionalDecl, chosen, missing);
         }
         if (visiting.contains(key)) {
             warnings.add("Dependency cycle detected at " + key);
@@ -145,6 +149,32 @@ public final class DependencySolver {
         }
         chosen.put(key, new Resolved(selected, already, selected.version().toString()));
         return true;
+    }
+
+    /**
+     * Re-checks a new constraint against the already-selected version. Matching (or
+     * unconstrained) requests reuse the pick; conflicts surface as a Missing entry
+     * with a conflict reason so the plan honestly reports the broken combination.
+     */
+    private static boolean revalidateChosen(String key, String range, boolean optionalDecl,
+            Map<String, Resolved> chosen, List<Missing> missing) {
+        if (range == null || range.isBlank() || range.equals("*")) {
+            return true;
+        }
+        SemVerRange constraint;
+        try {
+            constraint = SemVerRange.parse(range);
+        } catch (IllegalArgumentException invalidRange) {
+            return true; // select() already rejects unparsable ranges for fresh picks
+        }
+        SemVer chosenVersion = chosen.get(key).candidate().version();
+        if (constraint.matches(chosenVersion)) {
+            return true;
+        }
+        missing.add(new Missing(key, range, optionalDecl,
+                "Conflicting constraint: " + key + " was resolved to " + chosenVersion
+                        + ", which does not satisfy '" + range + "'"));
+        return false;
     }
 
     /**

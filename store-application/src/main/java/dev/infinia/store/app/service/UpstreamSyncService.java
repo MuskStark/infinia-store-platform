@@ -130,8 +130,13 @@ public class UpstreamSyncService {
             StoreUser reviewer = requireReviewerAccount();
             ensureNamespace(source.targetNamespace(), bot);
             RepoFetcher.SyncScope provenanceScope = new RepoFetcher.SyncScope();
+            // AUTO is probed exactly once per sync; the concrete adapter decision is
+            // persisted on every provenance row so the download path replays the
+            // same adapter instead of re-probing (audit P1-7).
+            UpstreamAdapter adapter = resolveAdapter(source);
+            String adapterType = adapter.type();
 
-            for (NormalizedItem item : resolveAdapter(source).discover(source, fetcher)) {
+            for (NormalizedItem item : adapter.discover(source, fetcher)) {
                 try {
                     String contentSha = packageBuilder.metadataDigest(item);
                     var exact = upstreamItems.findExact(source.id(), item.externalId(),
@@ -144,7 +149,7 @@ public class UpstreamSyncService {
                         // Legacy blob-backed release with identical catalog metadata:
                         // convert its latest view to pass-through without fetching it.
                         Release published = publish(source, bot, reviewer, item, contentSha,
-                                exact.get().id());
+                                exact.get().id(), adapterType);
                         upstreamReleases.save(new UpstreamRelease(UuidV7.generate(),
                                 exact.get().id(), published.id, exact.get().commitSha(),
                                 item.version(), contentSha, run.id(),
@@ -158,15 +163,15 @@ public class UpstreamSyncService {
                             && upstreamItems.findLatest(source.id(), item.externalId())
                                     .isEmpty()) {
                         recordProvenance(source, item, contentSha, existing, run.id(),
-                                UuidV7.generate(), provenanceScope);
+                                UuidV7.generate(), adapterType, provenanceScope);
                         skipped++;
                         continue;
                     }
                     UUID virtualArtifactId = UuidV7.generate();
                     Release published = publish(source, bot, reviewer, item, contentSha,
-                            virtualArtifactId);
+                            virtualArtifactId, adapterType);
                     recordProvenance(source, item, contentSha, published, run.id(),
-                            virtualArtifactId, provenanceScope);
+                            virtualArtifactId, adapterType, provenanceScope);
                     imported++;
                 } catch (Exception e) {
                     errors.add(item.slug() + ": " + e.getMessage());
@@ -231,7 +236,7 @@ public class UpstreamSyncService {
      * it and the actual payload is scanned and hashed only in the download request.
      */
     private Release publish(UpstreamSource source, StoreUser bot, StoreUser reviewer,
-            NormalizedItem item, String contentSha, UUID virtualArtifactId)
+            NormalizedItem item, String contentSha, UUID virtualArtifactId, String adapterType)
             throws IOException, InterruptedException {
         boolean isSkill = "SKILL".equals(item.kind());
         ListingType type = isSkill ? ListingType.SKILL : ListingType.MCP;
@@ -288,68 +293,6 @@ public class UpstreamSyncService {
         return releases.findById(release.id).orElse(release);
     }
 
-    /** In-memory scan on the exact pass-through bytes; blocking → fast-fail. */
-    private Release scanAndApprove(UpstreamSource source, StoreUser bot, StoreUser reviewer,
-            Release release, byte[] artifact, ListingType type) {
-        ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.UPLOADING);
-        release.status = ReleaseStatus.UPLOADING;
-        releases.save(release);
-        ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.SCANNING);
-        release.status = ReleaseStatus.SCANNING;
-        releases.save(release);
-
-        ScanResult result = new dev.infinia.store.scanner.PackageScanner()
-                .scan(type.name(), release.version.toString(), artifact);
-        Review review = new Review();
-        review.id = UuidV7.generate();
-        review.releaseId = release.id;
-        review.listingId = release.listingId;
-        review.submittedAt = Instant.now();
-        // Findings key on (rule, message) — identical duplicates would violate
-        // pk_review_finding; append the file like ScanPipeline so hits in
-        // different files stay distinct while exact duplicates collapse.
-        java.util.LinkedHashMap<String, Review.Finding> distinct =
-                new java.util.LinkedHashMap<>();
-        for (var f : result.findings) {
-            String message = f.file() == null ? f.message()
-                    : f.message() + " (" + f.file() + ")";
-            distinct.putIfAbsent(f.rule() + "|" + message,
-                    new Review.Finding(f.severity(), f.rule(), message));
-        }
-        review.findings = new ArrayList<>(distinct.values());
-        if (result.hasBlockingFindings()) {
-            ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.REJECTED);
-            release.status = ReleaseStatus.REJECTED;
-            review.status = "REJECTED";
-            reviewRepository.save(review);
-            releases.save(release);
-            String rules = result.findings.stream().map(ScanResult.Finding::rule).distinct()
-                    .toList().toString();
-            throw new IllegalStateException("blocked by security scan " + rules
-                    + " — an admin can force-publish after manual review");
-        }
-        ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.IN_REVIEW);
-        release.status = ReleaseStatus.IN_REVIEW;
-        review.status = "IN_REVIEW";
-        reviewRepository.save(review);
-        releases.save(release);
-        reviews.decide(reviewer.id, review.id,
-                new dev.infinia.store.contract.api.ReviewDtos.ReviewDecisionRequest("APPROVE",
-                        "Auto-approved: aggregated from trusted upstream " + source.name()));
-        return releases.findById(release.id).orElse(release);
-    }
-
-    private byte[] buildArtifact(UpstreamSource source, NormalizedItem item, String version)
-            throws IOException {
-        return "SKILL".equals(item.kind())
-                ? packageBuilder.buildSkillPackage(source.targetNamespace(), item.slug(),
-                        item.name(), item.description(), item.skillFiles(), version)
-                : item.mcpTemplate();
-    }
-
-    private static String sha256Hex(byte[] bytes) {
-        return dev.infinia.store.scanner.Ed25519Signer.sha256Hex(bytes);
-    }
 
     /**
      * Bump-and-rebuild loop keeps the shipped manifest version consistent and
@@ -364,8 +307,8 @@ public class UpstreamSyncService {
                 .max(dev.infinia.store.contract.semver.SemVer::compareTo)
                 .orElse(null);
         DomainException lastConflict = null;
-        for (int patch = 0; patch < 50; patch++) {
-            String version = bump(baseVersion, patch);
+        for (int minorOffset = 0; minorOffset < 50; minorOffset++) {
+            String version = bumpMinor(baseVersion, minorOffset);
             if (floor != null
                     && dev.infinia.store.contract.semver.SemVer.parse(version)
                             .compareTo(floor) <= 0) {
@@ -390,13 +333,13 @@ public class UpstreamSyncService {
     }
 
     private void recordProvenance(UpstreamSource source, NormalizedItem item, String contentSha,
-            Release published, UUID runId, UUID virtualArtifactId,
+            Release published, UUID runId, UUID virtualArtifactId, String adapterType,
             RepoFetcher.SyncScope provenanceScope) {
         Instant now = Instant.now();
         String commitSha = commitShaOf(item, provenanceScope);
         UpstreamItem record = new UpstreamItem(virtualArtifactId, source.id(),
                 item.externalId(), published.listingId, item.sourceUrl(), item.sourcePath(),
-                null, commitSha, item.version(), contentSha, now, now, null);
+                null, commitSha, item.version(), contentSha, adapterType, now, now, null);
         upstreamItems.save(record);
         upstreamReleases.save(new UpstreamRelease(UuidV7.generate(), record.id(),
                 published.id, commitSha, item.version(),
@@ -423,38 +366,23 @@ public class UpstreamSyncService {
         }
     }
 
-    /** Polls until the scan resolves: into review, or rejected with reasons. */
-    private void awaitReview(UUID releaseId) throws InterruptedException {
-        for (int i = 0; i < 300; i++) {
-            Release current = releases.findById(releaseId).orElse(null);
-            if (current != null && current.status == ReleaseStatus.REJECTED) {
-                String findings = reviewRepository.findLatestByReleaseId(releaseId)
-                        .stream().flatMap(r -> r.findings.stream())
-                        .map(f -> f.rule()).distinct().toList().toString();
-                throw new IllegalStateException("blocked by security scan " + findings
-                        + " — an admin can force-publish after manual review");
-            }
-            if (current != null && current.status == ReleaseStatus.IN_REVIEW) {
-                return;
-            }
-            Thread.sleep(100);
-        }
-        throw new IllegalStateException("scan did not reach IN_REVIEW in time");
-    }
-
     private static String baseVersion(NormalizedItem item) {
         String v = item.version();
         return v != null && dev.infinia.store.contract.semver.SemVer.isValid(v) ? v : "0.0.0";
     }
 
-    private static String bump(String base, int patch) {
-        if (patch == 0) {
+    /**
+     * Offsets the MINOR segment ({@code 1.2.3 → 1.3.0}, {@code 1.4.3 → 1.5.0}) so the
+     * rebuilt manifest version stays strictly above existing releases of the listing.
+     */
+    private static String bumpMinor(String base, int minorOffset) {
+        if (minorOffset == 0) {
             return base;
         }
         String[] parts = base.split("[-+]");
         String[] numbers = parts[0].split("\\.");
         long minor = numbers.length > 1 ? Long.parseLong(numbers[1]) : 0;
-        return numbers[0] + "." + (minor + patch) + ".0";
+        return numbers[0] + "." + (minor + minorOffset) + ".0";
     }
 
     private UpstreamSource withStatus(UpstreamSource source, boolean ok, String error) {

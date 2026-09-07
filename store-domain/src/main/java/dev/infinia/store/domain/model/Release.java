@@ -20,6 +20,12 @@ public class Release {
     public UUID id;
     public UUID listingId;
     public SemVer version;
+    /**
+     * Optimistic-locking row version mirrored from the release table. Loaded with
+     * the row, written back after every save; a stale value makes the next save
+     * fail instead of silently overwriting a concurrent decision (review vs scan).
+     */
+    public long rowVersion;
     public ReleaseStatus status = ReleaseStatus.DRAFT;
     public Channel channel = Channel.STABLE;
     public Instant publishedAt;

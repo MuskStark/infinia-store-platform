@@ -52,8 +52,11 @@ java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar \
   --spring.profiles.active=local
 ```
 
-Open http://localhost:8080. The `local` profile runs on H2 stored under
-`~/.infinia-store` — no Docker needed. Seeded demo accounts (password `Password123!`):
+Open http://localhost:8080. The `local` profile runs on embedded H2 stored in a
+temporary folder under the project root (`tmp/database/`, git-ignored) — no Docker
+needed. Blobs, signing keys and git exports live under the same `tmp/` folder, so
+nothing store-generated lands in your home directory. Seeded demo accounts
+(password `Password123!`):
 
 | Account | Roles |
 |---|---|
@@ -65,7 +68,9 @@ Open http://localhost:8080. The `local` profile runs on H2 stored under
 The local profile seeds accounts only; its catalog starts empty. Integration tests explicitly
 enable their own demo fixtures.
 
-For deployments, point the platform at its public address so OAuth redirects and
+For a production run without Docker, use the `prod` profile — the database then lives in
+the `database/` folder of the program's running directory (`STORE_DATA_DIR` overrides the
+location in every mode). Point the platform at its public address so OAuth redirects and
 issued tokens match it (`store.base-url=https://store.example.com`) and provide the
 secrets listed under [Production-like stack](#production-like-stack-docker).
 

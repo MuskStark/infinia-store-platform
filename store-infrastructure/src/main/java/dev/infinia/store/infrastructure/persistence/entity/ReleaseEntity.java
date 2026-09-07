@@ -9,6 +9,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -20,6 +21,14 @@ import java.util.UUID;
 public class ReleaseEntity {
     @Id
     public UUID id;
+    /**
+     * Optimistic-lock version (audit P1-4). The repository adapter saves detached
+     * snapshots carrying the domain's loaded row version, so a concurrent writer
+     * between load and save fails the flush instead of being overwritten.
+     */
+    @Version
+    @Column(name = "row_version")
+    public long rowVersion;
     @Column(name = "listing_id", nullable = false)
     public UUID listingId;
     @Column(name = "version", nullable = false)

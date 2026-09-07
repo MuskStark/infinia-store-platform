@@ -108,6 +108,12 @@ class CompatFengYuApiTest {
                         MessageDigest.getInstance("SHA-256").digest(body.getBody())));
     }
 
+    /** Publishing with an explicit channel (audit P1-1: beta must not shadow stable). */
+    private void publishPlugin(String publisherToken, String reviewerToken, String slug,
+            String version, String channel) throws Exception {
+        publishPlugin(publisherToken, reviewerToken, slug, version, channel, "compat-tool");
+    }
+
     private void publishPlugin(String publisherToken, String reviewerToken, String slug,
             String version) throws Exception {
         http().exchangeJson(HttpMethod.POST, "/api/v1/organizations", jsonAuth(publisherToken),
@@ -153,6 +159,74 @@ class CompatFengYuApiTest {
         assertEquals(200, http().exchangeJson(HttpMethod.POST,
                 "/api/v1/reviews/" + reviewId + "/decisions", jsonAuth(reviewerToken),
                 Map.of("decision", "APPROVE"), Map.class).getStatusCode().value());
+    }
+
+    private void publishPlugin(String publisherToken, String reviewerToken, String slug,
+            String version, String channel, String toolSlug) throws Exception {
+        http().exchangeJson(HttpMethod.POST, "/api/v1/organizations", jsonAuth(publisherToken),
+                Map.of("slug", slug, "name", "Compat Org"), Map.class);
+        http().exchangeJson(HttpMethod.POST, "/api/v1/publisher/listings",
+                jsonAuth(publisherToken), Map.of("namespace", slug, "slug", toolSlug,
+                        "type", "PLUGIN", "name", "Compat Tool", "summary", "s"), Map.class);
+        String listingId = listings.findByCoordinate(
+                        dev.infinia.store.contract.coordinate.InfiniaCoordinate.parse(
+                                "infinia://plugin/" + slug + "/" + toolSlug))
+                .orElseThrow().id.toString();
+        ResponseEntity<Map> release = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/publisher/listings/" + listingId + "/releases", jsonAuth(publisherToken),
+                Map.of("version", version, "channel", channel), Map.class);
+        assertEquals(201, release.getStatusCode().value());
+        String releaseId = (String) release.getBody().get("releaseId");
+
+        ResponseEntity<Map> upload = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/publisher/releases/" + releaseId + "/uploads", jsonAuth(publisherToken),
+                Map.of("filename", "compat-tool-" + version + ".fyp"), Map.class);
+        String uploadUrl = (String) upload.getBody().get("uploadUrl");
+        HttpHeaders putHeaders = new HttpHeaders();
+        putHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        assertEquals(204, http().exchange(HttpMethod.PUT, uploadUrl, putHeaders,
+                PublishingPipelineTest.validPluginZip("compat." + slug + ".tool", version))
+                .getStatusCode().value());
+
+        assertEquals(202, http().exchangeJson(HttpMethod.POST,
+                "/api/v1/publisher/releases/" + releaseId + "/submit",
+                Http.bearer(publisherToken), null, Map.class).getStatusCode().value());
+        awaitStatus(publisherToken, releaseId, "IN_REVIEW");
+
+        ResponseEntity<List> queue = http().getJson("/api/v1/reviews?status=IN_REVIEW",
+                List.class, Http.bearer(reviewerToken));
+        String reviewId = null;
+        for (Object r : queue.getBody()) {
+            Map<?, ?> review = (Map<?, ?>) r;
+            if (releaseId.equals(review.get("releaseId"))) {
+                reviewId = (String) review.get("reviewId");
+            }
+        }
+        assertNotNull(reviewId, "release reached the review queue");
+        assertEquals(200, http().exchangeJson(HttpMethod.POST,
+                "/api/v1/reviews/" + reviewId + "/decisions", jsonAuth(reviewerToken),
+                Map.of("decision", "APPROVE"), Map.class).getStatusCode().value());
+    }
+
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void betaReleaseDoesNotShadowStableInCompatCatalog() throws Exception {
+        String publisherToken = AuthTestSupport.clientCredentialsToken(http(), "store-cli",
+                "dev-only-cli-secret");
+        String reviewerToken = AuthTestSupport.login(http(), null, "reviewer@infinia.local",
+                dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
+        String slug = "chfilter-" + UUID.randomUUID().toString().substring(0, 8);
+
+        publishPlugin(publisherToken, reviewerToken, slug, "1.0.0", "stable");
+        publishPlugin(publisherToken, reviewerToken, slug, "2.0.0-beta.1", "beta");
+
+        Map<String, Object> entry = findByEntryId(
+                http().<List>getJson("/api/v1/compat/fengyu/catalog", List.class, null).getBody(),
+                slug + ".compat-tool");
+        assertEquals("1.0.0", entry.get("version"),
+                "the stable catalog must keep serving the stable release — a newer beta"
+                        + " must not be pushed to every compat user (audit P1-1)");
     }
 
     /** test profile resolves ${server.port} before the random port is bound */

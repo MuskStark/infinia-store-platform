@@ -85,6 +85,40 @@ describe('StatusView (monitor)', () => {
     expect(legend.text()).toContain('HTTP response quality');
   });
 
+  it('keeps the overall center on plain gray hexes with no status cells or ECG', async () => {
+    const wrapper = mount(StatusView, { global: { plugins: [i18n] } });
+    await flushPromises();
+
+    const overall = wrapper.find('.hive-cell--overall');
+    // Decorative gray lattice only — status days belong to the service combs.
+    expect(overall.findAll('.hive-day')).toHaveLength(0);
+    expect(overall.findAll('.hive-fill__hex').length).toBeGreaterThan(0);
+    // The heartbeat trace is gone; the readouts stay.
+    expect(wrapper.find('.ekg-beat__trace').exists()).toBe(false);
+    expect(overall.text()).toContain('100.00%');
+  });
+
+  it('shows a day-cell detail tooltip on hover, with no comb-level tooltip', async () => {
+    const wrapper = mount(StatusView, { global: { plugins: [i18n] } });
+    await flushPromises();
+
+    // Hovering one small day hex names the service, the day, its state and uptime.
+    const dayButton = wrapper.findAll('[data-testid="status-component"]')[0].find('.hive-day');
+    await dayButton.trigger('mouseenter');
+    const tip = wrapper.find('[data-testid="day-tooltip"]');
+    expect(tip.exists()).toBe(true);
+    expect(tip.text()).toContain('Store API');
+    expect(tip.text()).toContain('2026-06-01');
+    expect(tip.text()).toContain('100.00%');
+    await dayButton.trigger('mouseleave');
+    expect(wrapper.find('[data-testid="day-tooltip"]').exists()).toBe(false);
+
+    // The whole-comb rim carries no hover tooltip — only day cells do.
+    const rim = wrapper.findAll('[data-testid="status-component"]')[0].find('.hive-cell__rim');
+    expect(rim.attributes('mouseenter')).toBeUndefined();
+    expect(wrapper.find('[data-testid="service-tooltip"]').exists()).toBe(false);
+  });
+
   it('fits the complete hive without any scroll container', async () => {
     const wrapper = mount(StatusView, { global: { plugins: [i18n] } });
     await flushPromises();

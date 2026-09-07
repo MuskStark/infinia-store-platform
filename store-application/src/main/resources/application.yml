@@ -107,14 +107,16 @@ store:
     status-history: true
 ---
 # H2 profile for local runs without Docker: `--spring.profiles.active=local`.
-# Paths anchor to the user home so the store data is independent of the working
-# directory (IDEA runs from the project root, maven from the module dir).
+# Database, blobs, keys and git exports all live under the project root's
+# git-ignored tmp/ folder (DataDirEnvironmentPostProcessor resolves it from the
+# working directory, so IDEA runs from the project root and Maven runs from the
+# module dir land on the same files; STORE_DATA_DIR overrides everything).
 spring:
   config:
     activate:
       on-profile: local
   datasource:
-    url: jdbc:h2:file:${user.home}/.infinia-store/storedb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    url: jdbc:h2:file:${store.data-dir}/storedb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
     username: sa
     password: ""
   jpa:
@@ -123,10 +125,23 @@ spring:
     console:
       enabled: true
 
-store:
-  blob-dir: ${user.home}/.infinia-store/blobs
-  key-dir: ${user.home}/.infinia-store/keys
-  export-dir: ${user.home}/.infinia-store/git-exports
+---
+# Single-jar production run without Docker: `--spring.profiles.active=prod`.
+# NOTE: the embedded H2 fallback below requires EXPLICIT acknowledgment —
+# ProductionHardeningCheck refuses to boot on it unless STORE_ALLOW_EMBEDDED_H2=true
+# or spring.datasource.url points at a real database (audit P2-5). Container
+# deployments keep PostgreSQL — the compose stack overrides spring.datasource.*
+# wholesale.
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${STORE_DB_URL:jdbc:h2:file:${store.data-dir}/storedb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH}
+    username: ${STORE_DB_USERNAME:sa}
+    password: ${STORE_DB_PASSWORD:}
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
 
 ---
 # Split-origin development / test: Store Web runs as a separate Vite origin

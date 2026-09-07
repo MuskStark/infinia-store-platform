@@ -141,6 +141,71 @@ class DependencySolverTest {
     }
 
     @Test
+    void conflictingConstraintOnChosenNodeIsReported() {
+        // A depends on B@^1, C depends on B@^2: whichever is resolved first wins B,
+        // the other's constraint must surface as a conflict, not silently pass.
+        Map<String, List<DependencySolver.Candidate>> catalog = new HashMap<>();
+        catalog.put("infinia://flow/a/root", List.of(
+                cand("infinia://flow/a/root", "1.0.0", null, List.of(
+                        dep("infinia://plugin/a/one", "^1.0.0", false),
+                        dep("infinia://plugin/a/two", "^1.0.0", false)))));
+        catalog.put("infinia://plugin/a/one", List.of(
+                cand("infinia://plugin/a/one", "1.0.0", null, List.of(
+                        dep("infinia://plugin/a/shared", "^1.0.0", false)))));
+        catalog.put("infinia://plugin/a/two", List.of(
+                cand("infinia://plugin/a/two", "1.0.0", null, List.of(
+                        dep("infinia://plugin/a/shared", "^2.0.0", false)))));
+        catalog.put("infinia://plugin/a/shared", List.of(
+                cand("infinia://plugin/a/shared", "1.2.0", null, List.of()),
+                cand("infinia://plugin/a/shared", "2.1.0", null, List.of())));
+
+        DependencySolver.Result result = solver(catalog).resolve(
+                InfiniaCoordinate.parse("infinia://flow/a/root"), null,
+                DependencySolver.ClientEnvironment.anonymous("4.0.0", "linux", "x64"));
+
+        assertFalse(result.resolvable());
+        assertTrue(result.missing().stream().anyMatch(m ->
+                        m.coordinate().equals("infinia://plugin/a/shared")
+                                && m.reason().contains("Conflicting constraint")),
+                "conflict must be reported, missing: " + result.missing());
+        // The plan keeps the chosen B version — the conflict is visible, not hidden.
+        assertTrue(result.plan().stream().anyMatch(r ->
+                r.candidate().version().toString().equals("1.2.0")));
+    }
+
+    @Test
+    void compatibleConstraintOnChosenNodeStillReusesPick() {
+        Map<String, List<DependencySolver.Candidate>> catalog = new HashMap<>();
+        catalog.put("infinia://flow/a/root", List.of(
+                cand("infinia://flow/a/root", "1.0.0", null, List.of(
+                        dep("infinia://plugin/a/one", ">=1.0.0 <2.0.0", false),
+                        dep("infinia://plugin/a/two", "^1.0.0", false)))));
+        catalog.put("infinia://plugin/a/one", List.of(
+                cand("infinia://plugin/a/one", "1.0.0", null, List.of(
+                        dep("infinia://plugin/a/shared", ">=1.0.0 <2.0.0", false)))));
+        catalog.put("infinia://plugin/a/two", List.of(
+                cand("infinia://plugin/a/two", "1.0.0", null, List.of(
+                        dep("infinia://plugin/a/shared", "^1.0.0", false)))));
+        catalog.put("infinia://plugin/a/shared", List.of(
+                cand("infinia://plugin/a/shared", "1.2.0", null, List.of())));
+
+        DependencySolver.Result result = solver(catalog).resolve(
+                InfiniaCoordinate.parse("infinia://flow/a/root"), null,
+                DependencySolver.ClientEnvironment.anonymous("4.0.0", "linux", "x64"));
+
+        assertTrue(result.resolvable(), "overlapping constraints must still resolve: "
+                + result.missing());
+        // The plan carries every resolved node including the root (solver contract:
+        // chosen.values()), so root + one + two + the single shared pick = 4.
+        assertEquals(4, result.plan().size());
+        assertEquals(1, result.plan().stream()
+                .filter(r -> r.candidate().coordinate().toString()
+                        .contains("plugin/a/shared"))
+                .count(),
+                "the shared dependency is chosen ONCE and reused by both branches");
+    }
+
+    @Test
     void prefersSameChannel() {
         Map<String, List<DependencySolver.Candidate>> catalog = new HashMap<>();
         DependencySolver.Candidate beta = new DependencySolver.Candidate(

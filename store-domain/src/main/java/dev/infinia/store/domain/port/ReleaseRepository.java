@@ -18,7 +18,8 @@ public interface ReleaseRepository {
 
     Optional<Release> findByListingIdAndVersion(UUID listingId, String version);
 
-    boolean existsByListingIdAndStatus(UUID listingId, String version, Iterable<ReleaseStatus> statuses);
+    /** Releases currently in one status — the scan watchdog reconciles stuck SCANNING rows. */
+    List<Release> findByStatus(ReleaseStatus status);
 
     /** Highest published (or deprecated) release of a listing in a channel. */
     Optional<Release> findLatestVisible(UUID listingId, Channel channel);

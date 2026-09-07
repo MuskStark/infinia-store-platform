@@ -69,8 +69,7 @@ public class NativeInstallController {
         // The manifest embeds a long-lived download ticket — Infinia Level gate first.
         beeLevels.requireListingAccess(listing);
         Release.ArtifactInfo artifact = release.artifacts.stream()
-                .filter(a -> a.kind() == ArtifactKind.PACKAGE).findFirst()
-                .orElse(release.artifacts.isEmpty() ? null : release.artifacts.get(0));
+                .filter(a -> a.kind() == ArtifactKind.PACKAGE).findFirst().orElse(null);
         if (artifact == null) {
             return ResponseEntity.notFound().build();
         }
@@ -145,8 +144,7 @@ public class NativeInstallController {
                 continue;
             }
             Release.ArtifactInfo artifact = release.artifacts.stream()
-                    .filter(a -> a.kind() == ArtifactKind.PACKAGE).findFirst()
-                    .orElse(release.artifacts.isEmpty() ? null : release.artifacts.get(0));
+                    .filter(a -> a.kind() == ArtifactKind.PACKAGE).findFirst().orElse(null);
             if (artifact == null) {
                 continue;
             }

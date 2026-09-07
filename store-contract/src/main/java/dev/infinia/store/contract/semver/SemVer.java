@@ -1,5 +1,6 @@
 package dev.infinia.store.contract.semver;
 
+import java.math.BigInteger;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -103,7 +104,9 @@ public final class SemVer implements Comparable<SemVer> {
         boolean aNum = isNumeric(a);
         boolean bNum = isNumeric(b);
         if (aNum && bNum) {
-            return Long.compare(Long.parseLong(a), Long.parseLong(b));
+            // BigInteger: numeric identifiers have no length bound in semver 2.0.0, so
+            // Long.parseLong would overflow (NumberFormatException) on 20+ digit identifiers.
+            return new BigInteger(a).compareTo(new BigInteger(b));
         }
         if (aNum) {
             return -1; // numeric identifiers always have lower precedence

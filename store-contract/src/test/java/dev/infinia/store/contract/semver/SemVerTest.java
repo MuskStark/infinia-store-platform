@@ -42,6 +42,38 @@ class SemVerTest {
         assertEquals(0, SemVer.parse("1.0.0+a").compareTo(SemVer.parse("1.0.0+b")));
     }
 
+    @Test
+    void hugeNumericPrereleaseIdentifiersDoNotCrashComparison() {
+        // 20+ digit numeric identifiers parse fine per semver 2.0.0 but overflow long;
+        // comparison must not throw NumberFormatException.
+        SemVer big = SemVer.parse("1.0.0-99999999999999999999.1");
+        SemVer bigger = SemVer.parse("1.0.0-100000000000000000000.1");
+        assertEquals(-1, Integer.signum(big.compareTo(bigger)));
+        assertEquals(1, Integer.signum(bigger.compareTo(big)));
+        assertEquals(0, big.compareTo(SemVer.parse("1.0.0-99999999999999999999.1")));
+    }
+
+    @Test
+    void hugeNumericIdentifierStillLosesAgainstAlphanumeric() {
+        // Numeric identifiers always have lower precedence than alphanumeric ones,
+        // regardless of magnitude.
+        SemVer numeric = SemVer.parse("1.0.0-99999999999999999999");
+        SemVer alpha = SemVer.parse("1.0.0-alpha");
+        assertEquals(-1, Integer.signum(numeric.compareTo(alpha)));
+        assertEquals(1, Integer.signum(alpha.compareTo(numeric)));
+    }
+
+    @Test
+    void hugeNumericIdentifiersSortNumericallyNotLexicographically() {
+        SemVer shorter = SemVer.parse("1.0.0-99999999999999999999");
+        SemVer longer = SemVer.parse("1.0.0-100000000000000000000");
+        assertEquals(-1, Integer.signum(shorter.compareTo(longer)));
+        // ...and mixed numeric/alphanumeric identifiers keep semver ordering.
+        SemVer num = SemVer.parse("1.0.0-99999999999999999999.rc");
+        SemVer alpha = SemVer.parse("1.0.0-rc.99999999999999999999");
+        assertEquals(-1, Integer.signum(num.compareTo(alpha)));
+    }
+
     @ParameterizedTest
     @CsvSource({
             "1.0",

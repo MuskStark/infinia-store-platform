@@ -229,20 +229,47 @@ public class CompatFengYuController {
 
     // ---- helpers ----
 
+    /**
+     * Latest published STABLE release per listing. Pre-releases are filtered out
+     * before aggregation — mirroring {@code portableRelease} — so a beta never
+     * shadows the stable catalog entry for every compat user (audit P1-1). Equal
+     * versions (e.g. {@code 4.0.0} vs {@code 4.0.0+build}) tie-break deterministically
+     * on the newer build time.
+     */
     private Map<UUID, Release> latestPublishedByListing(ListingType type) {
         Map<UUID, Release> latestByListing = new HashMap<>();
         for (Release release : releases.findVisibleByType(type)) {
+            if (release.channel != dev.infinia.store.contract.type.Channel.STABLE) {
+                continue;
+            }
             latestByListing.merge(release.listingId, release,
-                    (a, b) -> a.version.compareTo(b.version) >= 0 ? a : b);
+                    (a, b) -> latestOfEqualVersions(a, b));
         }
         return latestByListing;
     }
 
+    /** Version-first comparison; SemVer-equal builds resolve to the newer createdAt. */
+    public static Release latestOfEqualVersions(Release a, Release b) {
+        int byVersion = a.version.compareTo(b.version);
+        if (byVersion != 0) {
+            return byVersion > 0 ? a : b;
+        }
+        int byCreated = a.createdAt.compareTo(b.createdAt);
+        if (byCreated != 0) {
+            return byCreated > 0 ? a : b;
+        }
+        return a.id.compareTo(b.id) >= 0 ? a : b;
+    }
+
+    /**
+     * The installable PACKAGE artifact, or null when the release has none — a
+     * CHECKSUMS/SBOM-only release must not surface a bogus install URL (audit P2-8).
+     */
     private ArtifactInfo packageArtifact(Release release) {
         return release.artifacts.stream()
                 .filter(a -> a.kind() == dev.infinia.store.contract.type.ArtifactKind.PACKAGE)
                 .findFirst()
-                .orElse(release.artifacts.isEmpty() ? null : release.artifacts.get(0));
+                .orElse(null);
     }
 
     private String directDownloadUrl(ArtifactInfo artifact) {

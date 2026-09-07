@@ -296,7 +296,14 @@ function dayCells(history: StatusDayUptime[]) {
   return history.slice(-90).map((day, index) => ({ day, ...daySlots[index] }));
 }
 
-const tooltip = ref<{ day: StatusDayUptime; x: number; y: number; below: boolean } | null>(null);
+/** The day-cell tooltip: which service, which day, which state, how available. */
+const tooltip = ref<{
+  componentKey: string;
+  day: StatusDayUptime;
+  x: number;
+  y: number;
+  below: boolean;
+} | null>(null);
 
 /** Clicking a legend entry spotlights that service: its comb keeps its colors
  * while the rest of the hive sinks into a gray overlay. Null = whole hive. */
@@ -306,47 +313,17 @@ function toggleSelected(key: string) {
   selectedKey.value = selectedKey.value === key ? null : key;
 }
 
-/** Hovering a whole service comb names it, with its live numbers. */
-const serviceTip = ref<{ name: string; detail: string; color: string; x: number; y: number } | null>(null);
-
-function showServiceTip(
-  cell: {
-    kind: string;
-    color?: string;
-    component?: { key: string; indicator: string; uptime90d?: number | null };
-  },
-  event: MouseEvent,
-) {
-  if (cell.kind !== 'service' || !cell.component) return;
-  const uptime = cell.component.uptime90d != null
-    ? t('status.uptime90d', { percent: cell.component.uptime90d.toFixed(2) })
-    : null;
-  serviceTip.value = {
-    name: componentText(cell.component.key),
-    detail: [indicatorText(cell.component.indicator), uptime].filter(Boolean).join(' · '),
-    color: cell.color ?? '',
-    x: event.clientX,
-    y: event.clientY,
-  };
-}
-
-function moveServiceTip(event: MouseEvent) {
-  if (serviceTip.value) {
-    serviceTip.value = { ...serviceTip.value, x: event.clientX, y: event.clientY };
-  }
-}
-
 function hideTooltip() {
   tooltip.value = null;
-  serviceTip.value = null;
 }
 
-function showTooltip(day: StatusDayUptime, event: Event) {
+function showTooltip(componentKey: string, day: StatusDayUptime, event: Event) {
   const target = event.currentTarget as HTMLElement;
   const rect = target.getBoundingClientRect();
   const halfWidth = Math.min(260, window.innerWidth - 24) / 2;
   const below = rect.top < 100;
   tooltip.value = {
+    componentKey,
     day,
     x: Math.max(halfWidth + 12, Math.min(rect.left + rect.width / 2, window.innerWidth - halfWidth - 12)),
     y: below ? rect.bottom + 8 : rect.top - 8,
@@ -461,9 +438,6 @@ function incidentDuration(incident: ServiceIncident): string | null {
                   class="hive-cell__rim"
                   :class="cell.color ? '' : cell.kind === 'overall' ? indicatorColor(status.indicator) : 'bg-line'"
                   :style="cell.color ? { background: cell.color } : undefined"
-                  @mouseenter="showServiceTip(cell, $event)"
-                  @mousemove="moveServiceTip"
-                  @mouseleave="serviceTip = null"
                   aria-hidden="true"
                 />
                 <div class="hive-cell__body">
@@ -485,20 +459,17 @@ function incidentDuration(incident: ServiceIncident): string | null {
                         :class="indicatorColor(day.indicator)"
                         :style="hexCellStyle(x, y)"
                         :aria-label="tooltipText(day)"
-                        @mouseenter="showTooltip(day, $event)"
+                        @mouseenter="showTooltip(cell.component.key, day, $event)"
                         @mouseleave="tooltip = null"
-                        @focus="showTooltip(day, $event)"
+                        @focus="showTooltip(cell.component.key, day, $event)"
                         @blur="tooltip = null"
-                        @click="showTooltip(day, $event)"
+                        @click="showTooltip(cell.component.key, day, $event)"
                         @keydown.esc="tooltip = null"
                       />
                     </div>
                   </template>
                   <div v-else-if="cell.kind === 'overall'" class="hive-overall">
                     <h2 class="text-sm font-bold">{{ t('status.overall') }}</h2>
-                    <svg class="h-7 w-28" :class="banner.cls" viewBox="0 0 100 28" fill="none" aria-hidden="true">
-                      <path class="ekg-beat__trace" d="M0 18 H18 l5-7 5 12 5-16 5 9 5 2 H55 l5-7 5 12 5-16 5 9 5 2 H100" stroke="currentColor" stroke-width="2.5" />
-                    </svg>
                     <span class="text-2xl font-bold tabular-nums" :class="banner.cls">
                       {{ averageUptime != null ? `${averageUptime.toFixed(2)}%` : '—' }}
                     </span>
@@ -580,25 +551,36 @@ function incidentDuration(incident: ServiceIncident): string | null {
       <div class="h-14 animate-pulse rounded-lg bg-surface-muted dark:bg-slate-800" />
       <div class="h-64 animate-pulse rounded-lg bg-surface-muted dark:bg-slate-800" />
     </template>
+
+    <!-- Day-cell detail tooltip: fixed-positioned at visual coordinates, so it
+         stays accurate under the hive's scale transform. pointer-events-none
+         keeps it from flickering when it appears under the cursor. -->
+    <div
+      v-if="tooltip"
+      class="hive-tooltip card pointer-events-none fixed z-50 px-3 py-2 text-left text-xs shadow-lg"
+      :style="{
+        left: `${tooltip.x}px`,
+        top: `${tooltip.y}px`,
+        transform: tooltip.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+      }"
+      role="tooltip"
+      data-testid="day-tooltip"
+    >
+      <div class="flex items-center gap-1.5 font-semibold">
+        <span class="hive-legend-day inline-block h-3 w-2.5" :class="indicatorColor(tooltip.day.indicator)" aria-hidden="true" />
+        {{ componentText(tooltip.componentKey) }}
+      </div>
+      <div class="mt-1">{{ tooltip.day.date }}</div>
+      <div class="text-muted">{{ indicatorText(tooltip.day.indicator) }}</div>
+      <div v-if="tooltip.day.uptimePercent != null" class="tabular-nums">
+        {{ t('status.barUptime', { percent: tooltip.day.uptimePercent.toFixed(2) }) }}
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 @reference '../styles/main.css';
-
-/* The center comb's heartbeat: always visible, gently pulsing. */
-.ekg-beat__trace {
-  animation: ekg-pulse 2.4s ease-in-out infinite;
-}
-@keyframes ekg-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
 
 /* No scroll containers: the whole hive scales down to the page width, so the
  * complete comb is always visible at any viewport size. */
@@ -623,8 +605,7 @@ function incidentDuration(incident: ServiceIncident): string | null {
 .hive-cell__rim {
   position: absolute;
   inset: 0;
-  pointer-events: auto;
-  cursor: help;
+  pointer-events: none;
 }
 .hive-cell__body::before {
   content: '';
@@ -733,13 +714,7 @@ function incidentDuration(incident: ServiceIncident): string | null {
   filter: drop-shadow(0 0 10px rgb(255 255 255 / 0.3));
 }
 .hive-tooltip {
-  width: 260px;
+  width: max-content;
   max-width: calc(100vw - 24px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ekg-beat__trace {
-    animation: none;
-  }
 }
 </style>

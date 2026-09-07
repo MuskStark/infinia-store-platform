@@ -15,13 +15,14 @@ import dev.infinia.store.scanner.PackageScanner;
 import dev.infinia.store.scanner.ScanResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -30,6 +31,12 @@ import java.util.UUID;
  * Async scan stage of the publishing pipeline (design §8.2). Runs in its own executor
  * so the deployable can move it to dedicated scanner workers later; blocking findings
  * auto-reject, clean packages move the release to human review.
+ *
+ * <p>Scanning deliberately runs WITHOUT a wrapping transaction: the scan may take
+ * minutes, and the outcome is persisted by {@link ScanOutcomeStore} in a fresh,
+ * short transaction that re-reads the release row — so a reviewer decision landing
+ * mid-scan wins, and the stale scan result is discarded instead of overwriting it
+ * (audit P1-4, backed by the release row's optimistic-lock version).
  */
 @Component
 public class ScanPipeline {
@@ -41,50 +48,70 @@ public class ScanPipeline {
     private final PublishingRepositories.ReviewRepository reviews;
     private final BlobStorage blobs;
     private final PackageScanner scanner = new PackageScanner();
+    private final ScanOutcomeStore outcomeStore;
 
     public ScanPipeline(ReleaseRepository releases, ListingRepository listings,
-            PublishingRepositories.ReviewRepository reviews, BlobStorage blobs) {
+            PublishingRepositories.ReviewRepository reviews, BlobStorage blobs,
+            ScanOutcomeStore outcomeStore) {
         this.releases = releases;
         this.listings = listings;
         this.reviews = reviews;
         this.blobs = blobs;
+        this.outcomeStore = outcomeStore;
     }
 
+    /**
+     * Entry point invoked after the submitting transaction commits. Also re-invoked
+     * by {@link ScanWatchdog} for releases stuck in SCANNING (crashed worker, full
+     * executor queue), making the stage self-healing.
+     */
     @Async("scanExecutor")
-    @Transactional
     public void runScan(UUID releaseId, UUID reviewId) {
+        ScanWork work;
         try {
-            runScanInternal(releaseId, reviewId);
+            work = performScan(releaseId, reviewId);
         } catch (Exception e) {
             // A crash inside the scan worker (scanner bug, malformed package)
-            // must never leave the release wedged in SCANNING — there is no
-            // watchdog to reconcile it later. Fail closed: auto-reject.
+            // must never leave the release wedged in SCANNING. Fail closed:
+            // auto-reject in its own transaction.
             log.error("Scan crashed for release {} — auto-rejecting", releaseId, e);
             try {
-                releases.findById(releaseId).ifPresent(release -> {
-                    if (release.status == ReleaseStatus.SCANNING) {
-                        ReleaseStateMachine.assertTransition(release.status,
-                                ReleaseStatus.REJECTED);
-                        release.status = ReleaseStatus.REJECTED;
-                        releases.save(release);
-                    }
-                });
-                reviews.findById(reviewId).ifPresent(review -> {
-                    review.findings = new ArrayList<>(List.of(
-                            Review.Finding.error("scanner.error",
-                                    "Scan crashed: " + e.getClass().getSimpleName())));
-                    review.status = "REJECTED";
-                    reviews.save(review);
-                });
+                outcomeStore.markScanCrashed(releaseId, reviewId,
+                        e.getClass().getSimpleName());
+            } catch (OptimisticLockingFailureException conflict) {
+                log.info("Scan crash cleanup for release {} lost a race — the concurrent"
+                        + " decision stands", releaseId);
             } catch (Exception cleanupFailure) {
                 log.error("Scan crash cleanup also failed for release {}", releaseId,
                         cleanupFailure);
             }
+            return;
+        }
+        if (work == null) {
+            return;
+        }
+        try {
+            boolean applied = outcomeStore.applyScanOutcome(work);
+            if (!applied) {
+                log.info("Scan result for release {} not applied — the release already"
+                        + " moved on (reviewer decision or watchdog outcome stands)",
+                        releaseId);
+            }
+        } catch (OptimisticLockingFailureException conflict) {
+            // The reviewer (or another writer) committed between our read and the
+            // save: their decision is authoritative, the scan result is dropped.
+            log.info("Scan outcome for release {} overtook by a concurrent writer —"
+                    + " keeping the concurrent decision", releaseId);
         }
     }
 
-    private void runScanInternal(UUID releaseId, UUID reviewId) {
-        // Wait briefly for the submitting transaction to commit before flipping state.
+    /** Immutable scan result handed to {@link ScanOutcomeStore}. */
+    record ScanWork(UUID releaseId, UUID reviewId, List<Review.Finding> findings,
+            boolean blocking, List<Release.PermissionDecl> extractedPermissions) {}
+
+    private ScanWork performScan(UUID releaseId, UUID reviewId) throws IOException {
+        // Defensive re-read: with afterCommit scheduling the row is durable already,
+        // but a watchdog re-enqueue or replica lag benefits from a short retry.
         Release release = null;
         Review review = null;
         for (int attempt = 0; attempt < 100 && (release == null || review == null); attempt++) {
@@ -92,14 +119,14 @@ public class ScanPipeline {
                 Thread.sleep(20);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return;
+                return null;
             }
             release = releases.findById(releaseId).orElse(null);
             review = reviews.findById(reviewId).orElse(null);
         }
         if (release == null || review == null) {
             log.error("Scan target missing after retries: release={}", releaseId);
-            return;
+            return null;
         }
         Listing listing = listings.findById(release.listingId).orElse(null);
         ScanResult result;
@@ -127,42 +154,42 @@ public class ScanPipeline {
             distinct.putIfAbsent(f.rule() + "|" + message,
                     new Review.Finding(f.severity(), f.rule(), message));
         }
-        review.findings = new ArrayList<>(distinct.values());
-        if (result.hasBlockingFindings()) {
-            ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.REJECTED);
-            release.status = ReleaseStatus.REJECTED;
-            review.status = "REJECTED";
-        } else {
-            ReleaseStateMachine.assertTransition(release.status, ReleaseStatus.IN_REVIEW);
-            release.status = ReleaseStatus.IN_REVIEW;
-            // The package is the source of truth for permissions (design §8.2 step 6):
-            // what the reviewer approves, the resolver surfaces and the host confirms
-            // must match the shipped manifest, not the publisher's initial claim.
-            if (!result.extractedPermissions.isEmpty()) {
-                release.permissions = result.extractedPermissions.stream()
+        return new ScanWork(releaseId, reviewId, new ArrayList<>(distinct.values()),
+                result.hasBlockingFindings(), result.extractedPermissions.stream()
                         .map(p -> new Release.PermissionDecl(
-                                String.valueOf(p.get("permissionId")),
-                                "plugin", true, null))
-                        .toList();
-            }
-        }
-        releases.save(release);
-        reviews.save(review);
-        log.info("Scan finished for release {}: blocking={}, findings={}", releaseId,
-                result.hasBlockingFindings(), result.findings.size());
+                                String.valueOf(p.get("permissionId")), "plugin", true, null))
+                        .toList());
     }
 
+    /**
+     * Streams the package to a temp file and scans from disk (audit P2-4): the
+     * previous implementation buffered the whole artifact (up to the 1 GiB upload
+     * cap) in heap. Skill archives take the streaming ZipFile path; other kinds
+     * are bounded by the scanner's own read-back limit.
+     */
     private ScanResult scanPackage(Listing listing, Release release,
             Release.ArtifactInfo artifact) {
-        try (InputStream in = blobs.open(artifact.blobKey())) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            in.transferTo(out);
+        Path temp = null;
+        try {
+            temp = Files.createTempFile("infinia-scan-", ".pkg");
+            try (InputStream in = blobs.open(artifact.blobKey());
+                    var out = Files.newOutputStream(temp)) {
+                in.transferTo(out);
+            }
             return scanner.scan(listing == null ? "PLUGIN" : listing.type.name(),
-                    release.version.toString(), out.toByteArray());
+                    release.version.toString(), temp);
         } catch (IOException e) {
             ScanResult result = new ScanResult();
             result.error("scanner.io", "Package could not be read: " + e.getMessage());
             return result;
+        } finally {
+            if (temp != null) {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (IOException ignored) {
+                    // temp file cleanup is best-effort; the OS tmp cleaner covers the rest
+                }
+            }
         }
     }
 

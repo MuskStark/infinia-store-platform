@@ -74,10 +74,12 @@ public class StoreProblemDetails {
         problem.setTitle(messages.getMessage("error." + e.code.code + ".title", null,
                 e.code.code, LocaleContextHolder.getLocale()));
         String detail = e.getMessage();
-        if (e.code == StoreErrorCode.INTERNAL_ERROR && detail != null
-                && !detail.isBlank()) {
-            // Internal errors keep the concrete cause — the generic text hides
-            // exactly the information needed to debug delivery failures.
+        if ((e.code == StoreErrorCode.INTERNAL_ERROR || e.code == StoreErrorCode.VALIDATION_FAILED)
+                && detail != null && !detail.isBlank()) {
+            // Internal errors and input validation keep the concrete cause — the
+            // generic bundle text ("The request did not pass validation.") hides
+            // exactly the information needed to fix the request, e.g. which enum
+            // values a channel/kind/platform parameter accepts (audit P1-6/P3).
             problem.setDetail(detail);
         } else {
             problem.setDetail(messages.getMessage("error." + e.code.code + ".detail", null,

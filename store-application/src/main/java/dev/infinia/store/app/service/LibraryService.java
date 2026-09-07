@@ -91,9 +91,15 @@ public class LibraryService {
                 // server time is authoritative when the client clock is unreadable
             }
         }
-        installEvents.save(new InstallEventRecord(UuidV7.generate(), idempotencyKey, userId, null,
-                coordinate, version, type, action, outcome, hostVersion, os, arch, occurred,
-                Instant.now()));
+        try {
+            installEvents.save(new InstallEventRecord(UuidV7.generate(), idempotencyKey, userId,
+                    null, coordinate, version, type, action, outcome, hostVersion, os, arch,
+                    occurred, Instant.now()));
+        } catch (org.springframework.dao.DataIntegrityViolationException lostRace) {
+            // Two concurrent reports of one key: the unique index is the authority,
+            // the pre-check alone would 500 the loser (audit P3).
+            return false;
+        }
         return true;
     }
 
@@ -137,8 +143,16 @@ public class LibraryService {
             Listing listing = lookupListing(event.coordinate());
             Release latest = listing == null ? null
                     : releases.findLatestVisible(listing.id, listing.defaultChannel).orElse(null);
-            boolean updateAvailable = latest != null
-                    && latest.version.compareTo(SemVer.parse(event.version())) > 0;
+            // Telemetry versions are client-controlled and may not be SemVer; a bad
+            // string must not 500 the whole library view (audit P2-7).
+            boolean updateAvailable = false;
+            if (latest != null) {
+                try {
+                    updateAvailable = latest.version.compareTo(SemVer.parse(event.version())) > 0;
+                } catch (IllegalArgumentException notSemVer) {
+                    updateAvailable = false;
+                }
+            }
             result.add(new dev.infinia.store.contract.api.AccountDtos.InstalledItemDto(
                     event.coordinate(), event.version(),
                     listing == null ? event.type() : listing.type.name(),

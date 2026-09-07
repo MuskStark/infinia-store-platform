@@ -248,6 +248,36 @@ class AuthAndAccountFlowTest {
         assertEquals(0, duplicate.getBody(), "duplicate idempotency key must be ignored");
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void installedViewSurvivesInvalidClientVersionStrings() {
+        // Telemetry versions are client-controlled: a non-SemVer string used to
+        // 500 the whole library view (audit P2-7).
+        String token = AuthTestSupport.login(http(), null, "user@infinia.local",
+                dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
+        String event = """
+                [{"idempotencyKey":"evt-badversion-1",
+                  "coordinate":"infinia://plugin/official/markdown",
+                  "version":"not-a-version","type":"PLUGIN","action":"install",
+                  "outcome":"success","hostVersion":"4.0.1"}]
+                """;
+        HttpHeaders headers = Http.bearer(token);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        assertEquals(202, http().exchangeJson(HttpMethod.POST, "/api/v1/install-events",
+                headers, event, Integer.class).getStatusCode().value());
+
+        ResponseEntity<List> installed = http().getJson("/api/v1/me/installed",
+                List.class, Http.bearer(token));
+        assertEquals(200, installed.getStatusCode().value(),
+                "invalid telemetry version must not break the library view");
+        Map<String, Object> entry = (Map<String, Object>) installed.getBody().stream()
+                .filter(i -> "infinia://plugin/official/markdown"
+                        .equals(((Map<?, ?>) i).get("coordinate")))
+                .findFirst().orElseThrow();
+        assertEquals(false, entry.get("updateAvailable"),
+                "unknown installed version reports no update rather than crashing");
+    }
+
     /** Extracts the sid claim from the JWT so the test revokes its own session. */
     private static String sidOf(String token) {
         String payload = token.split("\\.")[1];

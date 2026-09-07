@@ -76,7 +76,7 @@ public class UpstreamArtifactService {
                     .orElseThrow(() -> new IllegalArgumentException(
                             "Upstream source missing: " + item.sourceId()));
 
-            UpstreamAdapter adapter = resolve(source);
+            UpstreamAdapter adapter = resolve(source, item);
             NormalizedItem discovered = adapter.discover(source, fetcher).stream()
                     .filter(n -> item.externalId().equals(n.externalId()))
                     .findFirst()
@@ -128,7 +128,28 @@ public class UpstreamArtifactService {
         }
     }
 
-    private UpstreamAdapter resolve(UpstreamSource source) {
+    /**
+     * Replays the adapter the SYNC resolved for this item (audit P1-7). AUTO is a
+     * sync-time probe: re-probing at download could disagree with the recorded
+     * provenance (an MCP registry source resolving as CLAUDE_MARKETPLACE made the
+     * externalId unfindable → 500). Rows persisted before the adapter type was
+     * recorded (null) fall back to the legacy probe for compatibility.
+     */
+    UpstreamAdapter resolve(UpstreamSource source, UpstreamItem item) {
+        if (item.adapterType() != null && !item.adapterType().isBlank()) {
+            String recorded = item.adapterType().trim().toUpperCase();
+            return adapters.stream()
+                    .filter(a -> a.type().equals(recorded))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Unknown adapter type " + recorded + " recorded for upstream item "
+                                    + item.id()));
+        }
+        return legacyResolve(source);
+    }
+
+    /** Pre-adapter-persistence fallback: probe the source shape again. */
+    UpstreamAdapter legacyResolve(UpstreamSource source) {
         String requested = source.adapterType() == null || source.adapterType().isBlank()
                 ? UpstreamAdapter.AUTO : source.adapterType().trim().toUpperCase();
         if (UpstreamAdapter.AUTO.equals(requested)

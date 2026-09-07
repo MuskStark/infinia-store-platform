@@ -63,7 +63,14 @@ public class LocalFsBlobStorage implements BlobStorage {
                 // Content-addressed: identical content already stored.
                 Files.delete(tmp);
             } else {
-                Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE);
+                try {
+                    Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.FileAlreadyExistsException concurrentDuplicate) {
+                    // Two uploads of identical content raced between the exists()
+                    // check and the atomic move — the key is content-addressed, so
+                    // the winner's blob is byte-identical: this upload succeeded too.
+                    Files.delete(tmp);
+                }
             }
             return blobKey;
         } catch (IOException | NoSuchAlgorithmException | RuntimeException e) {

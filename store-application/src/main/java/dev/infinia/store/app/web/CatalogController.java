@@ -4,6 +4,8 @@ import dev.infinia.store.app.service.CatalogService;
 import dev.infinia.store.contract.api.CatalogDtos;
 import dev.infinia.store.contract.type.Channel;
 import dev.infinia.store.contract.type.ListingType;
+import dev.infinia.store.domain.DomainException;
+import dev.infinia.store.contract.error.StoreErrorCode;
 import dev.infinia.store.domain.port.ListingQuery;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,12 +37,20 @@ public class CatalogController {
             @RequestParam(required = false, name = "featured") Boolean featured,
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "24") int limit) {
+        Channel requestedChannel = null;
+        if (channel != null && !channel.isBlank()) {
+            try {
+                requestedChannel = Channel.parse(channel);
+            } catch (IllegalArgumentException e) {
+                throw new DomainException(StoreErrorCode.VALIDATION_FAILED, e.getMessage());
+            }
+        }
         CatalogDtos.CatalogPageDto page = catalog.browse(new CatalogService.BrowseQuery(
                 type == null || type.isBlank() ? null
                         : ListingType.valueOf(type.trim().toUpperCase()),
                 query,
                 category,
-                channel == null ? null : Channel.valueOf(channel.trim().toUpperCase()),
+                requestedChannel,
                 hostVersion,
                 os,
                 arch,

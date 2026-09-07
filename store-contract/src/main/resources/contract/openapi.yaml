@@ -1565,7 +1565,7 @@ components:
       enum: [APP, PLUGIN, SKILL, MCP, FLOW]
     Channel:
       type: string
-      enum: [stable, beta, alpha, nightly, private]
+      enum: [stable, rc, beta, alpha, nightly, private]
     Platform:
       type: string
       enum: [windows, macos, linux, universal]
@@ -2220,7 +2220,7 @@ components:
       required: [filename]
       properties:
         version: { type: string, description: SemVer of the update package — inferred from the filename when omitted }
-        channel: { type: string, enum: [stable, beta, alpha, nightly], description: Inferred from the version's pre-release suffix when omitted }
+        channel: { type: string, enum: [stable, rc, beta, alpha, nightly], description: Inferred from the version's pre-release suffix when omitted }
         changelog: { type: string, description: Optional release notes }
         filename: { type: string, description: Package filename — version/channel/kind/platform/arch/variant are inferred from it }
         size: { type: integer, format: int64, description: Declared byte size }

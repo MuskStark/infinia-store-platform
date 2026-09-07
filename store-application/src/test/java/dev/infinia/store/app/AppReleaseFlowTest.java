@@ -197,10 +197,14 @@ class AppReleaseFlowTest {
         HttpHeaders putHeaders = new HttpHeaders();
         putHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
         for (Map.Entry<String, String[]> asset : assets.entrySet()) {
+            // The declared size is a commitment the upload completion enforces —
+            // declare the true body length ("app-binary:" + filename).
+            int declaredSize = ("app-binary:" + asset.getKey())
+                    .getBytes(StandardCharsets.UTF_8).length;
             ResponseEntity<Map> upload = http().exchangeJson(HttpMethod.POST,
                     "/api/v1/publisher/releases/" + releaseId + "/uploads",
                     jsonAuth(publisherToken), Map.of("filename", asset.getKey(),
-                            "size", 64), Map.class);
+                            "size", declaredSize), Map.class);
             assertEquals(201, upload.getStatusCode().value(), asset.getKey());
             // Routing metadata is inferred from the filename alone.
             assertEquals(asset.getValue()[0], upload.getBody().get("kind"), asset.getKey());

@@ -130,12 +130,9 @@ public class PublisherController {
         Release release = catalog.releaseOrThrow(releaseId);
         UploadSessionInfo session = publisher.createUploadSession(principal.requireUserId(),
                 release, request.filename(),
-                request.kind() == null ? null
-                        : ArtifactKind.valueOf(request.kind().trim().toUpperCase()),
-                request.platform() == null ? null
-                        : Platform.valueOf(request.platform().trim().toUpperCase()),
-                request.arch() == null ? null
-                        : Arch.valueOf(request.arch().trim().toUpperCase()),
+                parseEnum("kind", request.kind(), ArtifactKind.class),
+                parseEnum("platform", request.platform(), Platform.class),
+                parseEnum("arch", request.arch(), Arch.class),
                 request.variant(),
                 request.size() == null ? 0 : request.size());
         Instant expiresAt = session.expiresAt;
@@ -188,4 +185,17 @@ public class PublisherController {
     public record UploadRequest(String filename, String kind, String platform, String arch,
             String variant,
             Long size) {}
+
+    /** Enum query values deserve a problem detail that names the legal values. */
+    private static <E extends Enum<E>> E parseEnum(String field, String value, Class<E> type) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Enum.valueOf(type, value.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    field + " must be one of: " + java.util.Arrays.toString(type.getEnumConstants()));
+        }
+    }
 }

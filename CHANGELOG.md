@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Local database location
+
+- The embedded-H2 database moved out of `~/.infinia-store`: development runs (`local`/`dev`
+  profiles) now store it in a git-ignored temp folder under the project root
+  (`<root>/tmp/database/`, resolved by walking up from the working directory to the repo
+  markers, so IDEA runs from the project root and Maven runs from the module dir land on the
+  same files), and a new `prod` profile stores it in the `database/` folder of the program's
+  running directory for single-jar deployments (Docker keeps PostgreSQL). `store.data-dir` /
+  `STORE_DATA_DIR` overrides the location in every mode. On the first development boot the
+  old `~/.infinia-store/storedb` files are moved to the new location automatically — skipped
+  while H2 holds its lock or the target already holds a database.
+- Development runs anchor blob storage, signing keys and git exports under the same
+  `<root>/tmp/` folder (operator-set `store.blob-dir`/`store.key-dir`/`store.export-dir`
+  still win), so nothing store-generated is written to the user home any more. Production
+  blob/key locations keep their home-anchored defaults; `~/.infinia-store` can be deleted
+  after moving `blobs/` and `keys/` into the project `tmp/` by hand.
+
 ### Full-repo review fixes + production container image
 
 - Reliability: outbox events that failed once were never retried — the relay selected

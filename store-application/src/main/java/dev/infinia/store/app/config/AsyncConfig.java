@@ -3,11 +3,13 @@ package dev.infinia.store.app.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 /** Executor for the async scan pipeline (design §8.2). */
 @Configuration
 @EnableAsync
+@EnableScheduling // the scan watchdog reconcile loop (audit P2-6)
 public class AsyncConfig {
 
     @Bean(name = "scanExecutor")

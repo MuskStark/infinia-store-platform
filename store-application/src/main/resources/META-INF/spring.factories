@@ -1,2 +1,3 @@
 org.springframework.boot.env.EnvironmentPostProcessor=\
+  dev.infinia.store.app.config.DataDirEnvironmentPostProcessor,\
   dev.infinia.store.app.config.RemoteDataSourceEnvironmentPostProcessor

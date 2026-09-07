@@ -62,8 +62,9 @@ public class PackageScanner {
 
     /**
      * Disk-backed scan entry point for live upstream delivery. Skill archives are
-     * inspected through {@link ZipFile}; only individual text files up to 2 MiB
-     * are read for content rules, never the complete package.
+     * inspected through {@link ZipFile} entry-by-entry; only individual text files
+     * up to 2 MiB are read for content rules. Non-archive kinds (MCP templates)
+     * are read back in full under a 16 MiB cap.
      */
     public ScanResult scan(String listingType, String expectedVersion, Path content) {
         if (!"SKILL".equalsIgnoreCase(listingType)) {
@@ -95,7 +96,7 @@ public class PackageScanner {
         return result;
     }
 
-    // ---- PLUGIN (.fyp zip with plugin.json) ----
+    // ---- PLUGIN (.fyp zip with a manifest.json at the root) ----
 
     private void scanZipPackage(byte[] content, String expectedVersion, ScanResult result,
             String manifestName, String typeLabel) throws IOException {

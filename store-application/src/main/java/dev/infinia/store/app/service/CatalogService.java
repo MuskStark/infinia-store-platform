@@ -34,6 +34,13 @@ import java.util.List;
 @Service
 public class CatalogService {
 
+    /**
+     * Long-lived ticket for URLs embedded in the app update feed — aligned with
+     * the compat catalogs' 24h direct-download tickets rather than the API's
+     * short-lived default (see CompatFengYuController.COMPAT_TICKET_TTL_SECONDS).
+     */
+    private static final long FEED_TICKET_TTL_SECONDS = 24 * 3600;
+
     private final ListingRepository listings;
     private final ReleaseRepository releases;
     private final StoreProperties properties;
@@ -108,12 +115,20 @@ public class CatalogService {
                         "Listing not found: " + coordinate.listingPart()));
     }
 
-    /** Latest published release per listing of one type (compat surfaces). */
+    /**
+     * Latest published STABLE release per listing of one type (compat surfaces).
+     * Pre-releases are excluded before aggregation so a beta never shadows the
+     * stable view (audit P1-1); SemVer-equal versions tie-break deterministically.
+     */
     public List<Release> latestVisibleByType(dev.infinia.store.contract.type.ListingType type) {
         java.util.Map<java.util.UUID, Release> latest = new java.util.HashMap<>();
         for (Release release : releases.findVisibleByType(type)) {
+            if (release.channel != Channel.STABLE) {
+                continue;
+            }
             latest.merge(release.listingId, release,
-                    (a, b) -> a.version.compareTo(b.version) >= 0 ? a : b);
+                    (a, b) -> dev.infinia.store.app.web.CompatFengYuController
+                            .latestOfEqualVersions(a, b));
         }
         return List.copyOf(latest.values());
     }
@@ -229,7 +244,10 @@ public class CatalogService {
         }
         List<dev.infinia.store.contract.api.DeliveryDtos.AppUpdateArtifactDto> artifacts =
                 new ArrayList<>();
-        Instant expiresAt = Instant.now().plusSeconds(properties.downloadTicketTtlSeconds());
+        // Match the compat catalog's 24h direct-download tickets (audit P3): the
+        // feed is fetched at update-check time, but the user may click download
+        // much later — a 300s ticket turns that into a confusing 403.
+        Instant expiresAt = Instant.now().plusSeconds(FEED_TICKET_TTL_SECONDS);
         for (Release.ArtifactInfo a : CompatibilityEvaluator.appArtifacts(best,
                 requestedPlatform, requestedArch, requestedMode, variant)) {
             String ticketSignature = tickets.sign("download", a.blobKey(), expiresAt);

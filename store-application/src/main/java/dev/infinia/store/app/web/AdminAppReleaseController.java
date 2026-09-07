@@ -229,8 +229,12 @@ public class AdminAppReleaseController {
         return m.group(1);
     }
 
-    /** A pre-release suffix names the channel ({@code -beta.2} → beta); else stable. */
-    static String inferChannel(String version) {
+    /**
+     * A pre-release suffix names the channel ({@code -beta.2} → beta, {@code -rc.1} →
+     * rc); else stable. The FengYu release flow cuts {@code vX.Y.Z-rc.N} tags, so rc
+     * is a first-class channel of its own (audit P1-6).
+     */
+    public static String inferChannel(String version) {
         String lower = version.toLowerCase();
         int dash = lower.indexOf('-');
         if (dash < 0) {
@@ -240,8 +244,14 @@ public class AdminAppReleaseController {
         if (label.startsWith("alpha")) {
             return "alpha";
         }
-        if (label.startsWith("beta") || label.startsWith("rc") || label.startsWith("nightly")) {
-            return label.startsWith("nightly") ? "nightly" : "beta";
+        if (label.startsWith("rc")) {
+            return "rc";
+        }
+        if (label.startsWith("nightly")) {
+            return "nightly";
+        }
+        if (label.startsWith("beta")) {
+            return "beta";
         }
         return "stable";
     }

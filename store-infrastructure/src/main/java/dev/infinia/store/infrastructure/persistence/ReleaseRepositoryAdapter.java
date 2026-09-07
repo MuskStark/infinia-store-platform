@@ -9,8 +9,9 @@ import dev.infinia.store.contract.type.ReleaseStatus;
 import dev.infinia.store.domain.model.Release;
 import dev.infinia.store.domain.port.ReleaseRepository;
 import dev.infinia.store.infrastructure.persistence.entity.ReleaseEntity;
-import dev.infinia.store.infrastructure.persistence.repository.ListingJpaRepository;
 import dev.infinia.store.infrastructure.persistence.repository.ReleaseJpaRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,11 +28,12 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
             List.of(ReleaseStatus.PUBLISHED.name(), ReleaseStatus.DEPRECATED.name());
 
     private final ReleaseJpaRepository jpa;
-    private final ListingJpaRepository listingJpa;
 
-    public ReleaseRepositoryAdapter(ReleaseJpaRepository jpa, ListingJpaRepository listingJpa) {
+    @PersistenceContext
+    private EntityManager em;
+
+    public ReleaseRepositoryAdapter(ReleaseJpaRepository jpa) {
         this.jpa = jpa;
-        this.listingJpa = listingJpa;
     }
 
     @Override
@@ -48,22 +50,6 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
     public Optional<Release> findByListingIdAndVersion(UUID listingId, String version) {
         return jpa.findByListingIdAndVersion(listingId, version)
                 .map(ReleaseRepositoryAdapter::toDomain);
-    }
-
-    @Override
-    public boolean existsByListingIdAndStatus(UUID listingId, String version,
-            Iterable<ReleaseStatus> statuses) {
-        return jpa.findByListingId(listingId).stream()
-                .anyMatch(e -> e.version.equals(version) && contains(statuses, e.status));
-    }
-
-    private static boolean contains(Iterable<ReleaseStatus> statuses, String value) {
-        for (ReleaseStatus s : statuses) {
-            if (s.name().equals(value)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     @Override
@@ -86,33 +72,62 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
     }
 
     @Override
+    public List<Release> findByStatus(ReleaseStatus status) {
+        return jpa.findByStatus(status.name()).stream()
+                .map(ReleaseRepositoryAdapter::toDomain)
+                .toList();
+    }
+
+    @Override
     public Optional<Release> findByArtifactBlobKey(String blobKey) {
         return jpa.findByArtifactBlobKey(blobKey).map(ReleaseRepositoryAdapter::toDomain);
     }
 
     @Override
     public List<Release> findVisibleByType(dev.infinia.store.contract.type.ListingType type) {
-        // Type lives on the listing, not the release — resolve through the parent rows.
-        java.util.Set<UUID> listingIdsOfType = listingJpa.findAll().stream()
-                .filter(l -> type.name().equals(l.type))
-                .map(l -> l.id)
-                .collect(java.util.stream.Collectors.toSet());
-        if (listingIdsOfType.isEmpty()) {
-            return List.of();
-        }
-        return jpa.findByStatusIn(List.of(ReleaseStatus.PUBLISHED.name())).stream()
-                .filter(e -> VISIBLE_STATUSES.contains(e.status))
-                .filter(e -> listingIdsOfType.contains(e.listingId))
+        // Type lives on the listing, not the release — join in the database instead
+        // of loading every listing and every published release (audit P3).
+        return jpa.findVisibleByType(type.name(), VISIBLE_STATUSES).stream()
                 .map(ReleaseRepositoryAdapter::toDomain)
                 .toList();
     }
 
+    /**
+     * Saves the domain snapshot as a detached entity carrying the row version it
+     * was loaded with. Merging a versioned detached snapshot makes Hibernate
+     * verify the version in both the persistence context and the UPDATE where
+     * clause, so a concurrent writer between load and save surfaces as
+     * {@link org.springframework.dao.OptimisticLockingFailureException}
+     * instead of being silently overwritten (audit P1-4). The new row version is
+     * written back so consecutive saves of one domain object stay valid.
+     *
+     * <p>The raw {@code jakarta.persistence.OptimisticLockException} Hibernate
+     * raises is translated here: callers ({@code ScanPipeline},
+     * {@code ScanOutcomeStore}) catch the Spring DAO type to let the concurrent
+     * decision win, and this adapter does not go through a Spring Data repository
+     * proxy that would translate it automatically.
+     */
     @Override
     @Transactional
     public void save(Release release) {
-        ReleaseEntity entity = jpa.findById(release.id).orElseGet(ReleaseEntity::new);
-        copy(release, entity);
-        jpa.save(entity);
+        ReleaseEntity snapshot = new ReleaseEntity();
+        copy(release, snapshot);
+        snapshot.rowVersion = release.rowVersion;
+        try {
+            if (em.find(ReleaseEntity.class, release.id) == null) {
+                em.persist(snapshot);
+                em.flush();
+                release.rowVersion = snapshot.rowVersion;
+            } else {
+                ReleaseEntity merged = em.merge(snapshot);
+                em.flush();
+                release.rowVersion = merged.rowVersion;
+            }
+        } catch (jakarta.persistence.OptimisticLockException stale) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                    "Stale release snapshot for " + release.id
+                            + " — a concurrent writer already updated the row", stale);
+        }
     }
 
     @Override
@@ -182,6 +197,7 @@ public class ReleaseRepositoryAdapter implements ReleaseRepository {
         Release r = new Release();
         r.id = e.id;
         r.listingId = e.listingId;
+        r.rowVersion = e.rowVersion;
         r.version = SemVer.parse(e.version);
         r.status = ReleaseStatus.valueOf(e.status);
         r.channel = Channel.valueOf(e.channel);
