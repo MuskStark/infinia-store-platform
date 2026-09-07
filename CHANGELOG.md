@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Scan pipeline resilience & production hardening
+
+- Scanning can no longer wedge or trample concurrent review decisions. A
+  `ScanWatchdog` re-enqueues releases stuck in `SCANNING` for more than 10 minutes
+  (worker crash before its fail-closed cleanup, a swallowed executor task, or a
+  restart mid-scan); the pipeline stays idempotent so an already-moved release is
+  skipped. Scan outcomes now persist through `ScanOutcomeStore` in their own
+  transaction that re-reads the release row right before writing — a reviewer
+  decision that landed while the scan ran is detected and respected — and the
+  release table carries an optimistic-lock `row_version` (Flyway V11) so a stale
+  full-row save can never flip a REJECT back to IN_REVIEW.
+- Production-like deployments fail fast instead of running on weak defaults:
+  `ProductionHardeningCheck` refuses to start outside the local/dev/test profiles
+  while the dev-only ticket/rollout/CLI-client secrets are unchanged, and the
+  `prod` profile's embedded-H2 fallback requires an explicit
+  `STORE_ALLOW_EMBEDDED_H2=true` — otherwise the startup aborts before the web
+  server binds, pointing at PostgreSQL.
+- OAuth client-credentials issuance no longer mints `PUBLISHER`+`REVIEWER` tokens
+  when the seeded CI service account is absent — it refuses with an actionable
+  message instead of granting unattributable powers. A read-only
+  `GET /git/**` permit rule is in place for the planned anonymous git
+  smart-HTTP export endpoints (writes stay authenticated).
+- Upstream items persist the adapter a sync actually resolved (`adapter_type`,
+  Flyway V12): the download path no longer re-probes the source document and
+  disagrees with the sync-time decision on AUTO sources, which used to leave
+  MCP-registry entries un-downloadable; `UpstreamSyncService` slims down
+  accordingly. The dependency solver handles the added cases, the monitor status
+  view's hover tooltips are reworked, and the local blob store's temp handling
+  aligns with the review fixes.
+
 ### Local database location
 
 - The embedded-H2 database moved out of `~/.infinia-store`: development runs (`local`/`dev`

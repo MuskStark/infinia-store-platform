@@ -13,7 +13,7 @@ principles of the FengYu host.
   authorization server · Ed25519 release signing
 - **Frontend:** Vue 3.5 (English-first UI with 简体中文 switch) · Vite 7 · Pinia · vue-i18n ·
   Tailwind CSS 4 · a controlled, MIT-attributed Vue port of Magic UI
-- **Tests:** 267 backend tests (unit + full HTTP integration) and 18 frontend tests
+- **Tests:** 303 backend tests (unit + full HTTP integration) and 39 frontend tests
 
 ## Architecture
 
@@ -266,7 +266,7 @@ yarn workspace @infinia/store-web gen:api
 ## Development
 
 ```bash
-./mvnw verify                        # backend: 267 tests
+./mvnw verify                        # backend: 303 tests
 yarn ui:test                         # magic-ui-vue port: visual/behavior tests
 yarn web:test && yarn web:build      # SPA: i18n parity, client, component tests + typecheck
 ```
