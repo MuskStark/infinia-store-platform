@@ -21,6 +21,15 @@ const tone = computed(() => {
     case 'QUARANTINED':
     case 'YANKED':
       return 'danger';
+    // In-flight states read as "the pipeline is moving" (blue), while
+    // CHANGES_REQUESTED asks the publisher for input (gold) — muted gray made
+    // both indistinguishable from DRAFT in the release history.
+    case 'IN_REVIEW':
+    case 'SCANNING':
+    case 'UPLOADING':
+      return 'accent';
+    case 'CHANGES_REQUESTED':
+      return 'gold';
     default:
       return 'muted';
   }

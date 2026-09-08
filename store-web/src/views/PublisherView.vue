@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   api,
@@ -27,6 +27,9 @@ const { t } = useI18n();
 const store = usePublisherStore();
 const auth = useAuthStore();
 const message = ref('');
+/** In-card feedback for the release pipeline — actions happen down here, so
+ *  success/failure must be visible next to the buttons, not just at page top. */
+const releaseMessage = ref('');
 
 /** RFC 9457 problems carry stable codes; prefer the localized text. */
 function problemText(e: unknown): string {
@@ -56,10 +59,27 @@ const listingForm = ref({
 const releaseForm = ref({ version: '', channel: 'stable', requiresHost: '' });
 const fileInput = ref<HTMLInputElement | null>(null);
 const packageName = ref('');
+const packageSize = ref(0);
 const selectedListing = ref<CatalogItem | null>(null);
 const selectedListingId = ref<string | null>(null);
 const currentRelease = ref<PublisherRelease | null>(null);
 const busy = ref(false);
+
+/**
+ * The backend rework path (audit P1-3) accepts uploads for REJECTED and
+ * CHANGES_REQUESTED releases and moves them back to DRAFT, so the upload
+ * panel must light up for those states too — not just DRAFT.
+ */
+const UPLOADABLE_STATES = ['DRAFT', 'REJECTED', 'CHANGES_REQUESTED'];
+const canUploadCurrent = computed(() =>
+  currentRelease.value != null
+  && UPLOADABLE_STATES.includes(currentRelease.value.status));
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
 
 async function createOrg() {
   busy.value = true;
@@ -70,6 +90,8 @@ async function createOrg() {
     listingForm.value.namespace = created?.slug ?? orgForm.value.slug;
     useCustomNamespace.value = false;
     orgForm.value = { slug: '', name: '' };
+  } catch (e) {
+    message.value = problemText(e);
   } finally {
     busy.value = false;
   }
@@ -88,24 +110,32 @@ async function createListing() {
       name: listingForm.value.name,
     } as CatalogItem;
     await store.load();
+  } catch (e) {
+    message.value = problemText(e);
   } finally {
     busy.value = false;
   }
 }
 
 /** Publisher-side Infinia Level gate adjustment (Infinia Level 门槛). */
-const gateListingId = ref('');
+const gateCoordinate = ref('');
 const gateLevel = ref(0);
 
 async function applyGate() {
-  if (!gateListingId.value) return;
+  if (!gateCoordinate.value) return;
   busy.value = true;
   try {
+    // Resolve the listing UUID from the public detail endpoint — the publisher
+    // picks a listing by name, never by pasting a raw UUID.
+    const { namespace, slug } = splitCoordinate(gateCoordinate.value);
+    const detail = await api.get<ListingDetail>(`/api/v1/listings/${namespace}/${slug}`);
     await api.post(
-      `/api/v1/publisher/listings/${gateListingId.value}/min-bee-level`,
+      `/api/v1/publisher/listings/${detail.listingId}/min-bee-level`,
       { minBeeLevel: gateLevel.value },
     );
     message.value = t('publisher.gateUpdated');
+  } catch (e) {
+    message.value = problemText(e);
   } finally {
     busy.value = false;
   }
@@ -125,6 +155,7 @@ async function createRelease() {
   const selected = selectedListing.value;
   if (!selected?.coordinate) return;
   busy.value = true;
+  releaseMessage.value = '';
   try {
     // Resolve the listing UUID from the public detail endpoint.
     const { namespace, slug } = splitCoordinate(selected.coordinate);
@@ -137,17 +168,31 @@ async function createRelease() {
     );
     selectedListingId.value = detail.listingId;
     currentRelease.value = release;
+    packageName.value = '';
+    packageSize.value = 0;
+    if (fileInput.value) fileInput.value.value = '';
     await store.loadReleases(detail.listingId);
-    message.value = t('publisher.releaseCreated');
+    releaseMessage.value = t('publisher.releaseCreated');
   } catch (e) {
-    message.value = problemText(e);
+    releaseMessage.value = problemText(e);
   } finally {
     busy.value = false;
   }
 }
 
 function onPackageChange() {
-  packageName.value = fileInput.value?.files?.[0]?.name ?? '';
+  const file = fileInput.value?.files?.[0];
+  packageName.value = file?.name ?? '';
+  packageSize.value = file?.size ?? 0;
+}
+
+/** Drag-and-drop mirrors the hidden file input, so both paths share one state. */
+function onPackageDrop(event: DragEvent) {
+  const files = event.dataTransfer?.files;
+  if (files?.length && fileInput.value) {
+    fileInput.value.files = files;
+    onPackageChange();
+  }
 }
 
 async function uploadAndSubmit() {
@@ -155,18 +200,23 @@ async function uploadAndSubmit() {
   const release = currentRelease.value;
   if (!file || !release) return;
   busy.value = true;
+  releaseMessage.value = '';
   try {
     const session = await api.post<UploadSession>(
       `/api/v1/publisher/releases/${release.releaseId}/uploads`,
       { filename: file.name },
     );
     await api.putRaw(session.uploadUrl, await file.arrayBuffer());
-    message.value = t('publisher.uploadDone');
     const result = await api.post<SubmitResult>(
       `/api/v1/publisher/releases/${release.releaseId}/submit`,
     );
     await pollStatus();
-    message.value = `${t('publisher.submit')}: ${result.status}`;
+    const finalStatus = store.releases[release.releaseId]?.status ?? result.status;
+    releaseMessage.value = t('publisher.submittedStatus', {
+      status: t(`state.${finalStatus}`),
+    });
+  } catch (e) {
+    releaseMessage.value = problemText(e);
   } finally {
     busy.value = false;
   }
@@ -191,7 +241,9 @@ async function selectListing(listing: CatalogItem) {
   selectedListingId.value = null;
   currentRelease.value = null;
   message.value = '';
+  releaseMessage.value = '';
   packageName.value = '';
+  packageSize.value = 0;
   // Resolve the listing UUID, then load its releases (incl. DRAFTs) so an
   // interrupted draft can be resumed — the upload area keys off currentRelease.
   try {
@@ -206,7 +258,7 @@ async function selectListing(listing: CatalogItem) {
     );
     if (draft) {
       currentRelease.value = draft;
-      message.value = t('publisher.draftResumed');
+      releaseMessage.value = t('publisher.draftResumed');
     }
   } catch {
     /* detail load failure leaves the wizard usable for new releases */
@@ -214,20 +266,27 @@ async function selectListing(listing: CatalogItem) {
   }
 }
 
+/**
+ * Any release row can be selected: DRAFT to resume the upload, REJECTED /
+ * CHANGES_REQUESTED to read the scan findings and re-upload (the backend
+ * flips those back to DRAFT on upload). Terminal states show their history.
+ */
 async function pickRelease(release: PublisherRelease) {
-  currentRelease.value = release;
   message.value = '';
+  releaseMessage.value = '';
   packageName.value = '';
-}
-
-async function refreshSelectedListingReleases() {
-  const listingId = selectedListingId.value;
-  if (!listingId) return;
-  await store.loadReleases(listingId);
-  const fresh = store.releasesByListing[listingId]?.find(
-    (r) => r.releaseId === currentRelease.value?.releaseId,
-  );
-  if (fresh) currentRelease.value = fresh;
+  packageSize.value = 0;
+  if (fileInput.value) fileInput.value.value = '';
+  currentRelease.value = release;
+  // The listing-scoped list omits scan findings; the single-release detail
+  // carries them, so a rejected row can explain itself after a reload.
+  if (release.findings?.length) return;
+  try {
+    await store.refreshRelease(release.releaseId);
+    currentRelease.value = store.releases[release.releaseId] ?? release;
+  } catch {
+    /* keep the row-level data if the detail fetch fails */
+  }
 }
 
 async function loadOrgNamespaces() {
@@ -269,6 +328,20 @@ const CHANNEL_OPTIONS = [
   { value: 'stable', label: t('channel.stable') },
   { value: 'beta', label: t('channel.beta') },
 ];
+const GATE_LISTING_OPTIONS = computed(() =>
+  store.listings.map((listing) => ({
+    value: listing.coordinate,
+    label: listing.name,
+  })));
+
+/** Row hint on the right edge of each release row. */
+function releaseRowHint(status: string): string {
+  if (status === 'DRAFT') return t('publisher.clickToResume');
+  if (status === 'REJECTED' || status === 'CHANGES_REQUESTED') {
+    return t('publisher.clickToInspect');
+  }
+  return '';
+}
 </script>
 
 <template>
@@ -302,7 +375,7 @@ const CHANNEL_OPTIONS = [
       <form class="grid gap-3 sm:grid-cols-3" @submit.prevent="createOrg">
         <input v-model="orgForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" :placeholder="t('publisher.orgSlug')" class="input" />
         <input v-model="orgForm.name" :placeholder="t('publisher.orgName')" class="input" />
-        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</button>
+        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">{{ t('publisher.createOrgAction') }}</button>
       </form>
     </MagicCard>
 
@@ -334,6 +407,9 @@ const CHANNEL_OPTIONS = [
         >
           {{ t('publisher.namespaceBackToList') }}
         </button>
+        <p v-if="!orgNamespaces.length && !useCustomNamespace" class="text-xs text-muted sm:col-span-3 dark:text-slate-400">
+          {{ t('publisher.namespaceNone') }}
+        </p>
         <input v-model="listingForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" :placeholder="t('publisher.slug')" class="input" />
         <SelectMenu
           v-model="listingForm.type"
@@ -353,7 +429,7 @@ const CHANNEL_OPTIONS = [
           />
           <span class="mt-1 block text-xs text-muted">{{ t('publisher.minBeeLevelHint') }}</span>
         </label>
-        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</button>
+        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">{{ t('publisher.createListingAction') }}</button>
       </form>
     </MagicCard>
 
@@ -361,11 +437,11 @@ const CHANNEL_OPTIONS = [
       <h2 class="mb-2 font-semibold">{{ t('publisher.setGate') }}</h2>
       <p class="mb-3 text-sm text-muted">{{ t('publisher.setGateHint') }}</p>
       <form class="grid gap-3 sm:grid-cols-3" @submit.prevent="applyGate">
-        <input
-          v-model="gateListingId"
-          required
-          placeholder="listing UUID"
-          class="input font-mono"
+        <SelectMenu
+          :model-value="gateCoordinate"
+          :options="GATE_LISTING_OPTIONS"
+          :aria-label="t('publisher.setGatePickListing')"
+          @update:model-value="gateCoordinate = String($event)"
         />
         <SelectMenu
           :model-value="gateLevel"
@@ -373,14 +449,15 @@ const CHANNEL_OPTIONS = [
           :aria-label="t('publisher.minBeeLevel')"
           @update:model-value="gateLevel = Number($event)"
         />
-        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">
+        <button type="submit" :disabled="busy || !gateCoordinate" class="btn btn-primary self-start justify-self-start whitespace-nowrap">
           {{ t('common.confirm') }}
         </button>
       </form>
     </MagicCard>
 
     <MagicCard v-if="selectedListing && selectedListingId" class="p-6">
-      <h2 class="mb-4 font-semibold">{{ t('publisher.releases') }}</h2>
+      <h2 class="mb-1 font-semibold">{{ t('publisher.releases') }}</h2>
+      <p class="mb-3 text-xs text-muted dark:text-slate-400">{{ selectedListing.name }}</p>
       <p v-if="!store.releasesByListing[selectedListingId]?.length" class="text-sm text-muted">
         {{ t('publisher.noReleases') }}
       </p>
@@ -388,15 +465,15 @@ const CHANNEL_OPTIONS = [
         <li
           v-for="release in store.releasesByListing[selectedListingId]"
           :key="release.releaseId"
-          class="flex cursor-pointer flex-wrap items-center gap-3 py-3 text-sm"
+          class="-mx-2 flex cursor-pointer flex-wrap items-center gap-3 rounded-lg px-2 py-3 text-sm transition-colors hover:bg-surface-muted/70 dark:hover:bg-slate-800/60"
           :class="currentRelease?.releaseId === release.releaseId ? 'text-accent' : ''"
-          @click="release.status === 'DRAFT' && pickRelease(release)"
+          @click="pickRelease(release)"
         >
           <code class="font-semibold">v{{ release.version }}</code>
           <Badge tone="muted">{{ t(`channel.${release.channel}`) }}</Badge>
           <StateChip :status="release.status" />
           <span class="ml-auto text-xs text-muted dark:text-slate-400">
-            {{ release.status === 'DRAFT' ? t('publisher.clickToResume') : formatDate(release.createdAt) }}
+            {{ releaseRowHint(release.status) || formatDate(release.createdAt) }}
           </span>
         </li>
       </ul>
@@ -405,33 +482,63 @@ const CHANNEL_OPTIONS = [
     <MagicCard v-if="selectedListing" class="p-6">
       <h2 class="mb-4 font-semibold">{{ t('publisher.newRelease') }}</h2>
       <form class="grid gap-3 sm:grid-cols-4" @submit.prevent="createRelease">
-        <input v-model="releaseForm.version" required placeholder="1.0.0" class="input" />
-        <SelectMenu v-model="releaseForm.channel" :options="CHANNEL_OPTIONS" :aria-label="t('listing.channel')" />
-        <input v-model="releaseForm.requiresHost" placeholder=">=4.0.0 <5.0.0" class="input" />
-        <button type="submit" :disabled="busy" class="btn btn-primary self-start justify-self-start whitespace-nowrap">{{ t('common.confirm') }}</button>
+        <label class="block text-sm">
+          <span class="mb-1 block">{{ t('publisher.version') }}</span>
+          <input v-model="releaseForm.version" required placeholder="1.0.0" class="input" />
+        </label>
+        <label class="block text-sm">
+          <span class="mb-1 block">{{ t('publisher.channel') }}</span>
+          <SelectMenu v-model="releaseForm.channel" :options="CHANNEL_OPTIONS" :aria-label="t('publisher.channel')" />
+        </label>
+        <label class="block text-sm">
+          <span class="mb-1 block">{{ t('publisher.requiresHost') }}</span>
+          <input v-model="releaseForm.requiresHost" placeholder=">=4.0.0 <5.0.0" class="input" />
+        </label>
+        <button type="submit" :disabled="busy" class="btn btn-primary self-end justify-self-start whitespace-nowrap">{{ t('publisher.createReleaseAction') }}</button>
       </form>
 
-      <div v-if="currentRelease" class="mt-6 space-y-4">
+      <div v-if="currentRelease" class="mt-6 space-y-4 border-t border-line pt-5 dark:border-slate-800">
         <div class="flex items-center gap-2">
           <StateChip :status="currentRelease.status" />
           <Badge tone="muted">{{ currentRelease.version }}</Badge>
         </div>
-        <ProgressBar v-if="currentRelease.status === 'SCANNING'" />
-        <div v-if="currentRelease.status === 'DRAFT'" class="space-y-2">
+        <p v-if="releaseMessage" class="alert alert-info" role="status">
+          {{ releaseMessage }}
+        </p>
+        <div v-if="currentRelease.status === 'SCANNING'" class="space-y-2">
+          <ProgressBar />
+          <p class="text-xs text-muted dark:text-slate-400">{{ t('publisher.scanningHint') }}</p>
+        </div>
+        <div v-if="canUploadCurrent" class="space-y-3">
+          <p v-if="currentRelease.status !== 'DRAFT'" class="alert alert-info">
+            {{ t('publisher.reworkHint') }}
+          </p>
           <!-- Same hidden-input + styled picker pattern as the admin app-release
                upload, so both package uploaders render identically. -->
           <input ref="fileInput" type="file" class="hidden" @change="onPackageChange" />
-          <div class="flex flex-wrap items-center gap-3">
-            <button type="button" class="btn btn-secondary" @click="fileInput?.click()">
-              {{ t('publisher.uploadPackage') }}
-            </button>
-            <span class="min-w-0 flex-1 truncate text-sm" :class="packageName ? '' : 'text-muted dark:text-slate-400'">
-              {{ packageName || '—' }}
-            </span>
-          </div>
-          <button :disabled="busy || !packageName" class="btn btn-primary" @click="uploadAndSubmit">
-            {{ t('publisher.submit') }}
+          <button
+            type="button"
+            class="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-line px-6 py-8 text-center transition-colors hover:border-accent/60 hover:bg-accent/5 dark:border-slate-700"
+            @click="fileInput?.click()"
+            @dragover.prevent
+            @drop.prevent="onPackageDrop"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true" class="text-muted dark:text-slate-400">
+              <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+            <span class="text-sm font-medium">{{ t('publisher.uploadDropHint') }}</span>
+            <span class="text-xs text-muted dark:text-slate-400">{{ t('publisher.uploadHint') }}</span>
           </button>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="min-w-0 flex-1 truncate text-sm" :class="packageName ? '' : 'text-muted dark:text-slate-400'">
+              <template v-if="packageName">{{ packageName }} <span class="text-xs">({{ formatSize(packageSize) }})</span></template>
+              <template v-else>—</template>
+            </span>
+            <button :disabled="busy || !packageName" class="btn btn-primary whitespace-nowrap" @click="uploadAndSubmit">
+              {{ t('publisher.submit') }}
+            </button>
+          </div>
         </div>
         <ul v-if="currentRelease.findings?.length" class="space-y-1 text-sm">
           <li v-for="finding in currentRelease.findings" :key="finding.rule" class="card p-2">

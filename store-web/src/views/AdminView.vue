@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type AdminAppRelease, type AdminAppUploadSession, type AdminListing, type AdminUser, type AuditEvent, type DataSourceStatus, type RemoteDatabase, type RemoteDatabaseTestResult, type Report } from '../api/client';
+import { api, type AdminAppRelease, type AdminAppUploadSession, type AdminListing, type AdminUser, type AuditEvent, type DataSourceStatus, type PublisherRelease, type RemoteDatabase, type RemoteDatabaseTestResult, type Report } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -267,6 +267,17 @@ void [upstreamsLoading, adding, syncingId, lastSync];
 // ---- listing curation (design §12.4 管理: 上下架/推荐/Infinia Level 门槛) ----
 const listings = ref<AdminListing[]>([]);
 const listingsLoading = ref(false);
+const listingSearch = ref('');
+
+/** 367+ rows render without pagination, so a client-side filter is the relief
+ *  valve — same pattern as the user table above. */
+const filteredListings = computed(() => {
+  const q = listingSearch.value.trim().toLowerCase();
+  if (!q) return listings.value;
+  return listings.value.filter(
+    (l) => l.name.toLowerCase().includes(q) || l.coordinate.toLowerCase().includes(q),
+  );
+});
 
 async function loadListings() {
   listingsLoading.value = true;
@@ -278,10 +289,17 @@ async function loadListings() {
 }
 
 async function toggleVisibility(row: AdminListing) {
-  const visibility = row.visibility === 'PUBLIC' ? 'UNLISTED' : 'PUBLIC';
-  const updated = await api.post<AdminListing>(
-    `/api/v1/admin/listings/${row.listingId}/visibility`, { visibility });
-  Object.assign(row, updated);
+  // Delisting hides the listing from every catalog at once — worth a confirm.
+  const delisting = row.visibility === 'PUBLIC';
+  if (delisting && !window.confirm(t('admin.delistConfirm', { name: row.name }))) return;
+  const visibility = delisting ? 'UNLISTED' : 'PUBLIC';
+  try {
+    const updated = await api.post<AdminListing>(
+      `/api/v1/admin/listings/${row.listingId}/visibility`, { visibility });
+    Object.assign(row, updated);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
 }
 
 async function toggleFeatured(row: AdminListing) {
@@ -345,10 +363,80 @@ async function resolve(report: Report, resolution: 'ACTIONED' | 'DISMISSED') {
   await load();
 }
 
+// ---- security withdrawal (安全下架): pick listing → pick release → act ----
+const withdrawListingId = ref('');
+const withdrawReleases = ref<PublisherRelease[]>([]);
+const withdrawLoading = ref(false);
+const withdrawMessage = ref('');
+const withdrawError = ref<string | null>(null);
+
+const WITHDRAW_LISTING_OPTIONS = computed(() =>
+  listings.value.map((l) => ({ value: l.listingId, label: l.name })));
+
+/** Admins may read every listing's releases (owner check is skipped for
+ *  PLATFORM_ADMIN), so the withdrawal form can offer versions by name. */
+async function loadWithdrawReleases() {
+  withdrawError.value = null;
+  withdrawMessage.value = '';
+  withdrawReleases.value = [];
+  releaseId.value = '';
+  if (!withdrawListingId.value) return;
+  withdrawLoading.value = true;
+  try {
+    withdrawReleases.value = await api.get<PublisherRelease[]>(
+      `/api/v1/publisher/listings/${withdrawListingId.value}/releases`,
+    );
+  } catch (e) {
+    withdrawError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    withdrawLoading.value = false;
+  }
+}
+
+const WITHDRAW_RELEASE_OPTIONS = computed(() =>
+  withdrawReleases.value.map((r) => ({
+    value: r.releaseId,
+    label: `v${r.version} · ${t(`state.${r.status}`, r.status)}`,
+  })));
+
+function onWithdrawListingChange(value: string | number) {
+  withdrawListingId.value = String(value);
+  void loadWithdrawReleases();
+}
+
+function onWithdrawReleaseChange(value: string | number) {
+  releaseId.value = String(value);
+}
+
 async function withdraw(kind: 'yank' | 'quarantine') {
   if (!releaseId.value) return;
-  await api.post(`/api/v1/admin/releases/${releaseId.value}/${kind}`, { reason: reason.value });
-  reason.value = '';
+  withdrawError.value = null;
+  withdrawMessage.value = '';
+  const row = withdrawReleases.value.find((r) => r.releaseId === releaseId.value);
+  if (row && row.status !== 'PUBLISHED') {
+    withdrawError.value = t('admin.withdrawNeedsPublished');
+    return;
+  }
+  if (kind === 'quarantine' && !reason.value.trim()) {
+    withdrawError.value = t('admin.withdrawReasonRequired');
+    return;
+  }
+  if (!window.confirm(t(kind === 'yank' ? 'admin.yankConfirm' : 'admin.quarantineConfirm',
+    { version: row?.version ?? releaseId.value }))) {
+    return;
+  }
+  try {
+    await api.post(`/api/v1/admin/releases/${releaseId.value}/${kind}`, { reason: reason.value });
+    reason.value = '';
+    await loadWithdrawReleases();
+    // Set after the refresh: loadWithdrawReleases clears stale feedback.
+    withdrawMessage.value = t(
+      kind === 'yank' ? 'admin.yankDone' : 'admin.quarantineDone',
+      { version: row?.version ?? '' },
+    );
+  } catch (e) {
+    withdrawError.value = e instanceof Error ? e.message : String(e);
+  }
 }
 
 // ---- manual host-app update upload (手动上传主程序更新包) ----
@@ -827,8 +915,18 @@ async function deleteAppRelease(rel: AdminAppRelease) {
 
       <section v-if="tab === 'listings'" class="space-y-3">
         <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.listingsHint') }}</p>
+        <div class="flex flex-wrap items-center gap-3">
+          <input
+            v-model="listingSearch"
+            :placeholder="t('admin.listingSearch')"
+            class="input max-w-md"
+          />
+          <span class="text-xs text-muted dark:text-slate-400">
+            {{ t('admin.listingsCount', { n: filteredListings.length }) }}
+          </span>
+        </div>
         <LoadingGrid v-if="listingsLoading && !listings.length" />
-        <EmptyState v-else-if="!listings.length" :title="t('common.empty')" />
+        <EmptyState v-else-if="!filteredListings.length" :title="t('common.empty')" />
         <div v-else class="table-card">
           <table>
             <thead>
@@ -842,23 +940,30 @@ async function deleteAppRelease(rel: AdminAppRelease) {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in listings" :key="row.listingId">
-                <td>
-                  <RouterLink :to="listingRoute(row.coordinate)" class="font-medium hover:text-accent">
+              <tr v-for="row in filteredListings" :key="row.listingId">
+                <td class="max-w-[15rem]">
+                  <RouterLink :to="listingRoute(row.coordinate)" class="block truncate font-medium hover:text-accent">
                     {{ row.name }}
                   </RouterLink>
-                  <code class="block text-xs text-muted">{{ row.coordinate }}</code>
+                  <code class="block truncate text-xs text-muted">{{ row.coordinate }}</code>
                 </td>
                 <td>{{ t(`type.${row.type}`) }}</td>
                 <td class="whitespace-nowrap">{{ row.latestVersion ? 'v' + row.latestVersion : '—' }}</td>
                 <td>
-                  <button
-                    class="btn btn-sm"
-                    :class="row.visibility === 'PUBLIC' ? 'btn-secondary' : 'btn-danger'"
-                    @click="toggleVisibility(row)"
-                  >
-                    {{ row.visibility === 'PUBLIC' ? t('admin.delist') : t('admin.relist') }}
-                  </button>
+                  <div class="flex flex-col items-start gap-1">
+                    <!-- State and action are separate: the button label alone
+                         could not say what the listing currently IS. -->
+                    <Badge :tone="row.visibility === 'PUBLIC' ? 'success' : 'danger'">
+                      {{ row.visibility === 'PUBLIC' ? t('admin.visiblePublic') : t('admin.visibleUnlisted') }}
+                    </Badge>
+                    <button
+                      class="btn btn-sm"
+                      :class="row.visibility === 'PUBLIC' ? 'btn-secondary' : 'btn-success'"
+                      @click="toggleVisibility(row)"
+                    >
+                      {{ row.visibility === 'PUBLIC' ? t('admin.delist') : t('admin.relist') }}
+                    </button>
+                  </div>
                 </td>
                 <td>
                   <button
@@ -996,26 +1101,48 @@ async function deleteAppRelease(rel: AdminAppRelease) {
       <section v-if="tab === 'withdraw'" class="space-y-4">
         <p class="text-sm text-muted">{{ t('admin.withdrawHint') }}</p>
         <MagicCard class="p-6">
-          <form class="flex flex-col gap-2 sm:flex-row" @submit.prevent="withdraw('yank')">
-            <input
-              v-model="releaseId"
-              required
-              placeholder="release UUID"
-              class="input font-mono"
-            />
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="block text-sm">
+              <span class="mb-1 block">{{ t('admin.withdrawPickListing') }}</span>
+              <SelectMenu
+                :model-value="withdrawListingId"
+                :options="WITHDRAW_LISTING_OPTIONS"
+                :aria-label="t('admin.withdrawPickListing')"
+                @update:model-value="onWithdrawListingChange"
+              />
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block">{{ t('admin.withdrawPickRelease') }}</span>
+              <SelectMenu
+                :model-value="releaseId"
+                :options="WITHDRAW_RELEASE_OPTIONS"
+                :aria-label="t('admin.withdrawPickRelease')"
+                :disabled="!withdrawListingId"
+                @update:model-value="onWithdrawReleaseChange"
+              >
+                <template #empty>
+                  <span class="block px-3 py-2 text-xs text-muted">
+                    {{ withdrawLoading ? t('common.loading') : t('admin.withdrawPickListingFirst') }}
+                  </span>
+                </template>
+              </SelectMenu>
+            </label>
+          </div>
+          <label class="mt-3 block text-sm">
+            <span class="mb-1 block">{{ t('admin.reasonLabel') }}</span>
             <input v-model="reason" :placeholder="t('admin.reasonLabel')" class="input" />
-            <button class="btn btn-secondary">
+          </label>
+          <div class="mt-4 flex flex-wrap items-center gap-2">
+            <button class="btn btn-secondary" :disabled="!releaseId" @click="withdraw('yank')">
               {{ t('admin.yank') }}
             </button>
-          </form>
-          <button
-            class="btn btn-danger mt-3 w-full"
-            :disabled="!releaseId"
-            @click="withdraw('quarantine')"
-          >
-            {{ t('admin.quarantine') }}
-          </button>
-          <p class="mt-2 text-xs text-muted">{{ t('admin.quarantineHint') }}</p>
+            <button class="btn btn-danger" :disabled="!releaseId" @click="withdraw('quarantine')">
+              {{ t('admin.quarantine') }}
+            </button>
+          </div>
+          <p v-if="withdrawMessage" class="alert alert-success mt-3" role="status">{{ withdrawMessage }}</p>
+          <p v-if="withdrawError" class="alert alert-error mt-3" role="alert">{{ withdrawError }}</p>
+          <p class="mt-3 text-xs text-muted">{{ t('admin.quarantineHint') }}</p>
         </MagicCard>
       </section>
 
