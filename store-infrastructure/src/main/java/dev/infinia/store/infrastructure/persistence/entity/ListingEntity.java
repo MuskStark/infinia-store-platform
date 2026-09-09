@@ -74,7 +74,7 @@ public class ListingEntity {
     public Map<String, LocalizationEmb> localizations = new HashMap<>();
 
     @Embeddable
-    public static record LocalizationEmb(String name, String summary,
+    public static record LocalizationEmb(@Column(columnDefinition = "text") String name, String summary,
             @Column(name = "description_md") String descriptionMarkdown,
             @Column(name = "changelog_md") String changelogMarkdown) {
     }
