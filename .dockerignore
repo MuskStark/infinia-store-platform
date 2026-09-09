@@ -22,6 +22,7 @@ hs_err_pid*
 
 # --- Runtime state and local artifacts ---
 data
+backups
 store-application/data
 store-application/data.bak-module-20260828
 *.log
