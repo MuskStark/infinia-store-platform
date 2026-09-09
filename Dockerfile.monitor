@@ -39,6 +39,13 @@ COPY mvnw pom.xml ./
 COPY .mvn .mvn
 COPY store-contract/pom.xml store-contract/pom.xml
 COPY store-monitor/pom.xml store-monitor/pom.xml
+# The root POM's reactor refuses to parse unless every declared module
+# directory exists; -pl store-monitor -am then builds only contract+monitor,
+# so the unrelated modules' POMs suffice — their sources stay out of context.
+COPY store-domain/pom.xml store-domain/pom.xml
+COPY store-infrastructure/pom.xml store-infrastructure/pom.xml
+COPY store-scanner/pom.xml store-scanner/pom.xml
+COPY store-application/pom.xml store-application/pom.xml
 # Warm the dependency layer; a miss only costs time on the next COPY layer.
 RUN ./mvnw -B -q -pl store-monitor -am dependency:go-offline -DskipTests || true
 COPY store-contract store-contract

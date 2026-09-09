@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### CI repair on main
+
+- `Dockerfile.monitor` builds again: the root POM's reactor refuses to parse
+  unless every declared module directory exists in the build context, so the
+  four modules the monitor never compiles (`store-domain`,
+  `store-infrastructure`, `store-scanner`, `store-application`) are present as
+  POM-only copies; `-pl store-monitor -am` still builds only
+  contract+monitor.
+- `ServiceStatusTest` is deterministic on slow CI runners: the test profile
+  already neutralized the host-dependent memory/disk thresholds but missed
+  JVM-heap pressure (85% warn line trips mid-suite on a 2-core runner) and
+  the http-quality window (its p95 is cumulative over all real-server
+  requests — including the status page's own probe time). Heap, pool and
+  HTTP thresholds are neutralized the same way; the structural assertions
+  stay about shape, not host speed. These failures predate the deployment
+  batch (main's CI had been red since the status-page commit).
+- `store-web/src/api/schema.d.ts` regenerated to match the
+  `fengyu-updates/deb` contract comment change that landed without a regen.
+- The images job now `needs: [backend, frontend]` — release images are never
+  published from a commit whose tests are red.
+
 ### Production deployment readiness
 
 - Reverse-proxy adaptation: both apps now run

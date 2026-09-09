@@ -57,6 +57,8 @@ jobs:
   images:
     name: Images (Docker → GHCR)
     runs-on: ubuntu-latest
+    # Never publish release images from a commit whose tests are red.
+    needs: [backend, frontend]
     permissions:
       contents: read
       packages: write

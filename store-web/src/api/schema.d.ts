@@ -271,7 +271,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** RESERVED — deliberately unimplemented (audit 3.5) */
+        /**
+         * RESERVED — deliberately unimplemented (audit 3.5)
+         * @description No shipped client consumes this endpoint: the desktop deb updater reads the
+         *     electron-updater generic feed at `/fengyu-updates/deb/latest-linux.yml`, the
+         *     Windows portable updater reads the compat GitHub-releases mirror, and the
+         *     portable-web backend checks GitHub directly. The historic response fields
+         *     never matched any of those contracts, so the endpoint answers 501 until it
+         *     is wired to a real client contract.
+         */
         get: operations["appUpdateFeed"];
         put?: never;
         post?: never;
@@ -2455,13 +2463,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /**
-             * @description Endpoint reserved; no consumer exists
-             *
-             * (RESERVED — audit 3.5: the desktop deb updater reads the
-             * electron-updater generic feed at /fengyu-updates/deb/latest-linux.yml,
-             * the Windows portable updater the compat GitHub-releases mirror)
-             */
+            /** @description Endpoint reserved; no consumer exists */
             501: {
                 headers: {
                     [name: string]: unknown;
