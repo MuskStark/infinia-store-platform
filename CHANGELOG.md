@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Production SPA cache policy & demo-account removal
+
+- Navigation "silently dead after an upgrade": the SPA's index.html carried no
+  Cache-Control, so browsers heuristic-cached the shell across deployments —
+  a stale shell references content-hashed chunks the upgraded server no
+  longer has, lazy-route loads 404 and every nav click is cancelled. A
+  DefaultNoCacheFilter (REQUEST/FORWARD/ERROR dispatches) now defaults every
+  GET/HEAD to revalidate-always; /assets/** keep their one-year immutable
+  cache. Same filter in the monitor for its embedded SPA. The welcome page is
+  served through an explicit forward:/index.html so it passes the filter.
+- The sign-in demo-accounts panel is now dev-only (`import.meta.env.DEV`):
+  production seeds nothing, and the credentials no longer ship in the
+  production bundle at all (emails, password and the hint text all moved
+  behind the DEV constant or reworded).
+
 ### Test-suite determinism
 
 - Every `@SpringBootTest` class now runs against its own fresh H2 database

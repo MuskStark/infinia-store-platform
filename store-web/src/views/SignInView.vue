@@ -32,13 +32,18 @@ const oauthMode = computed(() => route.query.oauth === '1');
 const error = ref<string | null>(route.query.error === '1' ? t('errors.invalid_credentials') : null);
 const notice = ref<string | null>(null);
 
-/** Seeded demo accounts (local/test profiles) — one click fills the form. */
-const demoAccounts = computed(() => [
-  { email: 'admin@infinia.local', label: t('role.PLATFORM_ADMIN') },
-  { email: 'reviewer@infinia.local', label: t('role.REVIEWER') },
-  { email: 'publisher@infinia.local', label: t('role.PUBLISHER') },
-  { email: 'user@infinia.local', label: t('role.USER') },
-]);
+/** Seeded demo accounts exist only under local/dev profiles, and the panel
+ *  only makes sense then: production seeds nothing. The literals sit behind
+ *  the DEV constant so the production build tree-shakes them out entirely. */
+const showDemoAccounts = import.meta.env.DEV;
+const demoAccounts = showDemoAccounts
+  ? computed(() => [
+      { email: 'admin@infinia.local', password: 'Password123!', label: t('role.PLATFORM_ADMIN') },
+      { email: 'reviewer@infinia.local', password: 'Password123!', label: t('role.REVIEWER') },
+      { email: 'publisher@infinia.local', password: 'Password123!', label: t('role.PUBLISHER') },
+      { email: 'user@infinia.local', password: 'Password123!', label: t('role.USER') },
+    ])
+  : computed(() => [] as { email: string; password: string; label: string }[]);
 
 const emailInvalid = computed(() => email.value.length > 0 && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.value));
 const passwordShort = computed(() => mode.value === 'register' && password.value.length > 0 && password.value.length < 8);
@@ -57,12 +62,14 @@ function switchMode(next: 'signin' | 'register') {
   notice.value = null;
 }
 
-function fillDemo(demoEmail: string) {
+/** Fills the form from a demo account row; carries no literals itself so it
+ *  stays in the bundle while the credentials do not. */
+function useDemoAccount(demo: { email: string; password: string }) {
   mode.value = 'signin';
   error.value = null;
   notice.value = null;
-  email.value = demoEmail;
-  password.value = 'Password123!';
+  email.value = demo.email;
+  password.value = demo.password;
 }
 
 function problemText(e: unknown): string {
@@ -182,7 +189,7 @@ async function register() {
               :minlength="mode === 'register' ? 8 : undefined"
               :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
               :aria-invalid="passwordShort || undefined"
-              placeholder="Password123!"
+              placeholder="••••••••"
               class="input pr-16!"
             />
             <button
@@ -238,7 +245,7 @@ async function register() {
         {{ notice }}
       </p>
 
-      <details v-if="mode === 'signin'" class="mt-5 text-sm">
+      <details v-if="mode === 'signin' && showDemoAccounts" class="mt-5 text-sm">
         <summary class="cursor-pointer select-none text-muted hover:text-accent dark:text-slate-400">
           {{ t('auth.demoAccounts') }}
         </summary>
@@ -247,7 +254,7 @@ async function register() {
             <button
               type="button"
               class="flex w-full items-center justify-between rounded-lg border border-line px-3 py-2 text-left text-xs hover:bg-surface-muted dark:border-slate-800"
-              @click="fillDemo(demo.email)"
+              @click="useDemoAccount(demo)"
             >
               <code>{{ demo.email }}</code>
               <span class="text-muted">{{ demo.label }}</span>

@@ -489,7 +489,7 @@ export default {
     togglePassword: '切换密码可见性',
     displayNamePlaceholder: '怎么称呼你？（可选）',
     demoAccounts: '演示账号（本地）',
-    demoHint: '点击账号自动填入表单，密码统一为 Password123!',
+    demoHint: '点击账号即可自动填入表单。',
     haveAccount: '已有账号？',
     noAccount: '还没有账号？',
     callbackWorking: '正在完成登录…',

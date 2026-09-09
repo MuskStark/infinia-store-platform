@@ -492,7 +492,7 @@ export default {
     togglePassword: 'Toggle password visibility',
     displayNamePlaceholder: 'How should we call you? (optional)',
     demoAccounts: 'Demo accounts (local)',
-    demoHint: 'Click an account to fill the form; the password is Password123!.',
+    demoHint: 'Click an account to autofill the form.',
     haveAccount: 'Already have an account?',
     noAccount: 'No account yet?',
     callbackWorking: 'Completing sign-in…',
