@@ -20,8 +20,11 @@ Internet ──HTTPS── SafeLine WAF (TLS termination, WAF/CC protection)
                        └── monitor       (monitordata volume: H2 mirror + history)
 ```
 
-All compose ports are loopback-bound; both services are published only
-through the WAF.
+The app ports (store 8080, monitor 8090) publish on all interfaces by
+default so a WAF on another host — or LAN clients — reach them directly
+(`STORE_BIND_HOST` / `MONITOR_BIND_HOST` rebind them, e.g. 127.0.0.1 for a
+co-located proxy). The dependency-plane ports (PostgreSQL, MinIO, Redis)
+stay loopback-bound: they carry the stack's credentials.
 
 ## First deployment
 
@@ -103,19 +106,12 @@ first becomes admin.
 
 ## WAF on a separate host
 
-When the reverse proxy / WAF runs on its own server, loopback bindings are
-unreachable from it. Set in `.env`:
-
-```sh
-STORE_BIND_HOST=0.0.0.0      # or the store server's LAN IP only
-MONITOR_BIND_HOST=0.0.0.0
-docker compose --profile app up -d
-```
-
-Then point the WAF sites at `http://<store-server-LAN-IP>:8080` and
-`:8090` (never 127.0.0.1 — that would hit the WAF host itself). Restrict
-the opened ports to the WAF's IP via the DOCKER-USER chain — plain ufw
-does NOT filter Docker-published ports:
+The app ports already publish on all interfaces by default, so a WAF on its
+own server can reach them out of the box: point the WAF sites at
+`http://<store-server-LAN-IP>:8080` and `:8090` (never 127.0.0.1 — that
+would hit the WAF host itself). Because the ports are open to the network,
+restrict them to the WAF's IP via the DOCKER-USER chain — plain ufw does
+NOT filter Docker-published ports:
 
 ```sh
 iptables -I DOCKER-USER -p tcp --dport 8080 ! -s <waf-ip> -j DROP
@@ -123,8 +119,10 @@ iptables -I DOCKER-USER -p tcp --dport 8090 ! -s <waf-ip> -j DROP
 # persist: apt install iptables-persistent && netfilter-persistent save
 ```
 
-The forwarded-header trust needs no change: the WAF's hop still originates
-from a private address, which the default internal-proxies covers.
+Prefer the ports not answer the LAN at all when the proxy is co-located?
+Set `STORE_BIND_HOST=127.0.0.1` (and `MONITOR_BIND_HOST`) in `.env`. The
+forwarded-header trust needs no change either way: a WAF hop from a private
+address is covered by the default internal-proxies.
 
 ## Backups
 

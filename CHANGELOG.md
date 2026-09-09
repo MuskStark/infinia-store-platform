@@ -10,10 +10,12 @@
   admin bootstrap path; later registrations keep the plain USER role and the
   admin assigns roles/levels/status per account from the existing user
   console. Documented in DEPLOYMENT.md "First admin".
-- Compose publishing is configurable for a WAF on a separate host:
-  `STORE_BIND_HOST` / `MONITOR_BIND_HOST` (default 127.0.0.1) rebind the two
-  app ports, with the DOCKER-USER firewall recipe in DEPLOYMENT.md — plain
-  ufw does not filter Docker-published ports.
+- The app ports publish on all interfaces by default (direct access for a
+  WAF on a separate host or LAN clients): `STORE_BIND_HOST` /
+  `MONITOR_BIND_HOST` rebind them — 127.0.0.1 restores loopback-only for a
+  co-located proxy. Dependency-plane ports (PostgreSQL/MinIO/Redis) stay
+  loopback-bound; DEPLOYMENT.md carries the DOCKER-USER firewall recipe
+  (plain ufw does not filter Docker-published ports).
 
 ### CI repair on main
 
