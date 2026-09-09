@@ -33,6 +33,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # build-monitor-jar.sh shells out to ./mvnw, which needs a JDK 21; the
+      # runner's default JDK is older and fails with "release version 21 not
+      # supported".
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
       - name: Enable Yarn 4
         run: corepack enable
       - name: Install

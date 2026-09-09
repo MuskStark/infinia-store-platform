@@ -22,8 +22,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * probes, a full 90-day history per component and the incident feed — all
  * reachable without any authentication, because a status page that needs a
  * login is useless during an outage.
+ *
+ * <p>Boots against its own empty H2 database instead of the suite's shared
+ * one: the assertions describe a fresh boot (every component operational,
+ * empty incident feed, 89 no-data history days), and the shared database
+ * accumulates state from earlier test classes — e.g. the SSRF conformance
+ * test leaves an enabled upstream source whose failed sync makes
+ * probeUpstream report degraded, which flips exactly these assertions
+ * depending on class execution order (surefire's default filesystem order
+ * differs between macOS and Linux).</p>
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "spring.datasource.url=jdbc:h2:mem:store-status;"
+                + "MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;"
+                + "DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1")
 @ActiveProfiles("test")
 class ServiceStatusTest {
 
