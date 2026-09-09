@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { useAuthStore } from './stores/auth';
 import { setLocale, type Locale } from './i18n';
 import BeeLevelBadge from './components/BeeLevelBadge.vue';
+import RouteContent from './components/RouteContent.vue';
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -383,7 +384,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
     </header>
 
     <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-8">
-      <RouterView :key="route.fullPath" />
+      <RouteContent />
     </main>
 
     <!-- Light-gray marketplace footer band: links left, brand right. -->

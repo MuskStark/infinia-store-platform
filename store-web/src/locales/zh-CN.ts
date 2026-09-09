@@ -21,6 +21,7 @@ export default {
     loading: '加载中…',
     empty: '这里空空如也',
     error: '出了点问题',
+    pageLoadError: '页面加载失败，请检查网络连接后重试。',
     retry: '重试',
     offline: '网络似乎不可用',
     notFound: '页面不存在',

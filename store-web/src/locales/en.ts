@@ -22,6 +22,7 @@ export default {
     loading: 'Loading…',
     empty: 'Nothing here yet',
     error: 'Something went wrong',
+    pageLoadError: 'This page could not be loaded. Please check your connection and retry.',
     retry: 'Retry',
     offline: 'You appear to be offline',
     notFound: 'Page not found',
