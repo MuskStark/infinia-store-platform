@@ -1075,6 +1075,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/upstreams/{upstreamId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Enable/disable an upstream source at runtime; the probe skips disabled sources */
+        patch: operations["setUpstreamEnabled"];
+        trace?: never;
+    };
     "/admin/upstreams/{upstreamId}/sync": {
         parameters: {
             query?: never;
@@ -3659,6 +3676,34 @@ export interface operations {
         responses: {
             /** @description Created */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Upstream"];
+                };
+            };
+        };
+    };
+    setUpstreamEnabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upstreamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated source */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

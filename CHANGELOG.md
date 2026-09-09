@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### A failing optional upstream no longer keeps the page yellow
+
+- Failed upstream syncs retry hourly (`store.upstream.retry-interval-ms`):
+  previously one failure degraded the status page's upstream component until
+  the next reboot, so a transient upstream outage (a 503, a network blip)
+  painted the whole page yellow while the store itself was healthy.
+- New runtime toggle: `PATCH /api/v1/admin/upstreams/{id}` with
+  `{"enabled": false}` parks a persistently failing source — the probe skips
+  disabled sources, turning the page green again without a reboot.
+  UpstreamAdminToggleTest covers failing-source → degraded → disable →
+  green end to end; the contract and generated types ship the operation.
+
 ### Status-page uptime semantics (full coloring audit)
 
 - Degraded samples now count as availability (the statuspage.io convention,

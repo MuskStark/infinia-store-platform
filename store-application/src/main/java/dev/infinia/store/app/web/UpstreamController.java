@@ -94,8 +94,37 @@ class UpstreamController {
         return result;
     }
 
+    /**
+     * Enables/disables a source at runtime. A persistently failing optional
+     * mirror must not paint the status page yellow until the next reboot:
+     * operators park it here, and the upstream probe skips disabled sources.
+     */
+    @PatchMapping("/{upstreamId}")
+    public ReviewDtos.UpstreamDto setEnabled(@PathVariable UUID upstreamId,
+            @RequestBody UpdateUpstreamRequest request) {
+        UUID adminId = principal.requireUserId();
+        if (request.enabled() == null) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "enabled is required (true or false)");
+        }
+        UpstreamSource source = upstreams.findById(upstreamId).orElseThrow(
+                () -> new DomainException(StoreErrorCode.NOT_FOUND,
+                        "Upstream source not found"));
+        UpstreamSource updated = new UpstreamSource(source.id(), source.name(),
+                source.marketplaceUrl(), source.targetNamespace(), request.enabled(),
+                source.lastSyncAt(), source.lastSyncOk(), source.lastError(),
+                source.adapterType());
+        upstreams.save(updated);
+        audit.record("USER", adminId.toString(),
+                request.enabled() ? "upstream.enable" : "upstream.disable", "UPSTREAM",
+                upstreamId.toString(), null, source.marketplaceUrl(), null);
+        return toDto(updated);
+    }
+
     record CreateUpstreamRequest(String name, String marketplaceUrl, String targetNamespace,
                 String adapterType) {}
+
+    record UpdateUpstreamRequest(Boolean enabled) {}
 
     private static ReviewDtos.UpstreamDto toDto(UpstreamSource source) {
         return new ReviewDtos.UpstreamDto(source.id().toString(), source.name(),

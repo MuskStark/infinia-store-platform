@@ -11,6 +11,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,6 +23,10 @@ import org.springframework.stereotype.Component;
  * WorkBuddy's open skill platform) so a deployment aggregates them without a
  * manual registration. The seeding is idempotent per source name and can be
  * turned off with {@code store.upstream.defaults.enabled=false}.</p>
+ *
+ * <p>A failed sync would otherwise degrade the status page's upstream
+ * component until the next reboot; the hourly retry lets a transient
+ * upstream outage (a 503, a network blip) self-heal back to green.</p>
  */
 @Component
 public class UpstreamCatalogBootstrap {
@@ -52,15 +57,30 @@ public class UpstreamCatalogBootstrap {
             seedDefault("SkillHub (WorkBuddy)", skillhubUrl, "skillhub",
                     UpstreamAdapter.SKILLHUB_REGISTRY);
         }
+        syncFailedSources("Initial upstream metadata index");
+    }
+
+    /**
+     * Retries enabled sources whose last sync failed, hourly — a dead-looking
+     * upstream component otherwise sticks until the next reboot, painting the
+     * whole page yellow while the store itself is perfectly healthy.
+     */
+    @Scheduled(initialDelayString = "${store.upstream.retry-interval-ms:3600000}",
+            fixedDelayString = "${store.upstream.retry-interval-ms:3600000}")
+    public void retryFailedSyncs() {
+        syncFailedSources("Upstream retry");
+    }
+
+    private void syncFailedSources(String logLabel) {
         upstreams.findAll().stream()
                 .filter(source -> source.enabled()
                         && (source.lastSyncAt() == null
                                 || !Boolean.TRUE.equals(source.lastSyncOk())))
                 .forEach(source -> {
                     UpstreamSyncService.SyncResult result = sync.sync(source.id());
-                    log.info("Initial upstream metadata index {}: imported={}, skipped={}, "
-                                    + "failed={}", source.name(), result.imported(),
-                            result.skipped(), result.failed());
+                    log.info("{} {}: imported={}, skipped={}, failed={}", logLabel,
+                            source.name(), result.imported(), result.skipped(),
+                            result.failed());
                 });
     }
 
