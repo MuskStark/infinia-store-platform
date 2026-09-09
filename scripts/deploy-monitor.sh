@@ -243,7 +243,12 @@ else
   chmod 600 .env
   log ".env generated: MONITOR_TARGET_BASE_URL=$TARGET_URL registry=$IMAGE_REGISTRY tag=$IMAGE_TAG"
 fi
-[[ -n $TARGET_URL ]] || TARGET_URL=$(grep -E '^MONITOR_TARGET_BASE_URL=' .env | cut -d= -f2-)
+# grep's non-match must not become a silent set-e exit — the die below is the
+# intended diagnostic when .env predates this variable (e.g. copied from
+# .env.example, where the line ships commented out).
+if [[ -z $TARGET_URL ]]; then
+  TARGET_URL=$(grep -E '^MONITOR_TARGET_BASE_URL=' .env | cut -d= -f2- || true)
+fi
 [[ -n $TARGET_URL ]] || die ".env has no MONITOR_TARGET_BASE_URL — rerun with --target-url or --force-env"
 
 # ------------------------------------------------- 5. pull & start --------

@@ -317,7 +317,10 @@ if [[ $WITH_MONITOR -eq 1 ]]; then
 fi
 
 # ---------------------------------------------------- 6. what's next -------
-STORE_URL=$(grep -E '^STORE_BASE_URL=' .env | cut -d= -f2-)
+# Same guard as deploy-monitor.sh: a commented-out line in a hand-copied
+# .env.example must not kill the script with a silent set-e exit here.
+STORE_URL=$(grep -E '^STORE_BASE_URL=' .env | cut -d= -f2- || true)
+STORE_URL=${STORE_URL:-<set STORE_BASE_URL in .env>}
 cat <<SUMMARY
 
 Deployment is up. Remaining wiring (see DEPLOYMENT.md):

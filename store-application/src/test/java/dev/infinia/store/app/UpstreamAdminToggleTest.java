@@ -23,8 +23,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * upstream probe skips disabled sources, so an optional aggregation mirror
  * being down must not keep the whole status page yellow while the store
  * itself is healthy.
+ *
+ * <p>Status reads serve the sampler's cached snapshot (reads no longer run
+ * probes), so a config change surfaces within one sampling window rather
+ * than instantly. This test pins the window at 250 ms and polls to the next
+ * sample instead of expecting a same-request flip.</p>
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "store.status.sample-interval-ms=250")
 @ActiveProfiles("test")
 class UpstreamAdminToggleTest {
 
@@ -36,7 +42,7 @@ class UpstreamAdminToggleTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void disablingAFailingSourceTurnsTheStatusPageGreenAgain() {
+    void disablingAFailingSourceTurnsTheStatusPageGreenAgain() throws InterruptedException {
         String admin = AuthTestSupport.login(http(), null, "admin@infinia.local",
                 dev.infinia.store.app.seed.SeedData.DEMO_PASSWORD);
 
@@ -51,9 +57,9 @@ class UpstreamAdminToggleTest {
         String upstreamId = (String) created.getBody().get("upstreamId");
         assertEquals(Boolean.FALSE, created.getBody().get("lastSyncOk"));
 
-        String degraded = upstreamIndicator();
-        assertEquals(dev.infinia.store.app.service.StatusService.DEGRADED, degraded,
-                "a failing enabled source degrades the upstream component");
+        assertEquals(dev.infinia.store.app.service.StatusService.DEGRADED,
+                awaitUpstreamIndicator(dev.infinia.store.app.service.StatusService.DEGRADED),
+                "a failing enabled source degrades the upstream component within one sampling window");
 
         // Park it: PATCH enabled=false. (The shared Http helper rides
         // HttpURLConnection, which rejects PATCH; JDK HttpClient does not.)
@@ -74,8 +80,19 @@ class UpstreamAdminToggleTest {
                 .findFirst().orElseThrow()).get("enabled"));
 
         assertEquals(dev.infinia.store.app.service.StatusService.OPERATIONAL,
-                upstreamIndicator(),
+                awaitUpstreamIndicator(dev.infinia.store.app.service.StatusService.OPERATIONAL),
                 "a disabled source must not keep the page yellow");
+    }
+
+    /** Polls the cached page until the next sample reflects {@code expected}. */
+    private String awaitUpstreamIndicator(String expected) throws InterruptedException {
+        String indicator = upstreamIndicator();
+        for (long deadline = System.currentTimeMillis() + 15_000;
+                !expected.equals(indicator) && System.currentTimeMillis() < deadline;
+                Thread.sleep(150)) {
+            indicator = upstreamIndicator();
+        }
+        return indicator;
     }
 
     @SuppressWarnings("unchecked")
