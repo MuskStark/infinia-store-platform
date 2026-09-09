@@ -13,13 +13,10 @@
 #      -e STORE_STORAGE_S3_SECRET_KEY=...] \
 #     -v store-data:/var/lib/infinia-store infinia-store
 #
-# `docker compose --profile app up` wires this against the stack's PostgreSQL,
-# Redis and MinIO (bucket store-blobs) with sensible defaults.
-
-LABEL org.opencontainers.image.title="Infinia Store Platform"
-LABEL org.opencontainers.image.description="Cloud control plane for the Infinia / FengYu ecosystem: catalog, publishing pipeline, review workflow, signed delivery and accounts."
-LABEL org.opencontainers.image.source="https://github.com/MuskStark/infinia-store-platform"
-LABEL org.opencontainers.image.licenses="GPL-3.0-only"
+# `docker compose --profile app up` wires this against the stack's PostgreSQL
+# and MinIO (bucket store-blobs); the three STORE_*_SECRET variables come from
+# .env (see .env.example). Redis ships with the stack per the platform design
+# but is not yet wired into the application.
 
 # ---- Stage 1: Store Web SPA (Vue 3 + Vite) ----------------------------------
 FROM node:22-alpine AS web
@@ -66,6 +63,11 @@ RUN ./mvnw -B -pl store-application -am package -DskipTests \
 
 # ---- Stage 3: runtime -------------------------------------------------------
 FROM eclipse-temurin:21-jre-noble AS runtime
+# OCI labels belong to a build stage — a LABEL before the first FROM is invalid.
+LABEL org.opencontainers.image.title="Infinia Store Platform"
+LABEL org.opencontainers.image.description="Cloud control plane for the Infinia / FengYu ecosystem: catalog, publishing pipeline, review workflow, signed delivery and accounts."
+LABEL org.opencontainers.image.source="https://github.com/MuskStark/infinia-store-platform"
+LABEL org.opencontainers.image.licenses="GPL-3.0-only"
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/* \

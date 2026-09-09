@@ -77,11 +77,15 @@ class DesktopSessionController {
     /** Refresh response mirrors the authorization server's token shape. */
     record RefreshResponse(String accessToken, long expiresIn, String refreshToken) {}
 
+    /**
+     * Remote address only — never parse X-Forwarded-For here. With
+     * {@code server.forward-headers-strategy=native}, Tomcat's RemoteIpValve has
+     * already resolved the trusted proxy chain, so getRemoteAddr() carries the
+     * real client; reading the header directly would let any caller forge the
+     * limiter key by prepending a fake XFF entry.
+     */
     private static String clientKey(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        String ip = forwarded == null || forwarded.isBlank()
-                ? request.getRemoteAddr() : forwarded.split(",")[0].trim();
-        return ip == null ? "unknown" : ip;
+        return request.getRemoteAddr();
     }
 
     /** Issues the session's rotating credential — requires a valid access token. */

@@ -13,13 +13,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.security.PrivateKey;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 
 /**
- * Platform release signing (design §8.3, ADR-006). The private key is kept outside
- * the database (dev: file under data/keys; prod: KMS-backed). Approved releases are
+ * Platform release signing (design §8.3, ADR-006). The private key lives as an
+ * owner-only file under store.key-dir (backed up with the other key material;
+ * ADR-006's KMS/HSM fronting remains a future deployment option). Approved releases are
  * signed with Ed25519 over the canonical envelope JSON.
  */
 @Service
@@ -58,8 +61,19 @@ public class PlatformSigningService {
         keyId = PLATFORM_KEY_ID_PREFIX + java.time.Year.now();
         try {
             Files.createDirectories(keyDir);
-            Files.writeString(keyDir.resolve(keyId + ".b64"),
-                    Ed25519Signer.encodePrivate(pair.getPrivate()));
+            // Idempotent overwrite (the DB may be fresher than the key dir)
+            // with owner-only permissions, via the same atomic swap the other
+            // key writers use.
+            Path keyFile = keyDir.resolve(keyId + ".b64");
+            Path tmp = keyFile.resolveSibling(keyFile.getFileName() + ".tmp");
+            Files.writeString(tmp, Ed25519Signer.encodePrivate(pair.getPrivate()));
+            try {
+                Files.setPosixFilePermissions(tmp, Set.of(PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE));
+            } catch (UnsupportedOperationException ignored) {
+                // Non-POSIX filesystem: rely on the directory's own permissions.
+            }
+            Files.move(tmp, keyFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             throw new IllegalStateException("Cannot persist platform signing key", e);
         }

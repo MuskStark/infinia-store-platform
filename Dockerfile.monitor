@@ -1,0 +1,81 @@
+# syntax=docker/dockerfile:1
+#
+# Production image for the standalone status monitor (ADR-011): Monitor Web
+# SPA + status mirror API on one origin, port 8090. Deployed on its own host
+# or network segment so the status page survives a store outage.
+#
+#   docker build -f Dockerfile.monitor -t infinia-monitor .
+#   docker run -d --name monitor -p 8090:8090 \
+#     -e MONITOR_TARGET_BASE_URL=https://store.example.com \
+#     [-e MONITOR_ALERT_WEBHOOK=...] \
+#     -v monitor-data:/var/lib/infinia-monitor infinia-monitor
+#
+# The status page and its API are anonymous BY DESIGN (ADR-011: a status page
+# that needs a login is useless during an outage). Publish it through the
+# reverse proxy / WAF — CC protection and rate limiting live there — and keep
+# the loopback binding below so it is never reachable directly.
+
+# ---- Stage 1: Monitor Web SPA (Vue 3 + Vite) --------------------------------
+FROM node:22-alpine AS web
+WORKDIR /workspace
+RUN corepack enable
+# All workspace manifests: yarn resolves the whole workspace graph even when
+# building a single package.
+COPY package.json yarn.lock .yarnrc.yml ./
+COPY store-web/package.json store-web/package.json
+COPY monitor-web/package.json monitor-web/package.json
+COPY ui/magic-ui-vue/package.json ui/magic-ui-vue/package.json
+RUN yarn install --immutable
+COPY ui/ ui/
+COPY monitor-web/ monitor-web/
+RUN yarn workspace @infinia/monitor-web build \
+ && test -f monitor-web/dist/index.html
+
+# ---- Stage 2: executable Boot jar -------------------------------------------
+# Tests run in CI (`./mvnw verify`); the image build stays fast and reproducible.
+FROM maven:3.9-eclipse-temurin-21 AS jar
+WORKDIR /build
+COPY mvnw pom.xml ./
+COPY .mvn .mvn
+COPY store-contract/pom.xml store-contract/pom.xml
+COPY store-monitor/pom.xml store-monitor/pom.xml
+# Warm the dependency layer; a miss only costs time on the next COPY layer.
+RUN ./mvnw -B -q -pl store-monitor -am dependency:go-offline -DskipTests || true
+COPY store-contract store-contract
+COPY store-monitor store-monitor
+# The Vite output ships as static resources inside the jar (build-monitor-jar.sh
+# parity); verify so a release image can never ship without the SPA.
+COPY --from=web /workspace/monitor-web/dist monitor-web/dist
+RUN ./mvnw -B -pl store-monitor -am package -DskipTests \
+ && JAR=$(ls store-monitor/target/store-monitor-*.jar | grep -v '\.original$' | head -1) \
+ && test -n "$JAR" \
+ && jar tf "$JAR" | grep -q 'BOOT-INF/classes/static/index.html' \
+ && cp "$JAR" /store-monitor.jar
+
+# ---- Stage 3: runtime -------------------------------------------------------
+FROM eclipse-temurin:21-jre-noble AS runtime
+# OCI labels belong to a build stage — a LABEL before the first FROM is invalid.
+LABEL org.opencontainers.image.title="Infinia Store Monitor"
+LABEL org.opencontainers.image.description="Standalone status monitor for the Infinia Store Platform: probes the store's public status API, mirrors snapshots, keeps external-reachability history and incidents, and serves the public status UI from an independent process."
+LABEL org.opencontainers.image.source="https://github.com/MuskStark/infinia-store-platform"
+LABEL org.opencontainers.image.licenses="GPL-3.0-only"
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --system infinia \
+ && useradd --system --gid infinia --home-dir /var/lib/infinia-monitor --shell /usr/sbin/nologin infinia \
+ && mkdir -p /var/lib/infinia-monitor \
+ && chown -R infinia:infinia /var/lib/infinia-monitor
+ENV TZ=UTC \
+    JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom" \
+    # The H2 mirror database lives next to the history under the persistent
+    # volume (monitor.mirror-dir anchors both).
+    MONITOR_MIRROR_DIR=/var/lib/infinia-monitor
+WORKDIR /app
+COPY --from=jar --chown=infinia:infinia /store-monitor.jar store-monitor.jar
+USER infinia
+EXPOSE 8090
+VOLUME /var/lib/infinia-monitor
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
+    CMD curl -fsS http://127.0.0.1:8090/actuator/health | grep -qs UP || exit 1
+ENTRYPOINT ["/bin/sh", "-c", "exec java $JAVA_OPTS -jar /app/store-monitor.jar"]

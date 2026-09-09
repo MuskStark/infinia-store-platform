@@ -154,13 +154,16 @@ sha256sum-compatible manifest at `GET /api/v1/releases/{releaseId}/checksums.txt
 ### Production-like stack (Docker)
 
 ```bash
-docker compose up -d           # PostgreSQL 17, Redis 7, MinIO (+ store-blobs bucket)
+cp .env.example .env             # fill in the three STORE_*_SECRET values — compose enforces them
+docker compose up -d             # PostgreSQL 17, Redis 7, MinIO (+ store-blobs bucket)
 ./build-jar.sh
 java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar
 ```
 
 Secrets come from the environment (`STORE_TICKET_SECRET`, `STORE_ROLLOUT_SECRET`,
-`STORE_CLI_CLIENT_SECRET`, key material under `store.key-dir` → KMS in production).
+`STORE_CLI_CLIENT_SECRET`); JWT key material is generated on first boot and
+persisted as PEM files under `store.key-dir` — back them up and rotate by
+swapping the files (see DEPLOYMENT.md).
 
 ### External artifact storage (S3 / MinIO, ADR-012)
 
@@ -204,14 +207,18 @@ docker run -d --name store -p 8080:8080 \
 Local blob/key state lives under `/var/lib/infinia-store` (mount it as a
 volume, or point `STORE_STORAGE_*` at your object storage as above). The image
 build skips tests — run `./mvnw verify` in CI first, matching `build-jar.sh`
-usage. The compose stack can also bring the whole application up against its
-PostgreSQL/Redis/MinIO dependencies:
+usage. A matching `Dockerfile.monitor` packages the standalone status monitor
+(non-root, healthcheck, volume for its H2 mirror). The compose stack can also
+bring the whole application up against its
+PostgreSQL/MinIO dependencies:
 
 ```bash
-docker compose --profile app up -d --build   # store on 127.0.0.1:8080
+docker compose --profile app up -d --build   # store :8080 + monitor :8090, loopback-only
 ```
 
-The `store` service is behind the opt-in `app` profile, so plain
+See DEPLOYMENT.md for the production topology behind a reverse proxy / WAF
+(TLS, body-size limits, forwarded-header trust), backups and upgrades. The
+`store` service is behind the opt-in `app` profile, so plain
 `docker compose up -d` still starts only the dependency stack, and its ports
 bind to loopback — put a TLS-terminating reverse proxy in front for real
 exposure.

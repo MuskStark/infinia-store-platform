@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### Production deployment readiness
+
+- Reverse-proxy adaptation: both apps now run
+  `server.forward-headers-strategy: native`, so behind the WAF/reverse proxy
+  (SafeLine terminates TLS) logs, metrics and redirects see the real client
+  IP. Tomcat only honors `X-Forwarded-*` from trusted internal proxies
+  (spoofed chains are ignored), and the desktop-session rate limiter switched
+  from hand-parsing `X-Forwarded-For` (forgeable: any caller could prepend a
+  fake entry and dodge the limit) to `getRemoteAddr()`.
+- The standalone monitor ships as a production image (`Dockerfile.monitor`:
+  multi-stage SPA+jar build, non-root, healthcheck, volume for its H2 mirror)
+  and joins the compose `app` profile. Its anonymous API is intentional
+  (ADR-011) — it is published through the reverse proxy / WAF, whose CC
+  protection is its traffic defense; both images now pass
+  `docker build --check` (the OCI labels sat before the first FROM, which is
+  invalid and would have failed the first real image build).
+- Compose hardening: the three `STORE_*_SECRET` values are mandatory at parse
+  time (`.env.example` documents them), the store runs the `prod` Spring
+  profile against the stack's PostgreSQL, MinIO is pinned to the final
+  official image (upstream stopped publishing), every service gets resource
+  ceilings and rotated json-file logs, and the minio-init bucket bootstrap now
+  inherits the credentials MinIO actually booted with instead of hardcoded
+  dev ones. The prod profile no longer pins the H2 dialect, which previously
+  made `prod` + PostgreSQL unbootable.
+- Key hygiene: freshly generated key material (JWT RSA private key, platform
+  Ed25519 signing key, remote-DB AES key) is written owner-only via atomic
+  temp-and-swap; the "KMS in production" javadoc/README claims that described
+  an unimplemented path now describe the file-based reality and the rotation
+  procedure.
+- `scripts/backup-stack.sh` snapshots PostgreSQL, the store-blobs bucket and
+  the key directory with retention; DEPLOYMENT.md documents the full
+  production topology (SafeLine site settings incl. the 1 GiB body limit,
+  forwarded-header trust, backups, restore, upgrades). CI builds and publishes
+  both images to GHCR on every push to `main`.
+- `scripts/deploy.sh` turns first deployment on a fresh Linux host into one
+  command: Docker Engine + compose install (Aliyun docker-ce repo, with a
+  `get.docker.com --mirror Aliyun` fallback), apt source mirror rewrite
+  (backed up first), `registry-mirrors` merged into `/etc/docker/daemon.json`,
+  `.env` generated with rolled secrets, then build/start with a health wait —
+  idempotent, so re-runs keep the existing `.env` and mirror config.
+
 ### Overflow & occlusion pass
 
 - Primary navigation: overflow is now legible. Gradient fades mark the clipped

@@ -11,8 +11,10 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.Set;
 
 /**
  * AES-256-GCM sealing for remote-database credentials (远程数据库配置). The key
@@ -77,6 +79,12 @@ public class SecretCipher {
             Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
             Files.writeString(tmp, Base64.getEncoder().encodeToString(generated.getEncoded()),
                     StandardCharsets.UTF_8);
+            try {
+                Files.setPosixFilePermissions(tmp, Set.of(PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE));
+            } catch (UnsupportedOperationException ignored) {
+                // Non-POSIX filesystem: rely on the directory's own permissions.
+            }
             Files.move(tmp, file);
             return generated;
         } catch (Exception e) {

@@ -16,6 +16,9 @@ spring:
 
 server:
   port: 8090
+  # Same proxy-chain rule as the store: honor X-Forwarded-* only when the
+  # peer is a trusted internal proxy (see store-application's application.yml).
+  forward-headers-strategy: native
 
 management:
   endpoints:

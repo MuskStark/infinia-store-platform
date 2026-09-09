@@ -23,6 +23,13 @@ spring:
 
 server:
   port: 8080
+  # Behind the reverse proxy / WAF (SafeLine terminates TLS): Tomcat's
+  # RemoteIpValve rewrites getRemoteAddr() from X-Forwarded-For, but ONLY
+  # when the peer itself is a trusted internal proxy (internal-proxies
+  # defaults cover loopback plus all private ranges) — spoofed XFF from a
+  # client outside that chain is ignored, so per-IP rate limiting stays
+  # meaningful.
+  forward-headers-strategy: native
   error:
     include-problem-details: always
 
@@ -139,8 +146,9 @@ spring:
     url: ${STORE_DB_URL:jdbc:h2:file:${store.data-dir}/storedb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH}
     username: ${STORE_DB_USERNAME:sa}
     password: ${STORE_DB_PASSWORD:}
-  jpa:
-    database-platform: org.hibernate.dialect.H2Dialect
+  # No dialect pin: Hibernate resolves it from the JDBC connection, so the
+  # same profile boots against both the H2 fallback and a real PostgreSQL
+  # (compose overrides spring.datasource.* wholesale).
 
 ---
 # Split-origin development / test: Store Web runs as a separate Vite origin
