@@ -88,12 +88,19 @@ verbatim when you prefer to run them by hand.
    a non-private address, extend `server.tomcat.remoteip.internal-proxies`.
 
 5. **Monitor host (8090)** — the standalone status monitor runs on its own
-   server so the page survives a store outage. The host needs only Docker, a
-   `.env` and the monitor compose file (it pulls the CI-published GHCR image —
-   no build toolchain):
+   server so the page survives a store outage. One command from the repo root
+   (installs Docker where missing, generates `.env`, pulls the CI-published
+   GHCR image, waits for health, and probes the store once from that host):
 
    ```sh
-   # on the monitor host, with the repo cloned (only docker-compose.monitor.yml matters)
+   sudo scripts/deploy-monitor.sh --target-url https://store.example.com
+   # ghcr.io unreachable from the host? add --image-registry ghcr.m.daocloud.io
+   # air-gapped? add --build to compile the image locally instead
+   ```
+
+   Manual equivalent:
+
+   ```sh
    printf 'MONITOR_TARGET_BASE_URL=https://store.example.com\n' > .env
    docker compose -f docker-compose.monitor.yml up -d
    ```
@@ -101,10 +108,11 @@ verbatim when you prefer to run them by hand.
    `MONITOR_TARGET_BASE_URL` is the store's URL **as this host reaches it** —
    prefer the public https URL through the WAF so the monitor measures true
    external reachability; the store's LAN address works for internal-only
-   installs. Pin the image by digest (`MONITOR_IMAGE_TAG`) for immutability.
-   The status page and its API are anonymous **by design** (ADR-011: a status
-   page that needs a login is useless during an outage); the WAF's CC
-   protection is its traffic defense. Upgrades on this host:
+   installs. Pin the image by digest (`MONITOR_IMAGE_TAG`) for immutability;
+   `MONITOR_IMAGE_REGISTRY` swaps in a GHCR proxy for networks without direct
+   ghcr.io access. The status page and its API are anonymous **by design**
+   (ADR-011: a status page that needs a login is useless during an outage);
+   the WAF's CC protection is its traffic defense. Upgrades on this host:
    `docker compose -f docker-compose.monitor.yml pull && docker compose -f docker-compose.monitor.yml up -d`.
 
 ## First admin

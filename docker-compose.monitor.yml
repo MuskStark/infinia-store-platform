@@ -8,6 +8,10 @@
 #   docker compose -f docker-compose.monitor.yml up -d
 #   docker compose -f docker-compose.monitor.yml logs -f monitor
 #
+# Direct ghcr.io access can be slow/unreachable on some networks: set
+# MONITOR_IMAGE_REGISTRY to a GHCR proxy (e.g. ghcr.m.daocloud.io), or build
+# locally from the repo instead: see scripts/deploy-monitor.sh --build.
+#
 # Pin by digest for immutability: replace :latest with @sha256:... from
 # https://github.com/MuskStark/infinia-store-platform/pkgs/container/infinia-store-platform-monitor
 
@@ -19,7 +23,7 @@ x-logging: &default-logging
 
 services:
   monitor:
-    image: ghcr.io/muskstark/infinia-store-platform-monitor:${MONITOR_IMAGE_TAG:-latest}
+    image: ${MONITOR_IMAGE_REGISTRY:-ghcr.io}/muskstark/infinia-store-platform-monitor:${MONITOR_IMAGE_TAG:-latest}
     # The status page and its API are anonymous BY DESIGN (ADR-011: a status
     # page that needs a login is useless during an outage). Publish it through
     # the reverse proxy / WAF, whose CC protection is its traffic defense.

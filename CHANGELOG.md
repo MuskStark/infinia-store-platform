@@ -22,7 +22,14 @@
   GHCR image pull — no build toolchain on that host — own volume, all-interface
   8090 by default, `MONITOR_TARGET_BASE_URL` mandatory (prefer the store's
   public URL through the WAF so the monitor measures true external
-  reachability; `MONITOR_IMAGE_TAG` pins the image).
+  reachability; `MONITOR_IMAGE_TAG` pins the image). `MONITOR_IMAGE_REGISTRY`
+  swaps in a GHCR proxy (e.g. ghcr.m.daocloud.io) for networks without direct
+  ghcr.io access.
+- `scripts/deploy-monitor.sh` is the monitor host's one-click counterpart of
+  deploy.sh: Docker install, apt/registry mirrors, `.env` generation
+  (target URL mandatory), image pull with clear guidance when ghcr.io is
+  unreachable, `--build` to compile locally instead, health wait, and a
+  reachability probe of the store from that host — the #1 misconfiguration.
 - The co-located monitor moved from the `app` profile to a `monitor` profile,
   so `--profile app` on the store host brings up the store only; single-host
   installs add `--profile monitor`. `scripts/deploy.sh` follows suit
