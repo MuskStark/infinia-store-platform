@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Split deployment: monitor on its own host
+
+- `docker-compose.monitor.yml` runs the standalone status monitor on a
+  dedicated server (ADR-011: the status page must survive a store outage):
+  GHCR image pull — no build toolchain on that host — own volume, all-interface
+  8090 by default, `MONITOR_TARGET_BASE_URL` mandatory (prefer the store's
+  public URL through the WAF so the monitor measures true external
+  reachability; `MONITOR_IMAGE_TAG` pins the image).
+- The co-located monitor moved from the `app` profile to a `monitor` profile,
+  so `--profile app` on the store host brings up the store only; single-host
+  installs add `--profile monitor`. `scripts/deploy.sh` follows suit
+  (store-only by default, `--with-monitor` for single-host) and prints the
+  monitor-host bootstrap. DEPLOYMENT.md carries the two-host topology, site
+  table and per-host upgrade commands.
+
 ### First-user admin bootstrap & split-host publishing
 
 - The first account registered on an empty deployment is granted

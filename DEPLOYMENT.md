@@ -1,27 +1,31 @@
 # Production Deployment
 
-Single-host deployment of the Infinia Store Platform behind a dedicated
-reverse proxy / WAF (tested topology: [SafeLine / 雷池](https://waf.chaitin.cn/)).
-Everything the app needs ships in this repo: `docker-compose.yml` (app +
-dependency planes), `Dockerfile` (store), `Dockerfile.monitor` (standalone
-status monitor), `scripts/backup-stack.sh`.
+Split-host deployment of the Infinia Store Platform behind a dedicated
+reverse proxy / WAF (tested topology: [SafeLine / 雷池](https://waf.chaitin.cn/)):
+the store stack runs on one server, the standalone status monitor on its own
+server (ADR-011 — the status page must survive a store outage), and the WAF
+publishes both. Everything ships in this repo: `docker-compose.yml` (store +
+dependency planes), `docker-compose.monitor.yml` (monitor host),
+`Dockerfile` (store), `Dockerfile.monitor` (monitor), `scripts/deploy.sh`
+(store host bootstrap), `scripts/backup-stack.sh`. Single-host installs are
+still supported: add `--profile monitor` to the store-host commands.
 
 ## Topology
 
 ```
 Internet ──HTTPS── SafeLine WAF (TLS termination, WAF/CC protection)
-                       │ http://127.0.0.1:8080  → store   (infinia-store)
-                       │ http://127.0.0.1:8090  → monitor (public status page)
-                    docker compose stack
-                       ├── postgres:17   (pgdata volume)
-                       ├── minio         (miniodata volume, bucket store-blobs)
-                       ├── redis:7       (reserved by design, not yet wired)
-                       ├── store         (storedata volume: blobs fallback + JWT keys)
-                       └── monitor       (monitordata volume: H2 mirror + history)
+                       │ http://<store-host>:8080   → store   (infinia-store)
+                       │ http://<monitor-host>:8090 → monitor (public status page)
+
+Store host: docker compose --profile app          Monitor host: -f docker-compose.monitor.yml
+   ├── postgres:17 (pgdata)                          └── monitor (monitordata: H2 mirror
+   ├── minio       (miniodata, store-blobs)               + history; GHCR image,
+   ├── redis:7     (reserved, not yet wired)              no build toolchain)
+   └── store       (storedata: blobs fallback + JWT keys)
 ```
 
 The app ports (store 8080, monitor 8090) publish on all interfaces by
-default so a WAF on another host — or LAN clients — reach them directly
+default so the WAF — or LAN clients — reach them directly
 (`STORE_BIND_HOST` / `MONITOR_BIND_HOST` rebind them, e.g. 127.0.0.1 for a
 co-located proxy). The dependency-plane ports (PostgreSQL, MinIO, Redis)
 stay loopback-bound: they carry the stack's credentials.
@@ -58,19 +62,20 @@ verbatim when you prefer to run them by hand.
    aborts startup if any dev-only secret survives, and `minio-init` propagates
    your MinIO credentials into the bucket setup and the store's S3 config.
 
-2. **Start the stack**:
+2. **Start the stack (store host)**:
 
    ```sh
    docker compose --profile app up -d --build
-   docker compose ps          # wait for store/monitor to report healthy
+   docker compose ps          # wait for store to report healthy
+   # single-host install: add --profile monitor for the co-located monitor
    ```
 
 3. **SafeLine sites** — two sites, both with HTTP upstreams:
 
    | Site | Upstream | Notes |
    |---|---|---|
-   | Store | `http://127.0.0.1:8080` (or the host LAN IP if SafeLine runs in its own container network) | Request body limit ≥ 1073741824 (1 GiB) — matches `store.max-upload-bytes`; SafeLine's default is far lower and large artifact uploads will fail with 413 |
-   | Monitor (status page) | `http://127.0.0.1:8090` | No uploads, default body limit is fine; can use `GET /actuator/health` as the upstream health-check path |
+   | Store | `http://<store-host>:8080` | Request body limit ≥ 1073741824 (1 GiB) — matches `store.max-upload-bytes`; SafeLine's default is far lower and large artifact uploads will fail with 413 |
+   | Monitor (status page) | `http://<monitor-host>:8090` | No uploads, default body limit is fine; can use `GET /actuator/health` as the upstream health-check path |
 
    TLS terminates at SafeLine; certificates live there.
 
@@ -82,13 +87,25 @@ verbatim when you prefer to run them by hand.
    spoofed `X-Forwarded-For` from outside is ignored. If SafeLine connects from
    a non-private address, extend `server.tomcat.remoteip.internal-proxies`.
 
-5. **Monitor (8090)** — the status page and its API are anonymous **by design**
-   (ADR-011: a status page that needs a login is useless during an outage).
-   It is published through SafeLine like the store; the WAF's CC protection
-   and rate limiting are its traffic defense, and the page stays reachable
-   through the proxy even when the store itself is down. Set
-   `MONITOR_TARGET_BASE_URL` to the store's **public** https URL so the
-   monitor measures reachability through the WAF, not just LAN connectivity.
+5. **Monitor host (8090)** — the standalone status monitor runs on its own
+   server so the page survives a store outage. The host needs only Docker, a
+   `.env` and the monitor compose file (it pulls the CI-published GHCR image —
+   no build toolchain):
+
+   ```sh
+   # on the monitor host, with the repo cloned (only docker-compose.monitor.yml matters)
+   printf 'MONITOR_TARGET_BASE_URL=https://store.example.com\n' > .env
+   docker compose -f docker-compose.monitor.yml up -d
+   ```
+
+   `MONITOR_TARGET_BASE_URL` is the store's URL **as this host reaches it** —
+   prefer the public https URL through the WAF so the monitor measures true
+   external reachability; the store's LAN address works for internal-only
+   installs. Pin the image by digest (`MONITOR_IMAGE_TAG`) for immutability.
+   The status page and its API are anonymous **by design** (ADR-011: a status
+   page that needs a login is useless during an outage); the WAF's CC
+   protection is its traffic defense. Upgrades on this host:
+   `docker compose -f docker-compose.monitor.yml pull && docker compose -f docker-compose.monitor.yml up -d`.
 
 ## First admin
 
@@ -149,8 +166,17 @@ outstanding tokens).
 
 ## Upgrades
 
+Store host:
+
 ```sh
 git pull && docker compose --profile app up -d --build
+```
+
+Monitor host (image pull only — no rebuild):
+
+```sh
+git pull && docker compose -f docker-compose.monitor.yml pull \
+  && docker compose -f docker-compose.monitor.yml up -d
 ```
 
 Flyway migrations (`store-infrastructure/src/main/resources/db/migration`) run

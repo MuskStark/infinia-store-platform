@@ -1,17 +1,23 @@
-# Local development / single-host production stack for the Infinia Store
-# Platform (design §4 "Cloud" plane).
+# Local development / production stack for the Infinia Store Platform
+# (design §4 "Cloud" plane).
 #
-# Dependency plane (default):   docker compose up -d
-# Application plane (opt-in):   docker compose --profile app up -d
+# Dependency plane (default):        docker compose up -d
+# Store host (split deployment):      docker compose --profile app up -d
+# Plus co-located monitor:            docker compose --profile app --profile monitor up -d
 #
-# The application plane runs the store under the `prod` Spring profile against
-# this stack's PostgreSQL and MinIO. Copy .env.example to .env and fill in the
+# The app profile runs the store under the `prod` Spring profile against this
+# stack's PostgreSQL and MinIO. Copy .env.example to .env and fill in the
 # STORE_* secrets first — ProductionHardeningCheck aborts startup on the
 # dev-only defaults, so the app cannot silently boot with public credentials.
 #
-# TLS/WAF termination is out of scope by design: the store and monitor publish
-# on loopback only and are expected behind a dedicated reverse proxy / WAF
-# (see DEPLOYMENT.md for the SafeLine setup).
+# The monitor lives in its own profile: in the split deployment it runs on its
+# own host from docker-compose.monitor.yml (the standalone status page must
+# survive a store outage, ADR-011); add the `monitor` profile here only for
+# single-host installs.
+#
+# TLS/WAF termination is out of scope by design: both apps publish directly
+# and are expected behind a dedicated reverse proxy / WAF (see DEPLOYMENT.md
+# for the SafeLine setup).
 
 # Docker's json-file log driver has no rotation by default; without these a
 # chatty app eventually fills the host disk.
@@ -148,16 +154,18 @@ services:
     logging: *default-logging
     <<: *default-limits
 
-  # Standalone status monitor (ADR-011), built from Dockerfile.monitor. Same
-  # app profile as the store. Its API and page are anonymous BY DESIGN
-  # (ADR-011) — published through the reverse proxy / WAF, which provides
-  # CC protection; loopback-only here so it is never reachable directly.
+  # Standalone status monitor (ADR-011), built from Dockerfile.monitor. Own
+  # profile: the split deployment runs it on a separate host via
+  # docker-compose.monitor.yml; enable it here only for single-host installs
+  # (hence the depends_on the store, which only applies when co-located).
+  # Its API and page are anonymous BY DESIGN (ADR-011) — published through
+  # the reverse proxy / WAF, which provides CC protection.
   monitor:
     build:
       context: .
       dockerfile: Dockerfile.monitor
     image: infinia-monitor
-    profiles: ["app"]
+    profiles: ["monitor"]
     depends_on:
       store:
         condition: service_healthy

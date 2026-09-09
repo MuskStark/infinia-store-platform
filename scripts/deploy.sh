@@ -26,6 +26,9 @@
 #   --skip-docker          assume Docker + compose are already installed
 #   --force-env            regenerate .env even if one exists (re-rolls secrets!)
 #   --no-up                prepare everything but do not build/start the stack
+#   --with-monitor         also run the status monitor on this host (single-host
+#                          installs; the split deployment runs it on its own
+#                          host via docker-compose.monitor.yml instead)
 #   --yes                  non-interactive: never prompt, accept defaults
 #   -h, --help             this help
 #
@@ -52,6 +55,7 @@ APT_MIRROR="mirrors.aliyun.com"
 SKIP_DOCKER=0
 FORCE_ENV=0
 NO_UP=0
+WITH_MONITOR=0
 ASSUME_YES=0
 
 while [[ $# -gt 0 ]]; do
@@ -66,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --skip-docker)     SKIP_DOCKER=1; shift ;;
     --force-env)       FORCE_ENV=1; shift ;;
     --no-up)           NO_UP=1; shift ;;
+    --with-monitor)    WITH_MONITOR=1; shift ;;
     --yes|-y)          ASSUME_YES=1; shift ;;
     -h|--help)         usage; exit 0 ;;
     *)                 usage >&2; die "unknown option: $1" ;;
@@ -268,7 +273,11 @@ if [[ $NO_UP -eq 1 ]]; then
 fi
 
 log "building and starting the stack (first build pulls Maven/npm deps — be patient)"
-docker compose --profile app up -d --build
+PROFILES=(--profile app)
+if [[ $WITH_MONITOR -eq 1 ]]; then
+  PROFILES+=(--profile monitor)
+fi
+docker compose "${PROFILES[@]}" up -d --build
 
 wait_healthy() { # wait_healthy <service> <timeout-seconds>
   local svc=$1 timeout=$2 waited=0 cid st
@@ -297,11 +306,15 @@ wait_healthy() { # wait_healthy <service> <timeout-seconds>
 }
 
 wait_healthy store 600
-wait_healthy monitor 300
+if [[ $WITH_MONITOR -eq 1 ]]; then
+  wait_healthy monitor 300
+fi
 
 log "verifying endpoints through the loopback bindings"
 curl -fsS http://127.0.0.1:8080/actuator/health | grep -q '"UP"' || warn "store health endpoint did not report UP"
-curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null     || warn "monitor health endpoint not reachable"
+if [[ $WITH_MONITOR -eq 1 ]]; then
+  curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null   || warn "monitor health endpoint not reachable"
+fi
 
 # ---------------------------------------------------- 6. what's next -------
 STORE_URL=$(grep -E '^STORE_BASE_URL=' .env | cut -d= -f2-)
@@ -318,9 +331,15 @@ Deployment is up. Remaining wiring (see DEPLOYMENT.md):
      https:// domain, then: docker compose --profile app up -d
   3. Backups — add to root's crontab (KEEP_DAYS=14 keeps two weeks):
        30 3 * * * cd $PWD && KEEP_DAYS=14 ./scripts/backup-stack.sh /mnt/backups/infinia
-  4. Useful commands:
+  4. Status monitor — split deployment (default): run it on its OWN host so
+     the status page survives a store outage:
+       git clone <this repo>; cd infinia-store-platform
+       printf 'MONITOR_TARGET_BASE_URL=%s\n' "$STORE_URL" > .env
+       docker compose -f docker-compose.monitor.yml up -d
+     (single-host install instead: re-run this script with --with-monitor)
+  5. Useful commands:
        docker compose ps
-       docker compose logs -f store monitor
+       docker compose logs -f store
        git pull && docker compose --profile app up -d --build   # upgrade
 
 SUMMARY

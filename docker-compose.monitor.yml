@@ -1,0 +1,46 @@
+# Monitor-host stack for the split deployment (ADR-011): the standalone status
+# monitor runs on its OWN server so the status page survives a store outage.
+# The store + its dependency plane live on another host (docker-compose.yml
+# `--profile app`); this file runs only the monitor, from the CI-published
+# GHCR image — no build toolchain needed on this host.
+#
+# Usage (this host needs only this file and a .env with MONITOR_TARGET_BASE_URL):
+#   docker compose -f docker-compose.monitor.yml up -d
+#   docker compose -f docker-compose.monitor.yml logs -f monitor
+#
+# Pin by digest for immutability: replace :latest with @sha256:... from
+# https://github.com/MuskStark/infinia-store-platform/pkgs/container/infinia-store-platform-monitor
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  monitor:
+    image: ghcr.io/muskstark/infinia-store-platform-monitor:${MONITOR_IMAGE_TAG:-latest}
+    # The status page and its API are anonymous BY DESIGN (ADR-011: a status
+    # page that needs a login is useless during an outage). Publish it through
+    # the reverse proxy / WAF, whose CC protection is its traffic defense.
+    environment:
+      # The store's URL AS THIS HOST REACHES IT — through the WAF (preferred:
+      # measures true external reachability) or the store host's LAN address.
+      MONITOR_TARGET_BASE_URL: ${MONITOR_TARGET_BASE_URL:?set in .env — the store's URL as this host reaches it}
+      MONITOR_ALERT_WEBHOOK: ${MONITOR_ALERT_WEBHOOK:-}
+    ports:
+      # All interfaces by default so a WAF on another host can reach it;
+      # MONITOR_BIND_HOST=127.0.0.1 tightens it for a co-located proxy.
+      - "${MONITOR_BIND_HOST:-0.0.0.0}:8090:8090"
+    volumes:
+      - monitordata:/var/lib/infinia-monitor
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${DOCKER_CPUS_LIMIT:-2}"
+          memory: "${DOCKER_MEM_LIMIT:-1g}"
+
+volumes:
+  monitordata:
