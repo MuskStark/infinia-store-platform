@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Test-suite determinism
+
+- Every `@SpringBootTest` class now runs against its own fresh H2 database
+  (ContextCustomizerFactory; classes that pin their own
+  `spring.datasource.url` are untouched). Previously the suite shared one
+  in-memory database, so classes mutating seeded state — the app-release
+  flow publishing newer versions of the seeded listing, the SSRF test's
+  failed-sync upstream — made results depend on surefire's class order,
+  which differs between machines and even between CI checkouts. Reproduced
+  in a fresh-clone Linux container; isolation makes cross-class pollution
+  structurally impossible (store-application suite ~40s slower, every class
+  boots its own context).
+
 ### Split deployment: monitor on its own host
 
 - `docker-compose.monitor.yml` runs the standalone status monitor on a

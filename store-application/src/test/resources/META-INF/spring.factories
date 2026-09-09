@@ -1,0 +1,5 @@
+# TestContext extension: a fresh H2 database per @SpringBootTest class, so
+# cross-class state mutations cannot make the suite order-dependent
+# (see FreshDatabasePerClass for the details).
+org.springframework.test.context.ContextCustomizerFactory=\
+  dev.infinia.store.app.FreshDatabasePerClass.Factory
