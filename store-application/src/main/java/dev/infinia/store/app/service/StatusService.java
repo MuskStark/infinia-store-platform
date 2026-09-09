@@ -247,7 +247,10 @@ public class StatusService {
             byDay.put(sample.day(), sample);
         }
         List<DayDto> history = new ArrayList<>(HISTORY_DAYS);
-        long ok = 0;
+        // Degraded samples count as availability (the statuspage.io convention:
+        // "slow but serving" is uptime); only down reduces the number, so a
+        // sub-100% day can only ever appear orange/red — never a 0.0% yellow.
+        long available = 0;
         long total = 0;
         for (int i = 0; i < HISTORY_DAYS; i++) {
             LocalDate day = from.plusDays(i);
@@ -257,9 +260,10 @@ public class StatusService {
                 continue;
             }
             long dayTotal = sample.ok() + sample.degraded() + sample.down();
-            ok += sample.ok();
+            long dayAvailable = sample.ok() + sample.degraded();
+            available += dayAvailable;
             total += dayTotal;
-            double uptimePercent = 100.0 * sample.ok() / dayTotal;
+            double uptimePercent = Math.round(1000.0 * dayAvailable / dayTotal) / 10.0;
             String dayIndicator;
             if (sample.down() > 0) {
                 dayIndicator = sample.down() == dayTotal ? MAJOR_OUTAGE : PARTIAL_OUTAGE;
@@ -270,7 +274,7 @@ public class StatusService {
             }
             history.add(new DayDto(day.toString(), dayIndicator, uptimePercent));
         }
-        Double uptime90d = total == 0 ? null : Math.round(1000.0 * ok / total) / 10.0;
+        Double uptime90d = total == 0 ? null : Math.round(1000.0 * available / total) / 10.0;
         return new ComponentDto(key, liveIndicator, uptime90d, history);
     }
 

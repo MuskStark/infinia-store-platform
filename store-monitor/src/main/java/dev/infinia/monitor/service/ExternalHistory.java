@@ -70,7 +70,10 @@ public class ExternalHistory {
         }
 
         List<DayDto> history = new ArrayList<>(historyDays);
-        long ok = 0;
+        // Degraded samples count as availability (the statuspage.io convention,
+        // mirrored with the store's own history): only down reduces the
+        // number, so a sub-100% day can only ever appear orange/red.
+        long available = 0;
         long total = 0;
         for (int i = 0; i < historyDays; i++) {
             LocalDate day = from.plusDays(i);
@@ -80,9 +83,10 @@ public class ExternalHistory {
                 continue;
             }
             long dayTotal = sample.ok + sample.degraded + sample.down;
-            ok += sample.ok;
+            long dayAvailable = sample.ok + sample.degraded;
+            available += dayAvailable;
             total += dayTotal;
-            double uptimePercent = 100.0 * sample.ok / dayTotal;
+            double uptimePercent = Math.round(1000.0 * dayAvailable / dayTotal) / 10.0;
             String dayIndicator;
             if (sample.down > 0) {
                 dayIndicator = sample.down == dayTotal
@@ -94,7 +98,7 @@ public class ExternalHistory {
             }
             history.add(new DayDto(day.toString(), dayIndicator, uptimePercent));
         }
-        Double uptime = total == 0 ? null : Math.round(1000.0 * ok / total) / 10.0;
+        Double uptime = total == 0 ? null : Math.round(1000.0 * available / total) / 10.0;
         return new ComponentDto(COMPONENT_KEY, liveIndicator, uptime, history);
     }
 

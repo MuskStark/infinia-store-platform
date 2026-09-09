@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Status-page uptime semantics (full coloring audit)
+
+- Degraded samples now count as availability (the statuspage.io convention,
+  mirrored between the store's own history and the monitor's external
+  component): only down samples reduce the uptime percentage, so a sub-100%
+  day can only ever appear orange/red — never again "0.00% uptime" colored
+  yellow, the confusing combination a day of pure degraded probes produced
+  (e.g. while the default upstream sync was failing).
+- Day uptimePercent is rounded to one decimal like uptime90d (it previously
+  leaked a raw double such as 33.333333333333336).
+- Component names audited: all 11 store components + the monitor's external
+  reachability carry localized names in both locales with no gaps;
+  "上游同步 / Upstream sync" is accurate for what it measures (upstream
+  aggregation health).
+
 ### Upstream aggregation works without seeding
 
 - Production boots with the default SkillHub upstream enabled but seeds
