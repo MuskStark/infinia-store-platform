@@ -45,6 +45,11 @@ public class UserAdapter implements IdentityRepositories.UserRepository {
     }
 
     @Override
+    public long count() {
+        return jpa.count();
+    }
+
+    @Override
     @Transactional
     public void save(StoreUser user) {
         UserEntity e = jpa.findById(user.id).orElseGet(UserEntity::new);

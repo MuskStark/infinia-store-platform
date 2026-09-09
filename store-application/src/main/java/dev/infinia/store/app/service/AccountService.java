@@ -46,6 +46,14 @@ public class AccountService {
         this.hasher = hasher;
     }
 
+    /**
+     * Registration (design §7.4). The first account ever registered on an empty
+     * deployment is granted PLATFORM_ADMIN — production runs seed nothing (the
+     * demo credentials are public knowledge and refused outside dev profiles),
+     * so this is the admin bootstrap: register right after first boot and you
+     * own the instance. Everyone after the first gets the plain USER role; the
+     * admin then assigns roles from the user console (AdminUserService).
+     */
     @Transactional
     public StoreUser register(String email, String password, String displayName) {
         String normalized = normalizeEmail(email);
@@ -60,11 +68,14 @@ public class AccountService {
             throw new DomainException(StoreErrorCode.EMAIL_TAKEN,
                     "An account with this email already exists");
         }
+        Set<UserRole> roles = users.count() == 0
+                ? Set.of(UserRole.USER, UserRole.PLATFORM_ADMIN)
+                : Set.of(UserRole.USER);
         UUID id = UuidV7.generate();
         StoreUser user = new StoreUser(id, email, normalized,
                 displayName == null || displayName.isBlank()
                         ? email.substring(0, email.indexOf('@')) : displayName.trim(),
-                Set.of(UserRole.USER), "ACTIVE", Instant.now());
+                roles, "ACTIVE", Instant.now());
         users.save(user);
         credentials.save(new Credential(UuidV7.generate(), id, Credential.CredentialType.PASSWORD,
                 hasher.hash(password), Instant.now()));

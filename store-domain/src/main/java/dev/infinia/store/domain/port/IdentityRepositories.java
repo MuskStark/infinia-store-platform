@@ -30,6 +30,9 @@ public final class IdentityRepositories {
         /** Every account, oldest first — the admin user console. */
         List<StoreUser> findAll();
 
+        /** Account count — the registration bootstrap's "is this the first user" check. */
+        long count();
+
         void save(StoreUser user);
     }
 

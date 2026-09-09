@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### First-user admin bootstrap & split-host publishing
+
+- The first account registered on an empty deployment is granted
+  PLATFORM_ADMIN automatically — production seeds nothing by design (demo
+  credentials are public and refused outside dev profiles), so this is the
+  admin bootstrap path; later registrations keep the plain USER role and the
+  admin assigns roles/levels/status per account from the existing user
+  console. Documented in DEPLOYMENT.md "First admin".
+- Compose publishing is configurable for a WAF on a separate host:
+  `STORE_BIND_HOST` / `MONITOR_BIND_HOST` (default 127.0.0.1) rebind the two
+  app ports, with the DOCKER-USER firewall recipe in DEPLOYMENT.md — plain
+  ufw does not filter Docker-published ports.
+
 ### CI repair on main
 
 - `Dockerfile.monitor` builds again: the root POM's reactor refuses to parse

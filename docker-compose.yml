@@ -136,8 +136,11 @@ services:
       STORE_ROLLOUT_SECRET: ${STORE_ROLLOUT_SECRET:?set in .env — ProductionHardeningCheck refuses the dev default}
       STORE_CLI_CLIENT_SECRET: ${STORE_CLI_CLIENT_SECRET:?set in .env — ProductionHardeningCheck refuses the dev default}
     ports:
-      # Loopback-only; publish through the reverse proxy / WAF, never directly.
-      - "127.0.0.1:8080:8080"
+      # Loopback by default; publish through the reverse proxy / WAF, never
+      # directly. Set STORE_BIND_HOST (e.g. 0.0.0.0 or the LAN IP) in .env when
+      # the WAF runs on a separate host — and firewall the port to the WAF only
+      # (see DEPLOYMENT.md; DOCKER-USER, not ufw, filters published ports).
+      - "${STORE_BIND_HOST:-127.0.0.1}:8080:8080"
     volumes:
       - storedata:/var/lib/infinia-store
     restart: unless-stopped
@@ -164,7 +167,8 @@ services:
       MONITOR_TARGET_BASE_URL: ${MONITOR_TARGET_BASE_URL:-http://store:8080}
       MONITOR_ALERT_WEBHOOK: ${MONITOR_ALERT_WEBHOOK:-}
     ports:
-      - "127.0.0.1:8090:8090"
+      # Same rule as the store: MONITOR_BIND_HOST opens it for an off-box WAF.
+      - "${MONITOR_BIND_HOST:-127.0.0.1}:8090:8090"
     volumes:
       - monitordata:/var/lib/infinia-monitor
     restart: unless-stopped

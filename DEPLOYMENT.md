@@ -87,6 +87,45 @@ verbatim when you prefer to run them by hand.
    `MONITOR_TARGET_BASE_URL` to the store's **public** https URL so the
    monitor measures reachability through the WAF, not just LAN connectivity.
 
+## First admin
+
+Production boots with zero accounts by design — the demo credentials
+(`admin@infinia.local` / `Password123!`) are public knowledge and seeding
+refuses to run outside the local/dev/test profiles. Instead, the **first
+account registered on an empty deployment automatically receives
+PLATFORM_ADMIN**: open the site right after first boot, register your own
+address, and you own the instance. Every later registration gets the plain
+USER role; the bootstrap admin then assigns roles (PUBLISHER, REVIEWER,
+PLATFORM_ADMIN), bee levels and status per account from the admin user
+console (`/api/v1/admin/users`, wired into the Web admin view). Register
+promptly after exposing the site — on an empty instance, whoever registers
+first becomes admin.
+
+## WAF on a separate host
+
+When the reverse proxy / WAF runs on its own server, loopback bindings are
+unreachable from it. Set in `.env`:
+
+```sh
+STORE_BIND_HOST=0.0.0.0      # or the store server's LAN IP only
+MONITOR_BIND_HOST=0.0.0.0
+docker compose --profile app up -d
+```
+
+Then point the WAF sites at `http://<store-server-LAN-IP>:8080` and
+`:8090` (never 127.0.0.1 — that would hit the WAF host itself). Restrict
+the opened ports to the WAF's IP via the DOCKER-USER chain — plain ufw
+does NOT filter Docker-published ports:
+
+```sh
+iptables -I DOCKER-USER -p tcp --dport 8080 ! -s <waf-ip> -j DROP
+iptables -I DOCKER-USER -p tcp --dport 8090 ! -s <waf-ip> -j DROP
+# persist: apt install iptables-persistent && netfilter-persistent save
+```
+
+The forwarded-header trust needs no change: the WAF's hop still originates
+from a private address, which the default internal-proxies covers.
+
 ## Backups
 
 `scripts/backup-stack.sh <dir>` snapshots PostgreSQL (pg_dump), the MinIO
