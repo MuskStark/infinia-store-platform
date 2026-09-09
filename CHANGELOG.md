@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Upstream aggregation works without seeding
+
+- Production boots with the default SkillHub upstream enabled but seeds
+  nothing, so the first sync aborted with "CI publisher account missing
+  (seed required)" and the status page showed the source permanently
+  degraded. The sync now provisions its internal machine accounts
+  (ci/reviewer) itself — credential-less rows that can never log in
+  interactively; they exist purely as ownership and audit anchors. New
+  UpstreamSyncProvisionsInternalAccountsTest covers the empty-deployment
+  bootstrap end to end.
+- The compose store service passes `STORE_UPSTREAM_DEFAULTS_ENABLED` /
+  `STORE_UPSTREAM_SKILLHUB_URL` through (default on), so a deployment can
+  disable or retarget the default mirror from `.env`.
+
 ### Production SPA cache policy & demo-account removal
 
 - Navigation "silently dead after an upgrade": the SPA's index.html carried no

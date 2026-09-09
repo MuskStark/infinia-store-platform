@@ -86,6 +86,9 @@ store:
     defaults:
       enabled: ${STORE_UPSTREAM_DEFAULTS_ENABLED:true}
       skillhub-url: ${STORE_UPSTREAM_SKILLHUB_URL:https://api.skillhub.cn/api/skills?pages=1}
+      # Indexing publishes through internal machine accounts (ci/reviewer);
+      # the first sync provisions them credential-less if seeding did not
+      # (production seeds nothing — see UpstreamSyncService#internalAccount).
   # Comprehensive-monitoring probe thresholds; the standalone monitor mirrors
   # these indicators, it never re-derives them.
   monitoring:

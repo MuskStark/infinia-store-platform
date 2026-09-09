@@ -15,6 +15,7 @@ import dev.infinia.store.contract.type.Channel;
 import dev.infinia.store.contract.type.ListingType;
 import dev.infinia.store.contract.type.Platform;
 import dev.infinia.store.contract.type.ReleaseStatus;
+import dev.infinia.store.contract.type.UserRole;
 import dev.infinia.store.domain.DomainException;
 import dev.infinia.store.domain.model.Listing;
 import dev.infinia.store.domain.model.Namespace;
@@ -47,6 +48,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.zip.ZipEntry;
@@ -130,8 +132,10 @@ public class UpstreamSyncService {
         int imported = 0;
         int skipped = 0;
         try {
-            StoreUser bot = requireCiAccount();
-            StoreUser reviewer = requireReviewerAccount();
+            StoreUser bot = internalAccount(CI_ACCOUNT_EMAIL, "Upstream CI Publisher",
+                    Set.of(UserRole.USER, UserRole.PUBLISHER, UserRole.REVIEWER));
+            StoreUser reviewer = internalAccount(REVIEWER_ACCOUNT_EMAIL, "Upstream Reviewer",
+                    Set.of(UserRole.USER, UserRole.REVIEWER));
             ensureNamespace(source.targetNamespace(), bot);
             RepoFetcher.SyncScope provenanceScope = new RepoFetcher.SyncScope();
             // AUTO is probed exactly once per sync; the concrete adapter decision is
@@ -413,16 +417,29 @@ public class UpstreamSyncService {
         return value.substring(0, max - 1) + "…";
     }
 
-    private StoreUser requireCiAccount() {
-        return users.findByEmailNormalized("ci@infinia.local")
-                .orElseThrow(() -> new IllegalStateException(
-                        "CI publisher account missing (seed required)"));
-    }
+    /** Internal machine accounts upstream aggregation acts through. */
+    private static final String CI_ACCOUNT_EMAIL = "ci@infinia.local";
+    private static final String REVIEWER_ACCOUNT_EMAIL = "reviewer@infinia.local";
 
-    private StoreUser requireReviewerAccount() {
-        return users.findByEmailNormalized("reviewer@infinia.local")
-                .orElseThrow(() -> new IllegalStateException(
-                        "Reviewer account missing (seed required)"));
+    /**
+     * Find-or-create an internal machine account. Dev/test profiles get these
+     * from SeedData; production seeds nothing (the demo credentials are public
+     * knowledge and refused outside dev profiles), so the first sync provisions
+     * them itself — WITHOUT a credential row, which means the accounts can
+     * never log in interactively. They exist purely as ownership and audit
+     * anchors; the store-cli client-credentials grant still maps onto the CI
+     * account through its protected client secret.
+     */
+    private StoreUser internalAccount(String email, String displayName,
+            Set<UserRole> roles) {
+        return users.findByEmailNormalized(email).orElseGet(() -> {
+            StoreUser account = new StoreUser(UuidV7.generate(), email,
+                    AccountService.normalizeEmail(email), displayName, roles,
+                    "ACTIVE", Instant.now());
+            users.save(account);
+            log.info("Provisioned internal service account {} for upstream aggregation", email);
+            return account;
+        });
     }
 
     private void ensureNamespace(String name, StoreUser owner) {
