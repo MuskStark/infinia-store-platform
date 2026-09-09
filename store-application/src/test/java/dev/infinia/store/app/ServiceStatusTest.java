@@ -90,7 +90,7 @@ class ServiceStatusTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void repeatedSnapshotsAggregateIntoTodaysBucket() {
+    void repeatedReadsKeepTheLatestSample() {
         status.page();
         status.page();
         ResponseEntity<Map> response = new Http(port).getJson("/api/v1/status", Map.class, null);
@@ -98,7 +98,7 @@ class ServiceStatusTest {
                 .get("components")).stream()
                 .filter(c -> "database".equals(c.get("key"))).findFirst().orElseThrow();
         double uptime = ((Number) database.get("uptime90d")).doubleValue();
-        assertEquals(100.0, uptime, 0.001, "both samples were ok");
+        assertEquals(100.0, uptime, 0.001, "the latest sample was healthy");
     }
 
     @Test
@@ -107,5 +107,14 @@ class ServiceStatusTest {
                 .getJson("/api/v1/status/incidents", List.class, null);
         assertEquals(200, response.getStatusCode().value());
         assertTrue(response.getBody().isEmpty());
+    }
+
+    @Test
+    void monitorLinkIsNullWhenDeploymentHasNotConfiguredOne() {
+        ResponseEntity<Map> response =
+                new Http(port).getJson("/api/v1/status/monitor", Map.class, null);
+        assertEquals(200, response.getStatusCode().value());
+        assertNull(response.getBody().get("url"),
+                "fresh boot invents no monitor address — the SPA shows its notice instead");
     }
 }

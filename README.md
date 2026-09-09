@@ -243,7 +243,10 @@ root config (re-point at a moved store and restart). Put the store behind
 `store.example.com`, the monitor behind `status.example.com`, keep
 `/api/v1/status` out of any CDN cache in front of the store, and give the
 monitor its own TLS via nginx. The store SPA's `/status` link redirects to the
-monitor (`VITE_MONITOR_BASE_URL` at build time). A cheap third-party ping on the
+monitor via runtime config — set `STORE_MONITOR_PUBLIC_URL` (e.g.
+`https://status.example.com`) on the store and restart; no image rebuild is
+needed (`VITE_MONITOR_BASE_URL` at build time still works as a fallback). A
+cheap third-party ping on the
 monitor itself is recommended — it is the one component nothing else watches.
 
 ## The publishing pipeline

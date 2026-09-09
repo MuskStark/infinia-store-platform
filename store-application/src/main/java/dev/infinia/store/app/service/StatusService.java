@@ -109,6 +109,9 @@ public class StatusService {
 
     private LocalDate lastPruneDay = null;
 
+    /** Published atomically; reads must not consume probe windows or add samples. */
+    private volatile StatusPageDto latestPage;
+
     /** Previous http.server.requests counters; window deltas judge HTTP quality. */
     private volatile HttpCounters lastHttpCounters = null;
 
@@ -136,8 +139,8 @@ public class StatusService {
 
     /** Background sampler so downtime is recorded even when nobody is watching. */
     @Scheduled(fixedDelayString = "${store.status.sample-interval-ms:60000}")
-    public void sample() {
-        page();
+    public synchronized void sample() {
+        latestPage = collectPage();
     }
 
     /**
@@ -194,8 +197,22 @@ public class StatusService {
         }
     }
 
-    /** Runs the live probes, records today's samples, and assembles the page. */
+    /** Reads the latest sample; initialize once if queried before the scheduler starts. */
     public StatusPageDto page() {
+        StatusPageDto snapshot = latestPage;
+        if (snapshot != null) {
+            return snapshot;
+        }
+        synchronized (this) {
+            if (latestPage == null) {
+                sample();
+            }
+            return latestPage;
+        }
+    }
+
+    /** Runs only during sampling, so HTTP windows and history have one cadence. */
+    private StatusPageDto collectPage() {
         Instant now = Instant.now();
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
 

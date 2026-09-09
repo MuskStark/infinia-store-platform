@@ -184,6 +184,10 @@ export const api = {
 
   getServiceIncidents: () =>
     request<ServiceIncident[]>('/api/v1/status/incidents'),
+
+  /** Where /status should hand off to (runtime STORE_MONITOR_PUBLIC_URL). */
+  getStatusMonitorLink: () =>
+    request<StatusMonitorLink>('/api/v1/status/monitor'),
 };
 
 // ---- typed DTO aliases generated from the contract ----
@@ -289,3 +293,4 @@ export type ServiceStatus = components['schemas']['StatusPage'];
 export type StatusComponentInfo = components['schemas']['StatusComponent'];
 export type StatusDayUptime = components['schemas']['StatusDay'];
 export type ServiceIncident = components['schemas']['Incident'];
+export type StatusMonitorLink = components['schemas']['MonitorLink'];

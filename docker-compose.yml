@@ -130,6 +130,9 @@ services:
       # the dev-only secrets, so this service cannot boot with public defaults.
       SPRING_PROFILES_ACTIVE: prod
       STORE_BASE_URL: ${STORE_BASE_URL:-http://localhost:8080}
+      # Public address of the standalone monitor's status page — the SPA's
+      # /status link hands off to it at runtime (no image rebuild needed).
+      STORE_MONITOR_PUBLIC_URL: ${STORE_MONITOR_PUBLIC_URL:-}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-store}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-store}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-store}

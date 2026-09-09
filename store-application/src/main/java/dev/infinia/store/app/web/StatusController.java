@@ -1,5 +1,6 @@
 package dev.infinia.store.app.web;
 
+import dev.infinia.store.app.config.StoreProperties;
 import dev.infinia.store.app.service.StatusService;
 import dev.infinia.store.contract.api.StatusDtos;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,9 +20,11 @@ import java.util.List;
 public class StatusController {
 
     private final StatusService status;
+    private final StoreProperties properties;
 
-    public StatusController(StatusService status) {
+    public StatusController(StatusService status, StoreProperties properties) {
         this.status = status;
+        this.properties = properties;
     }
 
     @GetMapping
@@ -33,5 +36,14 @@ public class StatusController {
     public List<StatusDtos.IncidentDto> incidents(
             @RequestParam(defaultValue = "50") int limit) {
         return status.incidents(limit);
+    }
+
+    /**
+     * The monitor's public address at runtime (STORE_MONITOR_PUBLIC_URL) so the
+     * bundled SPA can hand /status off without rebuilding per deployment.
+     */
+    @GetMapping("/monitor")
+    public StatusDtos.MonitorLinkDto monitor() {
+        return new StatusDtos.MonitorLinkDto(properties.monitorPublicUrl());
     }
 }

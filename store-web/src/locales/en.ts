@@ -41,6 +41,12 @@ export default {
     type: 'Type',
     footerTagline: 'Infinia Store Platform · Signed · Reviewed · Rollback-safe',
   },
+  statusRedirect: {
+    redirecting: 'Redirecting to the service status page…',
+    unconfiguredTitle: 'Status page not configured yet',
+    unconfiguredBody:
+      'This deployment has not set STORE_MONITOR_PUBLIC_URL, the address of the standalone status monitor. The operator can add it and restart the store.',
+  },
   role: {
     USER: 'User',
     PUBLISHER: 'Publisher',

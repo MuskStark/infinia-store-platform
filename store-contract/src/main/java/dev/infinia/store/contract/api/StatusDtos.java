@@ -49,4 +49,12 @@ public final class StatusDtos {
             String resolvedAt,
             String updatedAt) {
     }
+
+    /**
+     * Where the standalone monitor's public status page lives (ADR-011). The
+     * store SPA's /status deep link hands off to this address; {@code url} is
+     * null when the deployment has not configured one.
+     */
+    public record MonitorLinkDto(String url) {
+    }
 }

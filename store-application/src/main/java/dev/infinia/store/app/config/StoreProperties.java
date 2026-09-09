@@ -6,6 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "store")
 public record StoreProperties(
         String baseUrl,
+        /** Public address of the standalone monitor's status page (ADR-011); null when the deployment has not configured one. */
+        String monitorPublicUrl,
         String blobDir,
         String keyDir,
         String ticketSecret,
@@ -24,6 +26,10 @@ public record StoreProperties(
 
     public StoreProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8080" : baseUrl;
+        // No default: an unconfigured deployment reports null so the SPA can
+        // say so honestly instead of guessing at a monitor address.
+        monitorPublicUrl = monitorPublicUrl == null || monitorPublicUrl.isBlank()
+                ? null : monitorPublicUrl.trim();
         // Absolute defaults (working-directory independent): LocalFsBlobStorage
         // enforces blob-dir absoluteness and the check below enforces key-dir's.
         // S3 storage ignores blob-dir entirely.

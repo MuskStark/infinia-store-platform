@@ -40,6 +40,12 @@ export default {
     type: '类型',
     footerTagline: 'Infinia Store Platform · 签名交付 · 人工审核 · 支持回滚',
   },
+  statusRedirect: {
+    redirecting: '正在跳转到服务状态页…',
+    unconfiguredTitle: '尚未配置状态页地址',
+    unconfiguredBody:
+      '当前部署未设置独立状态监控的地址（STORE_MONITOR_PUBLIC_URL）。管理员补充该配置并重启商店后即可跳转。',
+  },
   role: {
     USER: '普通用户',
     PUBLISHER: '发布者',

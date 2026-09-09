@@ -66,12 +66,46 @@ describe('StatusView (monitor)', () => {
     vi.mocked(api.getIncidents).mockResolvedValue(incidents);
   });
 
+
+  it.each([
+    ['operational', 'Operational', 'bg-emerald-500'],
+    ['degraded', 'Degraded', 'bg-amber-400'],
+    ['partial_outage', 'Partial outage', 'bg-orange-500'],
+    ['major_outage', 'Major outage', 'bg-red-500'],
+    ['no_data', 'No data', 'bg-slate-300'],
+  ] as const)('shows the live component state %s independently of history', async (indicator, label, color) => {
+    const page = statusWith();
+    page.components[0].indicator = indicator;
+    vi.mocked(api.getStatus).mockResolvedValue(page);
+    const wrapper = mount(StatusView, { global: { plugins: [i18n] } });
+    await flushPromises();
+    const state = wrapper.find('[data-testid="component-live-status"]');
+    expect(state.text()).toBe(label);
+    expect(state.find('span').classes()).toContain(color);
+    expect(wrapper.find('.hive-day').classes()).toContain('bg-emerald-500');
+    wrapper.unmount();
+  });
+
+  it('renders no data neutrally without announcing healthy systems', async () => {
+    vi.mocked(api.getStatus).mockResolvedValue(statusWith({
+      indicator: 'no_data', mirroredAt: null, stale: true, components: [],
+    }));
+    const wrapper = mount(StatusView, { global: { plugins: [i18n] } });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="status-banner"]').text()).toBe('No data');
+    const overall = wrapper.find('.hive-overall');
+    expect(overall.text()).toContain('No data');
+    expect(overall.findAll('.text-success')).toHaveLength(0);
+    expect(wrapper.text()).not.toContain('All systems operational');
+    wrapper.unmount();
+  });
+
   it('renders every component in the 19-slot hive with the overall center', async () => {
     const wrapper = mount(StatusView, { global: { plugins: [i18n] } });
     await flushPromises();
 
     expect(wrapper.find('[data-testid="status-banner"]').text().replace(/\s+/g, ' ')).toBe(
-      '✓ All systems operational',
+      'All systems operational',
     );
     // 12 services + 1 overall + 6 spare = 19 hexagon cells.
     expect(wrapper.findAll('.hive-cell')).toHaveLength(19);
@@ -158,7 +192,7 @@ describe('StatusView (monitor)', () => {
     expect(banner.text()).toContain('Store unreachable');
     // The overall banner follows the red external component, not the frozen greens.
     expect(wrapper.find('[data-testid="status-banner"]').text().replace(/\s+/g, ' ')).toBe(
-      '✓ Major service outage',
+      'Major service outage',
     );
   });
 

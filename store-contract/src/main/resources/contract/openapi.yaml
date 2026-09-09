@@ -1554,6 +1554,24 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/Incident' }
 
+  /status/monitor:
+    get:
+      operationId: getStatusMonitorLink
+      tags: [Status]
+      summary: Public address of the standalone monitor's status page (anonymous access)
+      description: >-
+        Runtime-configured (STORE_MONITOR_PUBLIC_URL) so prebuilt images can
+        point the SPA's /status deep link at the deployment's monitor without
+        rebuilding. url is null when the deployment has not configured one.
+      security:
+        - {}
+      responses:
+        '200':
+          description: Monitor link; url is null when unconfigured
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitorLink' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2357,3 +2375,13 @@ components:
         startedAt: { type: string, format: date-time }
         resolvedAt: { type: string, format: date-time, nullable: true }
         updatedAt: { type: string, format: date-time }
+
+    MonitorLink:
+      type: object
+      description: Where the standalone monitor's public status page lives (ADR-011).
+      properties:
+        url:
+          type: string
+          format: uri
+          nullable: true
+          description: The monitor's public address, e.g. https://status.example.com; null when unconfigured.

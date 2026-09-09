@@ -1247,6 +1247,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/status/monitor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public address of the standalone monitor's status page (anonymous access)
+         * @description Runtime-configured (STORE_MONITOR_PUBLIC_URL) so prebuilt images can point the SPA's /status deep link at the deployment's monitor without rebuilding. url is null when the deployment has not configured one.
+         */
+        get: operations["getStatusMonitorLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1979,6 +1999,14 @@ export interface components {
             resolvedAt?: string | null;
             /** Format: date-time */
             updatedAt?: string;
+        };
+        /** @description Where the standalone monitor's public status page lives (ADR-011). */
+        MonitorLink: {
+            /**
+             * Format: uri
+             * @description The monitor's public address, e.g. https://status.example.com; null when unconfigured.
+             */
+            url?: string | null;
         };
     };
     responses: {
@@ -3977,6 +4005,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Incident"][];
+                };
+            };
+        };
+    };
+    getStatusMonitorLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Monitor link; url is null when unconfigured */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorLink"];
                 };
             };
         };

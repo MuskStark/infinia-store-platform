@@ -90,8 +90,10 @@ const banner = computed(() => {
       return { key: 'status.banner.partialOutage', cls: 'text-orange-600 dark:text-orange-400' };
     case 'major_outage':
       return { key: 'status.banner.majorOutage', cls: 'text-danger dark:text-red-400' };
-    default:
+    case 'operational':
       return { key: 'status.banner.operational', cls: 'text-success dark:text-emerald-400' };
+    default:
+      return { key: 'status.indicator.noData', cls: 'text-muted dark:text-slate-400' };
   }
 });
 
@@ -267,6 +269,7 @@ const hiveLegend = computed(() => {
     name: componentText(component.key),
     color: SERVICE_COLORS[index % SERVICE_COLORS.length],
     indicator: indicatorText(component.indicator),
+    indicatorColor: indicatorColor(component.indicator),
     uptime: component.uptime90d != null
       ? t('status.uptime90d', { percent: component.uptime90d.toFixed(2) })
       : null,
@@ -389,7 +392,7 @@ function incidentDuration(incident: ServiceIncident): string | null {
 
     <template v-else-if="status">
       <span class="sr-only" data-testid="status-banner" role="status">
-        ✓ {{ t(banner.key) }}
+        {{ t(banner.key) }}
       </span>
 
       <!-- Frozen-view banner: the store is unreachable, data below is frozen. -->
@@ -417,6 +420,10 @@ function incidentDuration(incident: ServiceIncident): string | null {
             >
               <span class="hive-legend__swatch" :style="{ background: entry.color }" aria-hidden="true" />
               <span class="text-sm font-medium">{{ entry.name }}</span>
+              <span class="ml-auto inline-flex items-center gap-1.5 whitespace-nowrap text-xs" data-testid="component-live-status">
+                <span class="h-2 w-2 rounded-full" :class="entry.indicatorColor" aria-hidden="true" />
+                {{ entry.indicator }}
+              </span>
             </button>
           </li>
         </ul>

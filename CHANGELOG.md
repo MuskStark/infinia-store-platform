@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### The footer's service-status link goes to the monitor page, not raw JSON
+
+- The SPA's `/status` deep link now reads the monitor's public address at
+  runtime from the new anonymous endpoint `GET /api/v1/status/monitor`
+  (backed by `STORE_MONITOR_PUBLIC_URL`), so prebuilt images redirect to the
+  deployment's status page without a rebuild; the build-time
+  `VITE_MONITOR_BASE_URL` stays as a fallback.
+- Previously an unconfigured deployment silently redirected users to the
+  `/api/v1/status` JSON payload. Now it degrades to a friendly bilingual
+  notice naming the missing setting instead.
+
 ### A failing optional upstream no longer keeps the page yellow
 
 - Failed upstream syncs retry hourly (`store.upstream.retry-interval-ms`):
