@@ -39,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         properties = {
                 // Drive PollCycle manually; keep the scheduler out of the assertions.
                 "monitor.poll-interval-ms=3600000",
+                "monitor.poll-initial-delay-ms=3600000",
                 "monitor.stale-after-ms=30000",
                 // Dedicated in-memory database: this class is a stateful sequence.
                 "spring.datasource.url=jdbc:h2:mem:monitor-it;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
@@ -155,7 +156,8 @@ class MonitorIntegrationTest {
         // Age the persisted fixture instead of racing a 300 ms wall-clock
         // window against HTTP startup and database work on slower CI hosts.
         var stored = snapshots.findById(1).orElseThrow();
-        stored.fetchedAt = before.fetchedAt().minusSeconds(31);
+        stored.fetchedAt = before.fetchedAt().minusSeconds(31)
+                .truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         snapshots.save(stored);
         mirror.restore();
         page = get("/api/v1/status");

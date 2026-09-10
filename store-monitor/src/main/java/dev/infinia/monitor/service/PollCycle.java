@@ -41,7 +41,8 @@ public class PollCycle {
         this.alerts = alerts;
     }
 
-    @Scheduled(fixedDelayString = "${monitor.poll-interval-ms:60000}")
+    @Scheduled(fixedDelayString = "${monitor.poll-interval-ms:60000}",
+            initialDelayString = "${monitor.poll-initial-delay-ms:0}")
     public void scheduled() {
         try {
             cycle();

@@ -27,9 +27,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                // The scheduler's own boot poll may add one sample to today's
-                // bucket; expectations are computed from the bucket itself.
+                // Polling is driven manually in tests; no startup sample races
+                // these writes to today's bucket.
                 "monitor.poll-interval-ms=3600000",
+                "monitor.poll-initial-delay-ms=3600000",
                 "spring.datasource.url=jdbc:h2:mem:monitor-uptime;"
                         + "MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;"
                         + "DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
