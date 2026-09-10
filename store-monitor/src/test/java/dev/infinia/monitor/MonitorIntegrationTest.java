@@ -1,10 +1,10 @@
 package dev.infinia.monitor;
 
 import com.sun.net.httpserver.HttpServer;
+import dev.infinia.monitor.persistence.MirrorSnapshotRepository;
 import dev.infinia.monitor.service.PollCycle;
 import dev.infinia.monitor.service.StatusMirror;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         properties = {
                 // Drive PollCycle manually; keep the scheduler out of the assertions.
                 "monitor.poll-interval-ms=3600000",
-                "monitor.stale-after-ms=300",
+                "monitor.stale-after-ms=30000",
                 // Dedicated in-memory database: this class is a stateful sequence.
                 "spring.datasource.url=jdbc:h2:mem:monitor-it;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
         })
@@ -104,6 +104,9 @@ class MonitorIntegrationTest {
     @Autowired
     StatusMirror mirror;
 
+    @Autowired
+    MirrorSnapshotRepository snapshots;
+
     @Test
     @Order(1)
     @SuppressWarnings("unchecked")
@@ -146,12 +149,19 @@ class MonitorIntegrationTest {
         assertEquals("external", incidents.get(0).get("component"));
         assertEquals("investigating", incidents.get(0).get("status"));
 
-        // Once the mirror age crosses the stale window the page says so.
-        Thread.sleep(400);
-        page = get("/api/v1/status");
-        assertTrue((Boolean) page.get("stale"));
         assertEquals(before.fetchedAt().toString(), page.get("mirroredAt"),
                 "fetchedAt stays frozen at the last successful fetch");
+
+        // Age the persisted fixture instead of racing a 300 ms wall-clock
+        // window against HTTP startup and database work on slower CI hosts.
+        var stored = snapshots.findById(1).orElseThrow();
+        stored.fetchedAt = before.fetchedAt().minusSeconds(31);
+        snapshots.save(stored);
+        mirror.restore();
+        page = get("/api/v1/status");
+        assertTrue((Boolean) page.get("stale"));
+        assertEquals(stored.fetchedAt.toString(), page.get("mirroredAt"),
+                "an aged snapshot remains visible during the outage");
     }
 
     @Test
