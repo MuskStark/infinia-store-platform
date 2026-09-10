@@ -174,6 +174,9 @@ outstanding tokens).
 
 ## Upgrades
 
+Automated (recommended): configure the CI deploy job once and every green
+push to `main` deploys itself — see "Automated deploys" below. By hand:
+
 Store host:
 
 ```sh
@@ -187,9 +190,129 @@ git pull && docker compose -f docker-compose.monitor.yml pull \
   && docker compose -f docker-compose.monitor.yml up -d
 ```
 
+`scripts/upgrade.sh` automates the store-host command safely (pinned commit,
+health wait, automatic rollback) and is what CI invokes.
+
 Flyway migrations (`store-infrastructure/src/main/resources/db/migration`) run
 automatically on boot. Schema changes are additive per release; check
 CHANGELOG.md before jumping major versions.
+
+## Automated deploys
+
+`ci.yml` ends with a `deploy` job: once `backend`, `frontend` and `images`
+are green on a push to `main` (or a manual *Run workflow* dispatch), it SSHes
+into the production host(s) and runs `scripts/upgrade.sh` pinned to the exact
+commit — checkout, `docker compose --profile app up -d --build`, health wait,
+and an automatic rollback to the previous image + checkout if the store does
+not come back healthy. Deploys queue behind each other (never cancel
+mid-deploy), `.env` is never touched, and runs appear under the repo's
+*Environments → production* tab. The optional monitor host (split deployment)
+updates by GHCR image pull in the same run. Self-hosted CI? The same upgrade
+ships as a Jenkins pipeline — "Jenkins instead of GitHub Actions" below.
+
+### One-time setup
+
+1. **Server** — the repo cloned at the deploy path with `.env` in place
+   (i.e. what `scripts/deploy.sh` leaves behind), plus credentials for an
+   unattended `git fetch origin`: add a read-only
+   [deploy key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys)
+   (`ssh-keygen -t ed25519 -N '' -f ~/.ssh/github_deploy`, paste the `.pub`
+   into the repo's Settings → Deploy keys) or an HTTPS credential helper.
+   The SSH user must be root or allowed to `sudo -n` (passwordless).
+2. **CI key pair** — a separate key for the runner:
+   `ssh-keygen -t ed25519 -N '' -f ci_deploy`, then append `ci_deploy.pub` to
+   the server's `~/.ssh/authorized_keys`. (No root shell? Give the CI user
+   passwordless sudo for `scripts/upgrade.sh` only.)
+3. **Repository secrets** (Settings → Secrets and variables → Actions):
+
+   | Secret | Required | Meaning |
+   |---|---|---|
+   | `DEPLOY_SSH_HOST` | yes | store host (IP or DNS); unset disables deploys entirely |
+   | `DEPLOY_SSH_PRIVATE_KEY` | yes | contents of the `ci_deploy` private key |
+   | `DEPLOY_SSH_USER` | no | default `root`; any user with passwordless sudo |
+   | `DEPLOY_SSH_PORT` | no | default `22` |
+   | `DEPLOY_PATH` | no | repo path on the host, default `/opt/infinia-store` |
+   | `DEPLOY_KNOWN_HOSTS` | no | `ssh-keyscan -p <port> <host>` output; without it the first connection is trusted on first use |
+   | `DEPLOY_MONITOR_SSH_HOST` | no | monitor host (split deployment); needs Docker access for its SSH user (root or the `docker` group) |
+   | `DEPLOY_MONITOR_*` | no | per-host `USER`/`PORT`/`PRIVATE_KEY`/`KNOWN_HOSTS`/`PATH`; default to the store host's values |
+
+4. Optional gate — *Settings → Environments → production → Required
+   reviewers* turns every deploy into a one-click approval.
+
+### Jenkins instead of GitHub Actions
+
+The repo ships a root `Jenkinsfile` with the same shape: backend verify and
+frontend tests/builds run in stage containers (Maven/JDK 21, Node 22 — the
+agent itself only needs Docker), and a green build of `main` deploys through
+the very same `scripts/upgrade.sh`. Prefer it when the server should not be
+reachable from GitHub runners, or you want self-hosted CI.
+
+Setup:
+
+1. Jenkins with the **Pipeline**, **Docker Pipeline** and (for remote
+   deploys) **SSH Agent** plugins; the agent needs Docker — `deploy.sh`
+   already configured registry mirrors on the production host, so the stage
+   images pull fine. Containerized Jenkins must mount the host Docker
+   socket and carry the docker CLI, or the `docker`-agent stages cannot
+   start sibling containers (first-boot unlock password:
+   `docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword`):
+
+   ```sh
+   # port 8888: the store already owns the host's 8080
+   docker run -d --name jenkins --restart unless-stopped \
+     -p 8888:8080 -p 50000:50000 \
+     -v jenkins_home:/var/jenkins_home \
+     -v /var/run/docker.sock:/var/run/docker.sock \
+     jenkins/jenkins:lts-jdk21
+   # docker CLI inside (one-off, Aliyun repo):
+   docker exec -u root jenkins bash -c '
+     apt-get update && apt-get install -y -q ca-certificates curl &&
+     install -m 0755 -d /etc/apt/keyrings &&
+     curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/debian/gpg -o /etc/apt/keyrings/docker.asc &&
+     echo "deb [signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list &&
+     apt-get update && apt-get install -y -q docker-cli'
+   ```
+2. New item → Pipeline: SCM = this repo, script path `Jenkinsfile`,
+   branch `main` (or a multibranch job — deploys stay gated on
+   `branch 'main'`). The pipeline polls SCM every ~5 minutes out of the
+   box; prefer a GitHub webhook for instant builds and then delete the
+   `triggers` block so one push doesn't queue two builds.
+3. Edit the `environment` block at the top of the `Jenkinsfile` once:
+   - Jenkins on its own host — set `PROD_HOST` / `PROD_USER` / `PROD_PATH`,
+     and add the deploy key as an "SSH Username with private key" credential
+     named `infinia-prod-deploy` (the same key pair as the GitHub Actions
+     setup above; the server's `authorized_keys` already has it).
+   - Jenkins on the production host — leave `PROD_HOST` empty and grant the
+     `jenkins` user passwordless sudo for the upgrader only:
+
+     ```sudoers
+     jenkins ALL=(root) NOPASSWD: /opt/infinia-store/scripts/upgrade.sh
+     ```
+
+     root must then be able to `git fetch` the checkout — same deploy-key
+     note as the GitHub Actions setup, installed for root's `~/.ssh`.
+
+The two CI systems coexist independently: GitHub Actions deploys only when
+its `DEPLOY_*` secrets are set, so leave them unset once Jenkins owns the
+deploys.
+
+### Notes
+
+- **Rollback**: `scripts/upgrade.sh` snapshots the running image as
+  `infinia-store:rollback` and restores it automatically when the new version
+  fails its health check. Manual rollback: `git checkout <previous-rev>`,
+  `docker tag infinia-store:rollback infinia-store:latest`,
+  `docker compose --profile app up -d --no-build`.
+- The upgrade pins an exact commit with `git checkout -f`: server-side edits
+  to tracked files are silently reverted. Keep host-specific settings in
+  `.env` (untracked), never in tracked files.
+- **Server not reachable from GitHub runners** (NAT, firewall)? Skip the
+  secrets and drive the same script from a server-side timer instead —
+  root's crontab, every 10 minutes:
+
+  ```cron
+  */10 * * * * root cd /opt/infinia-store && git fetch -q origin && [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ] && ./scripts/upgrade.sh >> /var/log/infinia-upgrade.log 2>&1
+  ```
 
 ## Image pinning notes
 
