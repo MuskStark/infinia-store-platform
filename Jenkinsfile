@@ -63,6 +63,8 @@ pipeline {
         }
       }
       steps {
+        // The release-script integration test invokes curl and jq.
+        sh 'apt-get -o Acquire::Retries=3 update && apt-get install -y --no-install-recommends jq'
         sh './mvnw -B verify'
       }
       post {
@@ -91,7 +93,7 @@ pipeline {
         sh 'yarn install --immutable'
         sh '''
           yarn workspace @infinia/store-web gen:api
-          git diff --exit-code -- store-web/src/api/schema.d.ts
+          git -c safe.directory="$WORKSPACE" diff --exit-code -- store-web/src/api/schema.d.ts
         '''
         sh 'yarn ui:test'
         sh 'yarn web:test'
