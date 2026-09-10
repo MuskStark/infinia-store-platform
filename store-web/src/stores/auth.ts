@@ -12,6 +12,15 @@ export const useAuthStore = defineStore('auth', {
     roles: (state): string[] => state.user?.roles ?? [],
   },
   actions: {
+    /**
+     * Adopts the user object carried by the login/register response so the UI
+     * can navigate immediately; the /me round-trip would leave the sign-in
+     * button idle for as long as that request takes.
+     */
+    adoptUser(user: PublicUser) {
+      this.user = user;
+      this.ready = true;
+    },
     async load() {
       if (!getAccessToken()) {
         this.user = null;

@@ -3,7 +3,22 @@ import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  plugins: [vue(), tailwindcss()],
+  plugins: [
+    vue(),
+    tailwindcss(),
+    // Vite rebuilds the entry <script> tag and drops data-cfasync from
+    // index.html, so re-add it here: without it Cloudflare Rocket Loader
+    // rewrites type="module" into its own loader (a known SPA breaker).
+    {
+      name: 'entry-script-opts-out-of-rocket-loader',
+      transformIndexHtml(html: string) {
+        return html.replace(
+          /<script(?![^>]*data-cfasync)([^>]*type="module")/g,
+          '<script data-cfasync="false"$1',
+        );
+      },
+    },
+  ],
   server: {
     // 8089 keeps the store SPA clear of the FengYu frontend's default 5173,
     // so both apps can run side by side during integration work.

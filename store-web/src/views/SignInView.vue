@@ -81,11 +81,24 @@ function problemText(e: unknown): string {
   return t('errors.server');
 }
 
-async function finishLogin(token: string) {
+async function finishLogin(token: string, user?: PublicUser) {
   setAccessToken(token);
-  await auth.load();
+  // The login response already carries the user: navigate at once instead of
+  // waiting on a second /me round-trip that leaves the form looking dead.
+  if (user) {
+    auth.adoptUser(user);
+  } else {
+    await auth.load();
+  }
   const redirect = (route.query.redirect as string) ?? '/';
-  router.push(redirect);
+  try {
+    await router.push(redirect);
+  } catch {
+    // A SPA navigation can fail after a redeploy (stale shell referencing
+    // removed chunks). A full page load re-fetches the shell and still lands
+    // the user where they asked to go — never stranded on the sign-in page.
+    window.location.assign(redirect);
+  }
 }
 
 async function signIn() {
@@ -97,11 +110,10 @@ async function signIn() {
       await submitOAuthSessionLogin(email.value, password.value);
       return;
     }
-    const response = await api.post<{ accessToken: string; user?: PublicUser }>(
-      '/api/v1/auth/login',
+    const response = await api.post<{ accessToken: string; user?: PublicUser }>('/api/v1/auth/login',
       { email: email.value, password: password.value },
     );
-    await finishLogin(response.accessToken);
+    await finishLogin(response.accessToken, response.user);
   } catch (e) {
     error.value = problemText(e);
   } finally {
@@ -125,11 +137,11 @@ async function register() {
       return;
     }
     // Register → immediately signed in with the same credentials.
-    const response = await api.post<{ accessToken: string }>('/api/v1/auth/login', {
+    const response = await api.post<{ accessToken: string; user?: PublicUser }>('/api/v1/auth/login', {
       email: email.value,
       password: password.value,
     });
-    await finishLogin(response.accessToken);
+    await finishLogin(response.accessToken, response.user);
   } catch (e) {
     error.value = problemText(e);
   } finally {
