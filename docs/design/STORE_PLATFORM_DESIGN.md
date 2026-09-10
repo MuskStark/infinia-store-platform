@@ -562,6 +562,7 @@ sequenceDiagram
 | 商品 | `GET /api/v1/listings/{namespace}/{slug}` | 商品详情和渠道版本 |
 | 解析 | `POST /api/v1/resolutions` | 按客户端环境求解版本和依赖 |
 | 下载 | `POST /api/v1/releases/{id}/download-ticket` | 短时、限用途 CDN 下载票据 |
+| 信任锚 | `GET /api/v1/platform-keys` | 平台 ACTIVE 签名公钥（宿主 `trusted-store-keys.json` 的引导来源，JWKS 同理匿名公开） |
 | 库 | `GET /api/v1/me/library`, `PUT/DELETE .../favorites/{listingId}` | 我的库与收藏 |
 | 遥测 | `POST /api/v1/install-events` | 可选、批量、幂等的安装结果 |
 | 发布 | `POST /api/v1/publisher/listings` | 创建商品 |

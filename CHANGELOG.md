@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Public platform trust anchors: `GET /api/v1/platform-keys`
+
+- The ACTIVE platform signing keys are now served anonymously as
+  `{keys:[{keyId, algorithm, publicKeyBase64, validFrom, validTo}]}` —
+  `publicKeyBase64` is the exact Base64 X.509 DER encoding the FengYu host's
+  operator overlay `trusted-store-keys.json` expects verbatim. Public keys
+  are public (JWKS precedent) and the private half never leaves KMS/HSM
+  (ADR-006), so the store itself can be the anchor bootstrap channel.
+- Closes the provisioning gap for strict-posture host installs
+  (`fengyu.store.require-signature=true`): operators fetch the anchor from
+  the store instead of hand-querying the `signing_key` table. Verified
+  end-to-end against a fresh local store — without the anchor the host
+  refuses the download at the signature gate; with it, plugin and skill
+  installs verify the Ed25519 signature over the downloaded bytes.
+
 ### Publisher center: step-by-step wizard, package autofill, status board, release deletion
 
 - The Publishing Center is now a focused 3-step wizard in one centered card —

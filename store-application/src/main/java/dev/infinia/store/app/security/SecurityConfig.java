@@ -64,7 +64,9 @@ public class SecurityConfig {
             "/api/v1/releases/*/download-ticket", "/api/v1/releases/*/install-manifest",
             "/api/v1/releases/*/install-package", "/api/v1/releases/*/checksums.txt",
             // Service status must stay reachable exactly when things are broken.
-            "/api/v1/status", "/api/v1/status/incidents", "/api/v1/status/monitor"
+            "/api/v1/status", "/api/v1/status/incidents", "/api/v1/status/monitor",
+            // Platform trust anchors (public keys only — JWKS precedent).
+            "/api/v1/platform-keys"
     };
 
     @Bean
