@@ -39,11 +39,16 @@ pipeline {
     // SSH host of the store server. Empty = Jenkins runs ON the production
     // host: the deploy executes scripts/upgrade.sh locally against PROD_PATH
     // (needs passwordless sudo for the Jenkins user on that script).
-    PROD_HOST     = ''
-    PROD_USER     = 'root'
-    PROD_PATH     = '/opt/infinia-store'
+    PROD_HOST     = '10.5.20.83'
+    PROD_USER     = 'jack'
+    PROD_PATH     = '/home/jack/infinia-store-platform'
     // Jenkins "SSH Username with private key" credential for remote deploys.
     DEPLOY_KEY_ID = 'infinia-prod-deploy'
+    // Split-host status monitor (ADR-011): upgraded separately by pulling the
+    // CI-published GHCR image — same SSH user, its own deploy credential.
+    MONITOR_HOST  = '10.5.20.84'
+    MONITOR_PATH  = '/home/jack/infinia-store-platform'
+    MONITOR_KEY_ID = 'infinia-monitor-deploy'
   }
 
   stages {
@@ -107,6 +112,17 @@ pipeline {
                 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
                     "$PROD_USER@$PROD_HOST" \
                     "cd '$PROD_PATH' && bash scripts/upgrade.sh --ref '$GIT_COMMIT'"
+              '''
+            }
+            // Monitor host pulls the CI-published GHCR image pinned to this
+            // commit; the image for a just-pushed commit may lag a few
+            // minutes behind (GitHub Actions publish), the next push catches up.
+            echo "Refreshing monitor ${env.PROD_USER}@${env.MONITOR_HOST}:${env.MONITOR_PATH} (GHCR image pull)"
+            sshagent(credentials: [env.MONITOR_KEY_ID]) {
+              sh '''
+                ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+                    "$PROD_USER@$MONITOR_HOST" \
+                    "cd '$MONITOR_PATH' && git fetch origin --prune && git checkout -f --detach '$GIT_COMMIT' && sudo -n docker compose -f docker-compose.monitor.yml pull && sudo -n docker compose -f docker-compose.monitor.yml up -d"
               '''
             }
           } else {
