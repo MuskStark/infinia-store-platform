@@ -132,7 +132,7 @@ async function createWebhook() {
           <input
             v-model="newOrgSlug"
             required
-            pattern="[a-z0-9][a-z0-9-]{0,62}"
+            pattern="[a-z0-9][a-z0-9\-]{0,62}"
             :placeholder="t('publisher.orgSlug')"
             class="input"
           />

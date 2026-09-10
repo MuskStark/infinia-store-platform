@@ -33,13 +33,22 @@ const message = ref('');
 /** In-card feedback for the release pipeline — actions happen down here, so
  *  success/failure must be visible next to the buttons, not just at page top. */
 const releaseMessage = ref('');
+/** Banners double as success and failure feedback; failures render in the
+ *  danger tone so "校验失败" doesn't look like a neutral status line. */
+const messageError = ref(false);
+const releaseMessageError = ref(false);
 
 /** RFC 9457 problems carry stable codes; prefer the localized text. */
 function problemText(e: unknown): string {
   if (e instanceof ApiRequestError && e.code) {
     const localized = t(`errors.${e.code}`);
-    if (localized !== `errors.${e.code}`) return localized;
-    return e.detail ?? e.message;
+    const text = localized !== `errors.${e.code}` ? localized : (e.detail ?? e.message);
+    // The generic title ("校验失败") hides which field failed — the server
+    // keeps the concrete cause for validation errors (audit P1-6), so show it.
+    if (e.code === 'validation_failed' && e.detail && !text.includes(e.detail)) {
+      return `${text}：${e.detail}`;
+    }
+    return text;
   }
   return e instanceof Error ? e.message : t('errors.server');
 }
@@ -134,6 +143,7 @@ async function onImportPackage() {
     message.value = '';
     showCreatePanel.value = true;
   } catch (e) {
+    messageError.value = true;
     message.value = e instanceof PluginManifestError
       ? t(`publisher.import.${e.message}`)
       : t('errors.server');
@@ -246,6 +256,7 @@ async function deleteCurrentRelease() {
   busy.value = true;
   try {
     await api.delete(`/api/v1/publisher/releases/${release.releaseId}`);
+    messageError.value = false;
     message.value = t('publisher.releaseDeleted');
     releaseMessage.value = '';
     currentRelease.value = null;
@@ -258,6 +269,7 @@ async function deleteCurrentRelease() {
     void hydrateListingStatuses();
     goToStep(2);
   } catch (e) {
+    releaseMessageError.value = true;
     releaseMessage.value = problemText(e);
   } finally {
     busy.value = false;
@@ -279,12 +291,14 @@ async function createOrg() {
   busy.value = true;
   try {
     const created = await api.post<{ slug: string }>('/api/v1/organizations', orgForm.value);
+    messageError.value = false;
     message.value = t('publisher.orgCreated');
     await loadOrgNamespaces();
     listingForm.value.namespace = created?.slug ?? orgForm.value.slug;
     useCustomNamespace.value = false;
     orgForm.value = { slug: '', name: '' };
   } catch (e) {
+    messageError.value = true;
     message.value = problemText(e);
   } finally {
     busy.value = false;
@@ -292,6 +306,13 @@ async function createOrg() {
 }
 
 async function createListing() {
+  // Without a namespace the request can only fail server-side: namespaces
+  // exist only via organization creation, so say so instead of a round trip.
+  if (!listingForm.value.namespace.trim()) {
+    messageError.value = true;
+    message.value = t('publisher.namespaceRequired');
+    return;
+  }
   busy.value = true;
   try {
     await api.post('/api/v1/publisher/listings', {
@@ -310,8 +331,10 @@ async function createListing() {
     step.value = 2;
     showCreatePanel.value = false;
     await store.load();
+    messageError.value = false;
     message.value = t('publisher.listingCreated');
   } catch (e) {
+    messageError.value = true;
     message.value = problemText(e);
   } finally {
     busy.value = false;
@@ -350,9 +373,11 @@ async function createRelease() {
     packageSize.value = 0;
     if (fileInput.value) fileInput.value.value = '';
     await store.loadReleases(detail.listingId);
+    releaseMessageError.value = false;
     releaseMessage.value = t('publisher.releaseCreated');
     step.value = 3;
   } catch (e) {
+    releaseMessageError.value = true;
     releaseMessage.value = problemText(e);
   } finally {
     busy.value = false;
@@ -391,10 +416,12 @@ async function uploadAndSubmit() {
     );
     await pollStatus();
     const finalStatus = store.releases[release.releaseId]?.status ?? result.status;
+    releaseMessageError.value = false;
     releaseMessage.value = t('publisher.submittedStatus', {
       status: t(`state.${finalStatus}`),
     });
   } catch (e) {
+    releaseMessageError.value = true;
     releaseMessage.value = problemText(e);
   } finally {
     busy.value = false;
@@ -437,6 +464,7 @@ async function selectListing(listing: CatalogItem) {
     );
     if (draft) {
       currentRelease.value = draft;
+      releaseMessageError.value = false;
       releaseMessage.value = t('publisher.draftResumed');
       // "继续草稿" is the point of picking this listing — land directly on
       // the upload step instead of making the user click the draft again.
@@ -446,6 +474,7 @@ async function selectListing(listing: CatalogItem) {
     }
   } catch {
     /* detail load failure leaves the wizard usable for new releases */
+    messageError.value = true;
     message.value = t('publisher.releasesUnavailable');
     step.value = 2;
   }
@@ -530,7 +559,7 @@ function releaseRowHint(status: string): string {
 <template>
   <div class="mx-auto w-full max-w-3xl space-y-6">
     <PageHeader :title="t('publisher.title')" :subtitle="t('publisher.subtitle')" />
-    <p v-if="message" class="alert alert-info" role="status">
+    <p v-if="message" class="alert" :class="messageError ? 'alert-error' : 'alert-info'" role="status">
       {{ message }}
     </p>
 
@@ -682,7 +711,11 @@ function releaseRowHint(status: string): string {
               <form class="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" @submit.prevent="createOrg">
                 <label class="block text-sm">
                   <span class="mb-1 block">{{ t('publisher.orgSlug') }}</span>
-                  <input v-model="orgForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" class="input" />
+                  <!-- pattern 里的短横线必须转义:HTML 用 v 标志编译 pattern,
+                       [a-z0-9-] 在 v 模式下非法 → 整条约束被浏览器静默忽略,
+                       大写 slug 就会漏到服务端变成一句没有细节的"校验失败"。 -->
+                  <input v-model="orgForm.slug" required pattern="[a-z0-9][a-z0-9\-]{0,62}" class="input" />
+                  <span class="mt-1 block text-xs text-muted dark:text-slate-400">{{ t('publisher.orgSlugHint') }}</span>
                 </label>
                 <label class="block text-sm">
                   <span class="mb-1 block">{{ t('publisher.orgName') }}</span>
@@ -731,7 +764,7 @@ function releaseRowHint(status: string): string {
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block">{{ t('publisher.slug') }}</span>
-                <input v-model="listingForm.slug" required pattern="[a-z0-9][a-z0-9-]{0,62}" class="input" />
+                <input v-model="listingForm.slug" required pattern="[a-z0-9][a-z0-9\-]{0,62}" class="input" />
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block">{{ t('publisher.name') }}</span>
@@ -846,7 +879,7 @@ function releaseRowHint(status: string): string {
               </button>
             </div>
 
-            <p v-if="releaseMessage" class="alert alert-info mb-4" role="status">
+            <p v-if="releaseMessage" class="alert mb-4" :class="releaseMessageError ? 'alert-error' : 'alert-info'" role="status">
               {{ releaseMessage }}
             </p>
 

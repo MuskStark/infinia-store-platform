@@ -75,8 +75,13 @@ function useDemoAccount(demo: { email: string; password: string }) {
 function problemText(e: unknown): string {
   if (e instanceof ApiRequestError && e.code) {
     const localized = t(`errors.${e.code}`);
-    if (localized !== `errors.${e.code}`) return localized;
-    return e.detail ?? e.message;
+    const text = localized !== `errors.${e.code}` ? localized : (e.detail ?? e.message);
+    // Validation failures keep their server-side cause (e.g. which field
+    // failed) — the bare localized title alone is not actionable.
+    if (e.code === 'validation_failed' && e.detail && !text.includes(e.detail)) {
+      return `${text}：${e.detail}`;
+    }
+    return text;
   }
   return t('errors.server');
 }

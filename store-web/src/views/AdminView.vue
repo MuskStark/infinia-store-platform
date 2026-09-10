@@ -867,7 +867,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
               <input
                 v-model="newNamespace"
                 required
-                pattern="[a-z0-9][a-z0-9-]{0,62}"
+                pattern="[a-z0-9][a-z0-9\-]{0,62}"
                 placeholder="superpowers"
                 class="input mt-1"
               />
