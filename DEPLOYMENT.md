@@ -273,8 +273,8 @@ Setup:
      apt-get update && apt-get install -y -q docker-cli'
    ```
 2. New item → Pipeline: SCM = this repo, script path `Jenkinsfile`,
-   branch `main` (or a multibranch job — deploys stay gated on
-   `branch 'main'`). The pipeline polls SCM every ~5 minutes out of the
+   branch `*/main` (or a multibranch job). The deploy gate accepts both
+   the regular Pipeline SCM branch and multibranch `BRANCH_NAME`. The pipeline polls SCM every ~5 minutes out of the
    box; prefer a GitHub webhook for instant builds and then delete the
    `triggers` block so one push doesn't queue two builds.
 3. Edit the `environment` block at the top of the `Jenkinsfile` once:
@@ -295,6 +295,25 @@ Setup:
 The two CI systems coexist independently: GitHub Actions deploys only when
 its `DEPLOY_*` secrets are set, so leave them unset once Jenkins owns the
 deploys.
+
+The split-host Jenkins deploy builds the monitor from the same commit as the
+store using `scripts/upgrade-monitor.sh`, so it does not depend on GitHub
+Actions publishing `latest`. It waits for container health and checks the
+image revision label. The host-local `.monitor-release.yml` override selects
+that commit's image; on failure the script restores the previous checkout
+and image. For subsequent manual Compose operations on this monitor host,
+include both files:
+
+```sh
+docker compose -f docker-compose.monitor.yml -f .monitor-release.yml ps
+sudo bash scripts/upgrade-monitor.sh --path "$PWD" --ref origin/main
+```
+
+The Jenkins deployment credentials are `infinia-prod-deploy` and
+`infinia-monitor-deploy`. Keep private keys in Jenkins credentials, never in
+Git. The controller's Docker CLI may be installed under its persistent
+`/var/jenkins_home/tools/docker` directory; add this directory to the node's
+`PATH+DOCKER` environment property if the container has no system Docker CLI.
 
 ### Notes
 

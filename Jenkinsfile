@@ -45,7 +45,7 @@ pipeline {
     // Jenkins "SSH Username with private key" credential for remote deploys.
     DEPLOY_KEY_ID = 'infinia-prod-deploy'
     // Split-host status monitor (ADR-011): upgraded separately by pulling the
-    // CI-published GHCR image — same SSH user, its own deploy credential.
+    // checked-out revision — same SSH user, its own deploy credential.
     MONITOR_HOST  = '10.5.20.84'
     MONITOR_PATH  = '/home/jack/infinia-store-platform'
     MONITOR_KEY_ID = 'infinia-monitor-deploy'
@@ -102,7 +102,7 @@ pipeline {
     }
 
     stage('Deploy (production)') {
-      when { branch 'main' }
+      when { expression { env.BRANCH_NAME == 'main' || env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main' } }
       steps {
         script {
           if (env.PROD_HOST?.trim()) {
@@ -111,18 +111,15 @@ pipeline {
               sh '''
                 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
                     "$PROD_USER@$PROD_HOST" \
-                    "cd '$PROD_PATH' && bash scripts/upgrade.sh --ref '$GIT_COMMIT'"
+                    "cd '$PROD_PATH' && git fetch origin --prune && sudo -n bash scripts/upgrade.sh --ref '$GIT_COMMIT'"
               '''
             }
-            // Monitor host pulls the CI-published GHCR image pinned to this
-            // commit; the image for a just-pushed commit may lag a few
-            // minutes behind (GitHub Actions publish), the next push catches up.
-            echo "Refreshing monitor ${env.PROD_USER}@${env.MONITOR_HOST}:${env.MONITOR_PATH} (GHCR image pull)"
+            echo "Deploying monitor ${env.GIT_COMMIT?.take(12)} to ${env.PROD_USER}@${env.MONITOR_HOST}:${env.MONITOR_PATH}"
             sshagent(credentials: [env.MONITOR_KEY_ID]) {
               sh '''
                 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
                     "$PROD_USER@$MONITOR_HOST" \
-                    "cd '$MONITOR_PATH' && git fetch origin --prune && git checkout -f --detach '$GIT_COMMIT' && sudo -n docker compose -f docker-compose.monitor.yml pull && sudo -n docker compose -f docker-compose.monitor.yml up -d"
+                    "cd '$MONITOR_PATH' && git fetch origin --prune && git show '$GIT_COMMIT:scripts/upgrade-monitor.sh' | sudo -n bash -s -- --path '$MONITOR_PATH' --ref '$GIT_COMMIT'"
               '''
             }
           } else {

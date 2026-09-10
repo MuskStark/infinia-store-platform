@@ -26,6 +26,7 @@ warn() { printf '\033[1;33mWARNING:\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------- flags -----
+ORIGINAL_ARGS=("$@")
 REF="origin/main"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,7 +41,7 @@ done
 if [[ ${EUID} -ne 0 ]]; then
   # Never prompt: unattended callers (CI, cron) must fail fast instead.
   command -v sudo >/dev/null 2>&1 || die "must run as root (try: sudo scripts/upgrade.sh)"
-  exec sudo -n bash "$0" "$@"
+  exec sudo -n bash "$0" "${ORIGINAL_ARGS[@]}"
 fi
 [[ -f docker-compose.yml ]] || die "run from the repo checkout (docker-compose.yml not found next to scripts/)"
 command -v git >/dev/null 2>&1 || die "git not installed"
