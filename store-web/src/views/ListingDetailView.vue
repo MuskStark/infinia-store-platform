@@ -125,6 +125,46 @@ const installInfo = computed(() => {
   }
 });
 
+/**
+ * Publisher-side Infinia Level gate management — moved out of the Publishing
+ * Center so that page stays a focused release wizard. Visible to publisher
+ * roles while viewing a listing; the server still rejects non-owners.
+ */
+const canManageGate = computed(() =>
+  auth.isAuthenticated
+  && ['PUBLISHER', 'ORG_ADMIN', 'PLATFORM_ADMIN'].some((role) => auth.roles.includes(role)));
+const GATE_LEVEL_OPTIONS = [0, 1, 2, 3, 4].map((level) => ({
+  value: level,
+  label:
+    level === 0
+      ? t('publisher.beeLevelPublic')
+      : `${t(`beeLevel.${level}`)} · Lv${level}+`,
+}));
+const gateLevel = ref(0);
+const gateBusy = ref(false);
+const gateSaved = ref(false);
+const gateError = ref<string | null>(null);
+
+async function applyGate() {
+  if (!detail.value) return;
+  gateBusy.value = true;
+  gateSaved.value = false;
+  gateError.value = null;
+  try {
+    await api.post(
+      `/api/v1/publisher/listings/${detail.value.listingId}/min-bee-level`,
+      { minBeeLevel: gateLevel.value },
+    );
+    // Keep the header badge in sync with the saved gate.
+    detail.value = { ...detail.value, minBeeLevel: gateLevel.value };
+    gateSaved.value = true;
+  } catch (e) {
+    gateError.value = e instanceof Error ? e.message : 'error';
+  } finally {
+    gateBusy.value = false;
+  }
+}
+
 async function load() {
   loading.value = true;
   error.value = null;
@@ -133,6 +173,9 @@ async function load() {
     detail.value = await api.get<ListingDetail>(
       `/api/v1/listings/${props.namespace}/${props.slug}`,
     );
+    gateLevel.value = detail.value?.minBeeLevel ?? 0;
+    gateSaved.value = false;
+    gateError.value = null;
     ratings.value = await api.get<RatingsPage>(
       `/api/v1/listings/${props.namespace}/${props.slug}/ratings`,
     );
@@ -585,6 +628,22 @@ const installLabel = computed(() => {
           <p v-if="!isAppListing && latestRelease" class="mt-1 text-muted dark:text-slate-400">
             {{ t('listing.downloadPackageHint') }}
           </p>
+        </div>
+        <div v-if="canManageGate" class="space-y-2 border-t border-line pt-3 dark:border-slate-800">
+          <h3 class="font-semibold">{{ t('publisher.setGate') }}</h3>
+          <p class="text-xs text-muted dark:text-slate-400">{{ t('publisher.setGateHint') }}</p>
+          <select v-model="gateLevel" class="input" :aria-label="t('publisher.minBeeLevel')">
+            <option v-for="option in GATE_LEVEL_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm w-full" :disabled="gateBusy" @click="applyGate">
+            {{ t('common.confirm') }}
+          </button>
+          <p v-if="gateSaved" class="text-xs text-success dark:text-emerald-400" role="status">
+            {{ t('publisher.gateUpdated') }}
+          </p>
+          <p v-if="gateError" class="text-xs text-danger dark:text-red-400">{{ gateError }}</p>
         </div>
       </aside>
     </section>
