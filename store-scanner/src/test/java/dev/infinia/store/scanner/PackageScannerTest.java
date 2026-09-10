@@ -34,6 +34,22 @@ class PackageScannerTest {
         return out.toByteArray();
     }
 
+    private static byte[] zipOfBytes(String[][] textEntries, String name, byte[] content)
+            throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zos = new ZipOutputStream(out)) {
+            for (String[] entry : textEntries) {
+                zos.putNextEntry(new ZipEntry(entry[0]));
+                zos.write(entry[1].getBytes(StandardCharsets.UTF_8));
+                zos.closeEntry();
+            }
+            zos.putNextEntry(new ZipEntry(name));
+            zos.write(content);
+            zos.closeEntry();
+        }
+        return out.toByteArray();
+    }
+
     /** Host-contract plugin manifest (FengYu PluginManifest, schemaVersion 2). */
     private static final String VALID_PLUGIN_JSON = """
             {
@@ -77,10 +93,10 @@ class PackageScannerTest {
 
     @Test
     void rejectsHostIncompatibleManifests() throws IOException {
-        // schemaVersion 1 + npm-style engine range + object permissions + bad token.
+        // schemaVersion 1 + host-invalid engine range + object permissions + bad token.
         String legacy = VALID_PLUGIN_JSON
                 .replace("\"schemaVersion\": 2", "\"schemaVersion\": 1")
-                .replace("\">=4.0.0 <5.0.0\"", "\"^4.0.0\"")
+                .replace("\">=4.0.0 <5.0.0\"", "\">=4.0\"")
                 .replace("[\"files.read\"]",
                         "[{\"permissionId\":\"fs.read\",\"scope\":\"fs\",\"required\":true}]");
         ScanResult result = new PackageScanner().scan("PLUGIN", "1.2.0",
@@ -212,6 +228,49 @@ class PackageScannerTest {
     }
 
     @Test
+    void scansPluginArchiveAboveTheTemplateCap() throws IOException {
+        // A ~17 MiB compressed .fyp is a legitimate plugin: the 16 MiB cap is for
+        // non-archive templates only — archives are bounded by SafeZip expansion
+        // limits, and seeded-random bytes keep the entry under the ratio limit.
+        byte[] payload = new byte[17 * 1024 * 1024];
+        new java.util.Random(42).nextBytes(payload);
+        Path pkg = temp.resolve("big.fyp");
+        Files.write(pkg, zipOfBytes(new String[][] {
+                {"manifest.json", VALID_PLUGIN_JSON},
+                {"index.js", "export function run() { return 1; }"}},
+                "assets/data.bin", payload));
+
+        ScanResult result = new PackageScanner().scan("PLUGIN", "1.2.0", pkg);
+
+        assertTrue(Files.size(pkg) > 16L * 1024 * 1024);
+        assertFalse(result.findings.stream()
+                .anyMatch(f -> f.rule().startsWith("scanner.")), () -> result.findings.toString());
+        assertFalse(result.hasBlockingFindings(), () -> result.findings.toString());
+    }
+
+    @Test
+    void rejectsPluginArchiveAboveTheCompressedCap() throws IOException {
+        Path pkg = temp.resolve("huge.fyp");
+        try (var raf = new java.io.RandomAccessFile(pkg.toFile(), "rw")) {
+            raf.setLength(201L * 1024 * 1024); // sparse — only Files.size() is consulted
+        }
+        ScanResult result = new PackageScanner().scan("PLUGIN", "1.0.0", pkg);
+        assertTrue(result.findings.stream()
+                .anyMatch(f -> f.rule().equals("scanner.archive-too-large")));
+    }
+
+    @Test
+    void stillCapsNonArchiveTemplatesAt16Mib() throws IOException {
+        Path template = temp.resolve("template.json");
+        try (var raf = new java.io.RandomAccessFile(template.toFile(), "rw")) {
+            raf.setLength(17L * 1024 * 1024);
+        }
+        ScanResult result = new PackageScanner().scan("MCP", "1.0.0", template);
+        assertTrue(result.findings.stream()
+                .anyMatch(f -> f.rule().equals("scanner.file-too-large")));
+    }
+
+    @Test
     void validatesFlowPackage() throws IOException {
         byte[] pkg = zipOf(new String[][] {
                 {"manifest.json", "{\"schemaVersion\":1,\"version\":\"2.1.0\"}"},
@@ -297,5 +356,134 @@ class PackageScannerTest {
         ScanResult result = new PackageScanner().scan("APP", "4.1.0", new byte[] {0x4D, 0x5A});
         assertFalse(result.hasBlockingFindings());
         assertNotNull(result.sbom);
+    }
+
+    /** Host engines grammar: the npm-style shorthand the host's P3 batch added is valid. */
+    @Test
+    void acceptsNpmStyleEngineRanges() throws IOException {
+        for (String range : new String[] {"^4.1.0", "~4.1.2", "^4.0", "~1", "4.x", "1.2.x", "*",
+                "^4.0 || >=4.2.0 <5.0.0", "1", ">=4.0.0 <5.0.0"}) {
+            String manifest = VALID_PLUGIN_JSON.replace("\">=4.0.0 <5.0.0\"", "\"" + range + "\"");
+            ScanResult result = new PackageScanner().scan("PLUGIN", "1.2.0",
+                    zipOf(new String[][] {
+                            {"manifest.json", manifest},
+                            {"index.js", "export function run() { return 1; }"}}));
+            assertFalse(result.findings.stream()
+                    .anyMatch(f -> f.rule().equals("plugin.engines-syntax")),
+                    () -> range + " → " + result.findings);
+        }
+
+        for (String range : new String[] {"^", ">=4.0", "latest", "1.2.3.4", ""}) {
+            String manifest = VALID_PLUGIN_JSON.replace("\">=4.0.0 <5.0.0\"", "\"" + range + "\"");
+            ScanResult result = new PackageScanner().scan("PLUGIN", "1.2.0",
+                    zipOf(new String[][] {
+                            {"manifest.json", manifest},
+                            {"index.js", "export function run() { return 1; }"}}));
+            assertTrue(result.findings.stream()
+                    .anyMatch(f -> f.rule().equals("plugin.engines-syntax")),
+                    () -> range + " → " + result.findings);
+        }
+    }
+
+    /** Manifest versions must be strict semver even when they match the release version. */
+    @Test
+    void flagsNonSemverManifestVersion() throws IOException {
+        ScanResult result = new PackageScanner().scan("PLUGIN", "1.0",
+                zipOf(new String[][] {
+                        {"manifest.json", VALID_PLUGIN_JSON
+                                .replace("\"version\": \"1.2.0\"", "\"version\": \"1.0\"")},
+                        {"index.js", "x"}}));
+        assertTrue(result.findings.stream()
+                .anyMatch(f -> f.rule().equals("plugin.version-format")));
+    }
+
+    @Test
+    void flagsOversizedManifest() throws IOException {
+        String padding = "x".repeat(1024 * 1024 + 1);
+        String manifest = VALID_PLUGIN_JSON.substring(0, VALID_PLUGIN_JSON.length() - 1)
+                + ", \"pad\": \"" + padding + "\"}";
+        ScanResult result = new PackageScanner().scan("PLUGIN", "1.2.0",
+                zipOf(new String[][] {
+                        {"manifest.json", manifest},
+                        {"index.js", "x"}}));
+        assertTrue(result.findings.stream()
+                .anyMatch(f -> f.rule().equals("plugin.manifest-too-large")));
+    }
+
+    /** A declared backend must carry its worker artifact and a callable rpc method table. */
+    @Test
+    void requiresBackendWorkerAndRpcMethods() throws IOException {
+        String backendManifest = """
+                {
+                  "schemaVersion": 2,
+                  "id": "official.markdown",
+                  "name": "Markdown Tools",
+                  "description": "Render and convert Markdown",
+                  "author": "official",
+                  "icon": "language-markdown",
+                  "category": "Productivity",
+                  "version": "1.2.0",
+                  "ui": {"entry": "index.js"},
+                  "permissions": [],
+                  "backend": {"runtime": "java"}
+                }
+                """;
+        ScanResult missing = new PackageScanner().scan("PLUGIN", "1.2.0", zipOf(new String[][] {
+                {"manifest.json", backendManifest},
+                {"index.js", "x"}}));
+        assertTrue(missing.findings.stream()
+                .anyMatch(f -> f.rule().equals("plugin.backend-artifact-missing")));
+        assertTrue(missing.findings.stream()
+                .anyMatch(f -> f.rule().equals("plugin.rpc-methods-missing")));
+
+        String withRpc = backendManifest.replace("\"backend\": {\"runtime\": \"java\"}",
+                "\"backend\": {\"runtime\": \"java\"},"
+                        + "\"rpc\": {\"methods\": {\"ping\": {"
+                        + "\"inputSchema\": {\"type\": \"object\"}}}}");
+        ScanResult present = new PackageScanner().scan("PLUGIN", "1.2.0", zipOf(new String[][] {
+                {"manifest.json", withRpc},
+                {"index.js", "x"},
+                {"backend/worker.jar", "not really a jar"}}));
+        assertFalse(present.findings.stream().anyMatch(f ->
+                        f.rule().startsWith("plugin.backend-")
+                                || f.rule().startsWith("plugin.rpc")),
+                () -> present.findings.toString());
+    }
+
+    @Test
+    void flagsInvalidBackendDetails() throws IOException {
+        String manifest = """
+                {
+                  "schemaVersion": 2,
+                  "id": "official.markdown",
+                  "name": "Markdown Tools",
+                  "description": "Render and convert Markdown",
+                  "author": "official",
+                  "icon": "language-markdown",
+                  "category": "Productivity",
+                  "version": "1.2.0",
+                  "ui": {"entry": "index.js"},
+                  "permissions": [],
+                  "backend": {"runtime": "java", "protocolVersion": 2,
+                              "callTimeoutSeconds": 0,
+                              "resources": {"memoryMb": 32, "maxProcesses": 128}},
+                  "rpc": {"methods": {"ping": {"inputSchema": {"type": "string"}}}},
+                  "aiTools": [{"name": "convert", "method": "nope", "effect": "execute"}]
+                }
+                """;
+        ScanResult result = new PackageScanner().scan("PLUGIN", "1.2.0", zipOf(new String[][] {
+                {"manifest.json", manifest},
+                {"index.js", "x"},
+                {"backend/worker.jar", "j"}}));
+        assertTrue(result.findings.stream()
+                .anyMatch(f -> f.rule().equals("plugin.backend-protocol-version")));
+        assertTrue(result.findings.stream()
+                .anyMatch(f -> f.rule().equals("plugin.backend-timeout")));
+        assertTrue(result.findings.stream()
+                .anyMatch(f -> f.rule().equals("plugin.backend-resources")));
+        assertTrue(result.findings.stream()
+                .anyMatch(f -> f.rule().equals("plugin.rpc-schema")));
+        assertTrue(result.findings.stream()
+                .anyMatch(f -> f.rule().equals("plugin.ai-tool")));
     }
 }

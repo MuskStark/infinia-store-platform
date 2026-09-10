@@ -26,6 +26,24 @@ import java.util.zip.ZipFile;
  */
 public class PackageScanner {
 
+    /** Non-archive templates are read back in full — hard-capped small (design §8.2). */
+    private static final long MAX_TEMPLATE_BYTES = 16L * 1024 * 1024;
+    /**
+     * Archive kinds (PLUGIN .fyp / FLOW .fyflow) stay compressed on disk. The cap
+     * mirrors the host's {@code PluginPackageService.MAX_PACKAGE_BYTES} (100 MB) —
+     * a larger package would pass the store and then be refused at install time —
+     * while the expanded content is bounded by SafeZip's own limits.
+     */
+    private static final long MAX_ARCHIVE_BYTES = 100L * 1024 * 1024;
+    /** Host {@code PluginPackageService.MAX_MANIFEST_BYTES}. */
+    private static final long MAX_MANIFEST_BYTES = 1024 * 1024;
+    /** Host {@code SkillPackageService} ceilings: 10 MB package, 50 MB expanded (verbatim). */
+    private static final long MAX_SKILL_PACKAGE_BYTES = 10L * 1024 * 1024;
+    private static final long MAX_SKILL_EXPANDED_BYTES = 50L * 1024 * 1024;
+    /** Host {@code PluginPackageService} timeout / resource ceilings, verbatim. */
+    private static final long MIN_TIMEOUT_SECONDS = 1L;
+    private static final long MAX_TIMEOUT_SECONDS = 600L;
+
     private final ObjectMapper mapper = new ObjectMapper();
     private final SafeZip.Limits limits;
 
@@ -61,39 +79,51 @@ public class PackageScanner {
     }
 
     /**
-     * Disk-backed scan entry point for live upstream delivery. Skill archives are
-     * inspected through {@link ZipFile} entry-by-entry; only individual text files
-     * up to 2 MiB are read for content rules. Non-archive kinds (MCP templates)
-     * are read back in full under a 16 MiB cap.
+     * Disk-backed scan entry point for the publishing pipeline and live upstream
+     * delivery. SKILL archives are inspected through {@link ZipFile} entry-by-entry;
+     * PLUGIN and FLOW are zip archives too — their compressed copy is capped at
+     * {@link #MAX_ARCHIVE_BYTES} while SafeZip bounds the expanded content, so a
+     * legitimate plugin above the template read-back cap still scans. Only
+     * non-archive templates (MCP JSON) are read back in full under 16 MiB.
      */
     public ScanResult scan(String listingType, String expectedVersion, Path content) {
-        if (!"SKILL".equalsIgnoreCase(listingType)) {
+        String type = listingType == null ? "" : listingType.toUpperCase(Locale.ROOT);
+        if (type.equals("SKILL")) {
+            ScanResult result = new ScanResult();
+            result.mimeType = "application/zip";
             try {
-                long size = Files.size(content);
-                if (size > 16L * 1024 * 1024) {
-                    ScanResult result = new ScanResult();
-                    result.error("scanner.file-too-large",
-                            "Non-archive template exceeds the 16 MiB scan limit");
+                if (Files.size(content) > MAX_SKILL_PACKAGE_BYTES) {
+                    result.error("scanner.skill-too-large",
+                            "Skill package exceeds the host's 10 MB package limit");
                     return result;
                 }
-                return scan(listingType, expectedVersion, Files.readAllBytes(content));
+                scanSkill(content, expectedVersion, result);
+            } catch (ScanViolation violation) {
+                result.findings.add(new ScanResult.Finding("CRITICAL", violation.rule,
+                        violation.getMessage(), null));
             } catch (IOException e) {
-                ScanResult result = new ScanResult();
                 result.error("scanner.io", "Package could not be read: " + e.getMessage());
+            }
+            return result;
+        }
+        boolean archive = type.equals("PLUGIN") || type.equals("FLOW");
+        long cap = archive ? MAX_ARCHIVE_BYTES : MAX_TEMPLATE_BYTES;
+        try {
+            if (Files.size(content) > cap) {
+                ScanResult result = new ScanResult();
+                result.error(archive ? "scanner.archive-too-large" : "scanner.file-too-large",
+                        archive
+                                ? "Archive exceeds the " + (MAX_ARCHIVE_BYTES >> 20)
+                                        + " MiB compressed scan limit"
+                                : "Non-archive template exceeds the 16 MiB scan limit");
                 return result;
             }
-        }
-        ScanResult result = new ScanResult();
-        result.mimeType = "application/zip";
-        try {
-            scanSkill(content, expectedVersion, result);
-        } catch (ScanViolation violation) {
-            result.findings.add(new ScanResult.Finding("CRITICAL", violation.rule,
-                    violation.getMessage(), null));
+            return scan(listingType, expectedVersion, Files.readAllBytes(content));
         } catch (IOException e) {
+            ScanResult result = new ScanResult();
             result.error("scanner.io", "Package could not be read: " + e.getMessage());
+            return result;
         }
-        return result;
     }
 
     // ---- PLUGIN (.fyp zip with a manifest.json at the root) ----
@@ -107,6 +137,11 @@ public class PackageScanner {
         if (manifest == null) {
             result.error("plugin.manifest-missing", "Missing " + manifestName + " manifest");
             return;
+        }
+        // Host: manifest.json larger than 1 MB is refused before parsing.
+        if (manifest.content().length > MAX_MANIFEST_BYTES) {
+            result.error("plugin.manifest-too-large",
+                    manifestName + " exceeds the host's 1 MB manifest limit");
         }
         JsonNode json;
         try {
@@ -149,6 +184,10 @@ public class PackageScanner {
             result.error("plugin.version-mismatch",
                     "Manifest version " + result.manifestVersion + " does not match release version "
                             + expectedVersion);
+        } else if (!FengYuHostRules.SEMVER_PATTERN.matcher(result.manifestVersion).matches()) {
+            // Host: SemanticVersion.isValid — a manifest version the host cannot parse
+            // would fail install even when it happens to equal the release version.
+            result.error("plugin.version-format", "Plugin version must be semantic versioning");
         }
         // The host resolves the UI through ui.entry (not the legacy entry field).
         JsonNode uiEntry = json.path("ui").path("entry");
@@ -179,17 +218,142 @@ public class PackageScanner {
         String engines = text(json.path("engines"), "fengyu");
         if (engines != null && !FengYuHostRules.hostCompatibleRange(engines)) {
             result.error("plugin.engines-syntax",
-                    "engines.fengyu must use host-compatible range syntax "
-                            + "(>= <= > < = only; no ^ ~ x *)");
+                    "engines.fengyu must be a valid FengYu range: comparators "
+                            + "(>=4.0.0, <5.0.0, =4.0.0), npm-style ^4.1.2 / ~4.1.2, wildcards "
+                            + "* / 1.x / 1.2.x, combined by spaces and ||");
         }
-        String backend = text(json.path("backend"), "runtime");
-        if (backend != null && !FengYuHostRules.pluginBackendRuntimes().contains(backend)) {
+        JsonNode backend = json.path("backend");
+        String backendRuntime = text(backend, "runtime");
+        if (backendRuntime != null
+                && !FengYuHostRules.pluginBackendRuntimes().contains(backendRuntime)) {
             result.error("plugin.backend-runtime",
                     "backend.runtime must be one of " + FengYuHostRules.pluginBackendRuntimes());
         }
+        validateBackendContract(json, backend, backendRuntime, files, result);
         scanContents(files, result);
         result.sbom = SbomGenerator.generate(typeLabel, expectedVersion,
                 Ed25519Signer.sha256Hex(content), files);
+    }
+
+    /**
+     * Install-time contract of a declared {@code backend} block, mirrored from the host's
+     * {@code PluginPackageService.validate} (worker artifact presence, protocol version,
+     * timeout / resource ceilings, rpc method table, AI tool references) so a store approval
+     * cannot be rejected at install time over a block the store never looked at.
+     *
+     * <p>Known gaps, still enforced by the host at install time: flowNodes / i18n
+     * flow-overlay validation and PluginHostVersion.requireCompatible (both depend on
+     * host-side state — the bundled builtin list and the running host version).</p>
+     */
+    private void validateBackendContract(JsonNode json, JsonNode backend, String backendRuntime,
+            Map<String, SafeZip.ExtractedFile> files, ScanResult result) {
+        if (!backend.isObject()) {
+            return;
+        }
+        // Host defaults a missing runtime to java, then requires the conventional artifact.
+        String runtime = backendRuntime == null || backendRuntime.isBlank()
+                ? "java" : backendRuntime;
+        // The store cannot know the installing host's OS; for `go` either flavor counts.
+        boolean workerPresent = files.containsKey(FengYuHostRules.workerArtifact(runtime, false))
+                || (runtime.equals("go")
+                        && files.containsKey(FengYuHostRules.workerArtifact("go", true)));
+        if (!workerPresent) {
+            result.error("plugin.backend-artifact-missing",
+                    "Plugin backend artifact does not exist: "
+                            + FengYuHostRules.workerArtifact(runtime, false));
+        }
+        JsonNode protocol = backend.path("protocolVersion");
+        if (protocol.isInt() && protocol.asInt() != 1) {
+            result.error("plugin.backend-protocol-version",
+                    "Unsupported backend.protocolVersion: " + protocol.asInt());
+        }
+        JsonNode timeout = backend.path("callTimeoutSeconds");
+        if (timeout.isNumber() && (timeout.asLong() < MIN_TIMEOUT_SECONDS
+                || timeout.asLong() > MAX_TIMEOUT_SECONDS)) {
+            result.error("plugin.backend-timeout",
+                    "backend.callTimeoutSeconds must be between "
+                            + MIN_TIMEOUT_SECONDS + " and " + MAX_TIMEOUT_SECONDS + " seconds");
+        }
+        JsonNode resources = backend.path("resources");
+        if (resources.isObject()) {
+            JsonNode memoryMb = resources.path("memoryMb");
+            if (memoryMb.isNumber() && (memoryMb.asLong() < 64 || memoryMb.asLong() > 8192)) {
+                result.error("plugin.backend-resources",
+                        "backend.resources.memoryMb must be between 64 and 8192");
+            }
+            JsonNode maxProcesses = resources.path("maxProcesses");
+            if (maxProcesses.isInt() && (maxProcesses.asInt() < 1 || maxProcesses.asInt() > 64)) {
+                result.error("plugin.backend-resources",
+                        "backend.resources.maxProcesses must be between 1 and 64");
+            }
+        }
+
+        // T2-04: a declared worker must expose at least one rpc method, and every
+        // schema must be a JSON-Schema OBJECT node (never an escaped string).
+        JsonNode methods = json.path("rpc").path("methods");
+        boolean hasMethods = methods.isObject() && methods.size() > 0;
+        if (!hasMethods) {
+            result.error("plugin.rpc-methods-missing",
+                    "Plugin declares a backend but no rpc.methods — a worker must expose "
+                            + "at least one method");
+        }
+        if (methods.isObject()) {
+            methods.fields().forEachRemaining(method -> {
+                if (!isObjectSchema(method.getValue().path("inputSchema"))) {
+                    result.error("plugin.rpc-schema", "rpc.methods." + method.getKey()
+                            + ".inputSchema must be a JSON object schema");
+                }
+                JsonNode outputSchema = method.getValue().path("outputSchema");
+                if (!outputSchema.isMissingNode() && !outputSchema.isNull()
+                        && !isObjectSchema(outputSchema)) {
+                    result.error("plugin.rpc-schema", "rpc.methods." + method.getKey()
+                            + ".outputSchema must be a JSON object schema");
+                }
+                JsonNode methodTimeout = method.getValue().path("timeoutSeconds");
+                if (methodTimeout.isNumber() && (methodTimeout.asLong() < MIN_TIMEOUT_SECONDS
+                        || methodTimeout.asLong() > MAX_TIMEOUT_SECONDS)) {
+                    result.error("plugin.rpc-timeout", "rpc.methods." + method.getKey()
+                            + ".timeoutSeconds must be between " + MIN_TIMEOUT_SECONDS
+                            + " and " + MAX_TIMEOUT_SECONDS + " seconds");
+                }
+            });
+        }
+
+        // AI tools reference rpc methods by name and carry mandatory effect metadata.
+        java.util.Set<String> toolNames = new java.util.HashSet<>();
+        JsonNode aiTools = json.path("aiTools");
+        if (aiTools.isArray()) {
+            for (JsonNode tool : aiTools) {
+                String name = text(tool, "name");
+                if (name == null || isBlank(name) || !toolNames.add(name)) {
+                    result.error("plugin.ai-tool", "Invalid or duplicate AI tool name: " + name);
+                    continue;
+                }
+                String method = text(tool, "method");
+                if (isBlank(method) || !methods.has(method)) {
+                    result.error("plugin.ai-tool",
+                            "AI tool " + name + " references unknown method: " + method);
+                }
+                String effect = text(tool, "effect");
+                if (effect == null
+                        || !java.util.Set.of("read", "write", "external").contains(effect)) {
+                    result.error("plugin.ai-tool", "Invalid effect for AI tool " + name);
+                }
+                JsonNode toolTimeout = tool.path("timeoutSeconds");
+                if (toolTimeout.isNumber() && (toolTimeout.asLong() < MIN_TIMEOUT_SECONDS
+                        || toolTimeout.asLong() > MAX_TIMEOUT_SECONDS)) {
+                    result.error("plugin.ai-tool", "AI tool " + name
+                            + ".timeoutSeconds must be between " + MIN_TIMEOUT_SECONDS
+                            + " and " + MAX_TIMEOUT_SECONDS + " seconds");
+                }
+            }
+        }
+    }
+
+    /** A JsonNode is a valid OBJECT input/output schema when it has {@code type:"object"}. */
+    private static boolean isObjectSchema(JsonNode schema) {
+        return schema != null && schema.isObject()
+                && schema.has("type") && "object".equals(schema.get("type").asText());
     }
 
     // ---- SKILL (.fys zip with manifest.json + SKILL.md) ----
@@ -282,6 +446,11 @@ public class PackageScanner {
                 if (total > limits.maxTotalBytes()) {
                     throw new ScanViolation("zip.total-too-large",
                             "Archive exceeds the total uncompressed size limit");
+                }
+                // Host SkillPackageService.extract: expanded content is capped at 50 MB.
+                if (total > MAX_SKILL_EXPANDED_BYTES) {
+                    throw new ScanViolation("skill.total-too-large",
+                            "Archive exceeds the host's 50 MB expanded size limit");
                 }
                 if (compressed > 0 && size / compressed > limits.maxRatio()) {
                     throw new ScanViolation("zip.bomb",
