@@ -164,6 +164,8 @@ export default {
     downloadFailed: '下载失败——票据可能已过期，请重试。',
     downloadPackage: '下载安装包',
     downloadPackageHint: '下载的安装包可在主程序「本地安装」中导入安装，包含签名与校验信息。',
+    packageDownloaded: '安装包已下载——在主程序「本地安装」中导入即可完成安装。',
+    installDownloadFailed: '安装包下载失败，请重试；也可在「版本」标签页直接下载。',
     packageDownloadFailed: '安装包下载失败，请重试。',
     signatureNote: '发布信封使用 Ed25519 平台签名，每次下载都会校验。',
     sha256: 'SHA-256',

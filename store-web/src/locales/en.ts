@@ -167,6 +167,8 @@ export default {
     downloadFailed: 'Download failed — the ticket may have expired. Try again.',
     downloadPackage: 'Download install package',
     downloadPackageHint: 'The downloaded package imports through the app\'s local install mode, with signature and checksums included.',
+    packageDownloaded: 'Install package downloaded — import it in the app\'s local install mode to finish installing.',
+    installDownloadFailed: 'Could not download the install package — try again, or download it from the Versions tab.',
     packageDownloadFailed: 'Package download failed. Try again.',
     signatureNote: 'Ed25519 platform signature over the release envelope; verified on every download.',
     sha256: 'SHA-256',

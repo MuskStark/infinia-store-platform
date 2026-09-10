@@ -7,10 +7,10 @@ import ListingDetailView from '../src/views/ListingDetailView.vue';
 import en from '../src/locales/en';
 
 /**
- * Web download of offline install packages (goal: 从网页直接下载插件等制品):
- * the listing detail page must offer the package download for installable
- * listings, target the right release endpoint, and stay retryable after a
- * failed attempt.
+ * Web download of offline install packages (goal: 从网页直接下载插件等制品).
+ * One CTA: the 获取/Get button runs the permission-aware resolve → confirm
+ * machine and downloads the install package on confirm — no second download
+ * button next to it. The versions tab keeps per-release direct downloads.
  */
 
 const RELEASE_ID = '11111111-1111-7111-8111-111111111111';
@@ -80,8 +80,15 @@ vi.mock('../src/api/client', () => ({
       }
       throw new Error('unexpected GET ' + path);
     }),
-    post: vi.fn(async () => {
-      throw new Error('unexpected POST');
+    post: vi.fn(async (path: string) => {
+      if (path === '/api/v1/resolutions') {
+        return {
+          resolvable: true,
+          plan: [{ coordinate: pluginDetail.coordinate, alreadyInstalled: false }],
+          missing: [],
+        };
+      }
+      throw new Error('unexpected POST ' + path);
     }),
     download: (path: string, fallbackName: string) => downloadMock(path, fallbackName),
   },
@@ -123,60 +130,78 @@ beforeEach(() => {
 });
 
 describe('ListingDetailView offline package download (网页直接下载安装包)', () => {
-  it('offers the install package download for an installable PLUGIN listing', async () => {
+  it('shows one Get CTA — no duplicate download button beside it', async () => {
     const wrapper = await mountDetail();
     const buttons = wrapper.findAll('button').map((b) => b.text());
-    expect(buttons).toContain(en.listing.downloadPackage);
-    // The aside explains where the file installs (主程序本地安装).
+    expect(buttons).toContain(en.common.get);
+    expect(buttons).not.toContain(en.listing.downloadPackage);
+    // The aside still explains where the file installs (主程序本地安装).
     expect(wrapper.text()).toContain(en.listing.downloadPackageHint);
     wrapper.unmount();
   });
 
-  it('downloads the latest release install package through api.download', async () => {
+  it('Get → confirm installs by downloading the offline install package', async () => {
     const wrapper = await mountDetail();
-    const button = wrapper.findAll('button').find((b) => b.text() === en.listing.downloadPackage);
-    expect(button).toBeDefined();
-    await button!.trigger('click');
+    await wrapper.findAll('button').find((b) => b.text() === en.common.get)!.trigger('click');
+    await flushPromises();
+
+    // Permission-aware confirm step (design §9.3) before any download.
+    expect(wrapper.text()).toContain(en.listing.confirmInstall);
+    expect(wrapper.text()).toContain(pluginDetail.coordinate);
+
+    // Install fake timers BEFORE the click — the 600ms verifying pause must
+    // be scheduled on them for advanceTimersByTimeAsync to skip it.
+    vi.useFakeTimers();
+    try {
+      await wrapper.findAll('button')
+        .find((b) => b.text() === en.common.confirm)!.trigger('click');
+      await vi.advanceTimersByTimeAsync(700);
+    } finally {
+      vi.useRealTimers();
+    }
     await flushPromises();
     expect(downloadMock).toHaveBeenCalledTimes(1);
     expect(downloadMock).toHaveBeenCalledWith(
       `/api/v1/releases/${RELEASE_ID}/install-package`,
       'official.markdown.zip',
     );
+    // Done state points the user at the host's local install mode.
+    expect(wrapper.text()).toContain(en.listing.packageDownloaded);
     wrapper.unmount();
   });
 
-  it('keeps the download retryable after a failed attempt', async () => {
+  it('a failed package download names the download, not the resolution', async () => {
     downloadMock.mockRejectedValueOnce(new Error('boom'));
     const wrapper = await mountDetail();
-    const button = () =>
-      wrapper.findAll('button').find((b) => b.text() === en.listing.downloadPackage)!;
+    await wrapper.findAll('button').find((b) => b.text() === en.common.get)!.trigger('click');
+    await flushPromises();
+    await wrapper.findAll('button').find((b) => b.text() === en.common.confirm)!.trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain(en.listing.installDownloadFailed);
+    expect(wrapper.text()).not.toContain(en.listing.resolveFailed);
+    wrapper.unmount();
+  });
 
-    await button().trigger('click');
+  it('keeps per-release direct downloads on the versions tab, retryable after failure', async () => {
+    downloadMock.mockRejectedValueOnce(new Error('boom'));
+    const wrapper = await mountDetail();
+    await wrapper.findAll('button').find((b) => b.text() === en.listing.versions)!.trigger('click');
+
+    const packageButton = () =>
+      wrapper.findAll('button').find((b) => b.text() === en.listing.downloadPackage)!;
+    expect(wrapper.findAll('button')
+      .filter((b) => b.text() === en.listing.downloadPackage).length).toBe(1);
+
+    await packageButton().trigger('click');
     await flushPromises();
     expect(wrapper.text()).toContain(en.listing.packageDownloadFailed);
 
     // The button is not disabled by the error state — a second click retries.
-    expect(button().attributes('disabled')).toBeUndefined();
-    await button().trigger('click');
+    expect(packageButton().attributes('disabled')).toBeUndefined();
+    await packageButton().trigger('click');
     await flushPromises();
     expect(downloadMock).toHaveBeenCalledTimes(2);
     expect(wrapper.text()).not.toContain(en.listing.packageDownloadFailed);
-    wrapper.unmount();
-  });
-
-  it('offers per-release downloads on the versions tab for published releases', async () => {
-    const wrapper = await mountDetail();
-    await wrapper.findAll('button').find((b) => b.text() === en.listing.versions)!.trigger('click');
-    const packageButtons = wrapper.findAll('button')
-      .filter((b) => b.text() === en.listing.downloadPackage);
-    expect(packageButtons.length).toBe(2); // CTA rail + one per published release
-    await packageButtons[1]!.trigger('click');
-    await flushPromises();
-    expect(downloadMock).toHaveBeenCalledWith(
-      `/api/v1/releases/${RELEASE_ID}/install-package`,
-      'official.markdown.zip',
-    );
     wrapper.unmount();
   });
 });

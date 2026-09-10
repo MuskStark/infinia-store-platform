@@ -29,11 +29,16 @@ const loading = ref(true);
 const gateRequired = ref<number | null>(null);
 const tab = ref<'overview' | 'versions' | 'permissions' | 'dependencies' | 'compatibility' | 'security' | 'reviews'>('overview');
 
+/** Resolve → confirm (permission aware) → download the offline install
+ *  package (design §9.2, §12.6). The web store cannot install into the host
+ *  itself — confirming hands the user the same installable package the host's
+ *  local install mode consumes. */
 const installStage = ref<
   'idle' | 'resolving' | 'confirm' | 'downloading' | 'verifying' | 'done' | 'failed'
 >('idle');
 const resolution = ref<ResolveResponse | null>(null);
-const ticket = ref<DownloadTicket | null>(null);
+/** Which step failed — the message must not blame resolution for a download error. */
+const failureKind = ref<'resolve' | 'download'>('resolve');
 const favorited = ref(false);
 
 const ratings = ref<RatingsPage | null>(null);
@@ -193,11 +198,13 @@ async function startInstall() {
       },
     });
     if (!resolution.value.resolvable) {
+      failureKind.value = 'resolve';
       installStage.value = 'failed';
       return;
     }
     installStage.value = 'confirm';
   } catch {
+    failureKind.value = 'resolve';
     installStage.value = 'failed';
   }
 }
@@ -206,14 +213,18 @@ async function confirmInstall() {
   if (!latestRelease.value) return;
   installStage.value = 'downloading';
   try {
-    ticket.value = await api.post<DownloadTicket>(
-      `/api/v1/releases/${latestRelease.value.releaseId}/download-ticket`,
+    // Confirming the permission-aware plan downloads the offline install
+    // package — the bytes the host's local install mode imports.
+    await api.download(
+      `/api/v1/releases/${latestRelease.value.releaseId}/install-package`,
+      `${props.namespace}.${props.slug}.zip`,
     );
     installStage.value = 'verifying';
     // Web store verifies metadata; the host performs byte-level SHA-256 + signature.
     await new Promise((resolve) => setTimeout(resolve, 600));
     installStage.value = 'done';
   } catch {
+    failureKind.value = 'download';
     installStage.value = 'failed';
   }
 }
@@ -402,15 +413,6 @@ const installLabel = computed(() => {
             {{ installLabel }}
           </button>
           <button
-            v-if="!isAppListing && latestRelease"
-            class="btn btn-secondary"
-            :disabled="packageDownloads[latestRelease.releaseId] === 'loading'"
-            @click="downloadInstallPackage()"
-          >
-            {{ packageDownloads[latestRelease.releaseId] === 'loading'
-              ? t('listing.downloading') : t('listing.downloadPackage') }}
-          </button>
-          <button
             v-if="isAppListing && recommendedArtifact"
             class="btn btn-primary"
             :disabled="artifactTickets[recommendedArtifact.artifactId ?? ''] === 'loading'"
@@ -420,10 +422,10 @@ const installLabel = computed(() => {
               ? t('listing.downloading') : t('common.download') }}
           </button>
           <p
-            v-if="!isAppListing && packageDownloads[latestRelease?.releaseId ?? ''] === 'error'"
-            class="text-xs text-red-600 dark:text-red-400"
+            v-if="installStage === 'done'"
+            class="text-xs leading-5 text-success dark:text-emerald-400"
           >
-            {{ t('listing.packageDownloadFailed') }}
+            {{ t('listing.packageDownloaded') }}
           </p>
           <ProgressBar v-if="installStage === 'downloading' || installStage === 'verifying'" />
           <button
@@ -440,14 +442,6 @@ const installLabel = computed(() => {
           >
             {{ t('listing.report') }}
           </button>
-          <a
-            v-if="ticket"
-            :href="ticket.url"
-            class="btn btn-secondary text-center"
-            download
-          >
-            {{ t('common.download') }} (sha256:{{ (ticket.sha256 ?? '').slice(0, 12) }}…)
-          </a>
         </div>
       </div>
 
@@ -477,7 +471,8 @@ const installLabel = computed(() => {
         </div>
       </div>
       <p v-else-if="installStage === 'failed'" class="mt-4 text-sm text-red-600 dark:text-red-400">
-        {{ t('listing.resolveFailed') }}
+        {{ failureKind === 'download'
+          ? t('listing.installDownloadFailed') : t('listing.resolveFailed') }}
       </p>
     </header>
 

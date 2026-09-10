@@ -42,8 +42,13 @@
   and legacy virtual `upstream/` artifacts are stored and platform-signed
   first, so a package never ships digest-less bytes. Completed package
   downloads count toward the listing's download counter.
-- The listing page gained a 下载安装包 / Download install package button
-  (CTA rail plus per-release buttons on the versions tab) backed by the new
+- The listing page keeps a single Get CTA: the permission-aware
+  resolve → confirm machine (design §9.2/§12.6) now ends by downloading the
+  offline install package itself — the old simulated install, its raw-ticket
+  download link and the duplicate 下载安装包 rail button are gone. The
+  versions tab keeps per-release package downloads; download failures name
+  the download instead of blaming resolution, and the done state points at
+  the host's local install mode (主程序本地安装). Backed by the new
   `api.download` helper, which streams the response as a Blob and keeps the
   server-side filename from `Content-Disposition`; APP listings keep their
   platform-detected binary download.
