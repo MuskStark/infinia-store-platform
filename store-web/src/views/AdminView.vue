@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type AdminAppRelease, type AdminAppUploadSession, type AdminListing, type AdminUser, type AuditEvent, type DataSourceStatus, type PublisherRelease, type RemoteDatabase, type RemoteDatabaseTestResult, type Report } from '../api/client';
+import { api, type AdminAppRelease, type AdminAppUploadSession, type AdminListing, type AdminUser, type AuditEvent, type DataSourceStatus, type PublisherRelease, type RemoteDatabase, type RemoteDatabaseTestResult, type Report, type Upstream, type UpstreamSyncRun } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -189,25 +189,7 @@ async function toggleUserStatus(user: AdminUser) {
 }
 
 // ---- upstream aggregation (aggregation plan §3/§8) ----
-interface UpstreamRow {
-  upstreamId: string
-  name: string
-  marketplaceUrl: string
-  targetNamespace: string
-  adapterType?: string | null
-  enabled?: boolean
-  lastSyncAt?: string | null
-  lastSyncOk?: boolean | null
-  lastError?: string | null
-}
-interface SyncOutcome {
-  upstream: string
-  imported: number
-  skipped: number
-  failed: number
-  errors: string[]
-}
-const upstreams = ref<UpstreamRow[]>([]);
+const upstreams = ref<Upstream[]>([]);
 const upstreamsLoading = ref(false);
 const newName = ref('');
 const newUrl = ref('');
@@ -215,7 +197,10 @@ const newNamespace = ref('');
 const newAdapter = ref('AUTO');
 const adding = ref(false);
 const syncingId = ref<string | null>(null);
-const lastSync = ref<SyncOutcome | null>(null);
+/** Sync-log viewer: which source is open and its recent runs. */
+const logUpstream = ref<Upstream | null>(null);
+const logRuns = ref<UpstreamSyncRun[] | null>(null);
+const logLoading = ref(false);
 
 async function loadUpstreams() {
   upstreamsLoading.value = true;
@@ -226,6 +211,11 @@ async function loadUpstreams() {
   }
 }
 
+/**
+ * Registration opens a background run server-side, so the list already shows
+ * the new source with 正在同步; the poll settles it into 成功/失败 without
+ * the admin babysitting a request that takes minutes.
+ */
 async function addUpstream() {
   if (!newName.value || !newUrl.value || !newNamespace.value) return;
   adding.value = true;
@@ -248,12 +238,11 @@ async function addUpstream() {
   }
 }
 
-async function syncNow(row: UpstreamRow) {
+async function syncNow(row: Upstream) {
   syncingId.value = row.upstreamId;
-  lastSync.value = null;
   error.value = null;
   try {
-    lastSync.value = await api.syncUpstream(row.upstreamId);
+    await api.syncUpstream(row.upstreamId);
     await Promise.all([loadUpstreams(), loadListings()]);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -262,7 +251,57 @@ async function syncNow(row: UpstreamRow) {
   }
 }
 
-void [upstreamsLoading, adding, syncingId, lastSync];
+async function openSyncLog(row: Upstream) {
+  logUpstream.value = row;
+  logRuns.value = null;
+  logLoading.value = true;
+  try {
+    logRuns.value = await api.getUpstreamSyncRuns(row.upstreamId);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+    logUpstream.value = null;
+  } finally {
+    logLoading.value = false;
+  }
+}
+
+function closeSyncLog() {
+  logUpstream.value = null;
+  logRuns.value = null;
+}
+
+function runStatusTone(status?: string | null): 'success' | 'danger' | 'muted' {
+  if (status === 'OK') return 'success';
+  if (status === 'PARTIAL') return 'danger';
+  return 'muted';
+}
+
+function runStatusLabel(status?: string | null): string {
+  if (status === 'RUNNING') return t('admin.syncSyncing');
+  if (status === 'OK') return t('admin.runOk');
+  if (status === 'PARTIAL') return t('admin.runPartial');
+  return status ?? '—';
+}
+
+/** Refresh the list while a run is open so SYNCING settles on its own. */
+let upstreamPoll: ReturnType<typeof setInterval> | null = null;
+watch(
+  () => tab.value === 'upstreams'
+    && upstreams.value.some((row) => row.syncStatus === 'SYNCING'),
+  (pollWanted) => {
+    if (pollWanted && upstreamPoll === null) {
+      upstreamPoll = setInterval(() => { void loadUpstreams(); }, 4000);
+    } else if (!pollWanted && upstreamPoll !== null) {
+      clearInterval(upstreamPoll);
+      upstreamPoll = null;
+    }
+  },
+);
+onBeforeUnmount(() => {
+  if (upstreamPoll !== null) clearInterval(upstreamPoll);
+});
+
+void [upstreamsLoading, adding, syncingId, logLoading];
 
 // ---- listing curation (design §12.4 管理: 上下架/推荐/Infinia Level 门槛) ----
 const listings = ref<AdminListing[]>([]);
@@ -862,54 +901,123 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           <li
             v-for="row in upstreams"
             :key="row.upstreamId"
-            class="card flex flex-wrap items-center justify-between gap-3 p-4"
+            class="card p-4"
           >
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="font-semibold">{{ row.name }}</span>
-                <Badge tone="muted">{{ row.targetNamespace }}</Badge>
-                <Badge v-if="row.adapterType" tone="accent">{{ row.adapterType }}</Badge>
-                <Badge
-                  v-if="row.lastSyncOk === true"
-                  tone="success"
-                >{{ t('admin.syncOk') }}</Badge>
-                <Badge
-                  v-else-if="row.lastSyncOk === false"
-                  tone="danger"
-                >{{ t('admin.syncFailed') }}</Badge>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold">{{ row.name }}</span>
+                  <Badge tone="muted">{{ row.targetNamespace }}</Badge>
+                  <Badge v-if="row.adapterType" tone="accent">{{ row.adapterType }}</Badge>
+                </div>
+                <code class="block truncate text-xs text-muted">{{ row.marketplaceUrl }}</code>
               </div>
-              <code class="block truncate text-xs text-muted">{{ row.marketplaceUrl }}</code>
-              <p
-                v-if="row.lastError"
-                class="mt-1 max-w-2xl text-xs text-red-600 dark:text-red-400"
-              >
-                {{ row.lastError }}
-              </p>
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  class="btn btn-secondary btn-sm"
+                  :disabled="logLoading && logUpstream?.upstreamId === row.upstreamId"
+                  @click="openSyncLog(row)"
+                >
+                  {{ t('admin.viewLog') }}
+                </button>
+                <button
+                  :disabled="syncingId === row.upstreamId || row.syncStatus === 'SYNCING'"
+                  class="btn btn-primary btn-sm"
+                  @click="syncNow(row)"
+                >
+                  {{ t('admin.syncNow') }}
+                </button>
+              </div>
             </div>
-            <div class="flex items-center gap-2">
-              <span v-if="row.lastSyncAt" class="text-xs text-muted">
+            <!-- Sync state lives under the upstream info: syncing / ok / failed,
+                 with the details one click away instead of an inline error wall. -->
+            <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2.5 text-sm dark:border-slate-800">
+              <template v-if="row.syncStatus === 'SYNCING'">
+                <span class="inline-flex items-center gap-1.5 font-medium text-accent">
+                  <span
+                    class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+                    aria-hidden="true"
+                  />
+                  {{ t('admin.syncSyncing') }}
+                </span>
+              </template>
+              <template v-else-if="row.syncStatus === 'OK'">
+                <span class="inline-flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
+                  <span aria-hidden="true">✓</span>
+                  {{ t('admin.syncOk') }}
+                </span>
+                <span class="text-xs text-muted">
+                  {{ t('admin.syncImported', { n: row.lastRunImported ?? 0 }) }} ·
+                  {{ t('admin.syncSkipped', { n: row.lastRunSkipped ?? 0 }) }}
+                </span>
+              </template>
+              <template v-else-if="row.syncStatus === 'FAILED'">
+                <span class="inline-flex items-center gap-1.5 font-medium text-danger">
+                  <span aria-hidden="true">✗</span>
+                  {{ t('admin.syncFailed') }}
+                </span>
+                <span class="text-xs text-muted">
+                  {{ t('admin.syncFailedCount', { n: row.lastRunFailed ?? 0 }) }}
+                </span>
+              </template>
+              <template v-else>
+                <span class="text-muted">{{ t('admin.syncPending') }}</span>
+              </template>
+              <span v-if="row.lastSyncAt" class="ml-auto text-xs text-muted">
                 {{ formatDateTime(row.lastSyncAt) }}
               </span>
-              <button
-                :disabled="syncingId === row.upstreamId"
-                class="btn btn-primary btn-sm"
-                @click="syncNow(row)"
-              >
-                <span v-if="syncingId === row.upstreamId" class="mr-1 inline-block cx-spin" />
-                {{ t('admin.syncNow') }}
-              </button>
             </div>
           </li>
         </ul>
 
-        <div v-if="lastSync" class="card p-4 text-sm" role="status">
-          <strong>{{ lastSync.upstream }}</strong>:
-          {{ t('admin.syncImported', { n: lastSync.imported }) }} ·
-          {{ t('admin.syncSkipped', { n: lastSync.skipped }) }} ·
-          {{ t('admin.syncFailedCount', { n: lastSync.failed }) }}
-          <ul v-if="lastSync.errors.length" class="mt-2 space-y-1 text-xs text-red-600 dark:text-red-400">
-            <li v-for="e in lastSync.errors" :key="e">{{ e }}</li>
-          </ul>
+        <!-- Sync-log viewer: full per-run detail on demand, not inline on cards. -->
+        <div
+          v-if="logUpstream"
+          class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="t('admin.syncLogTitle', { name: logUpstream.name })"
+          @click.self="closeSyncLog"
+        >
+          <MagicCard class="max-h-[80vh] w-full max-w-2xl overflow-y-auto p-6">
+            <div class="mb-4 flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h3 class="font-semibold">{{ t('admin.syncLogTitle', { name: logUpstream.name }) }}</h3>
+                <code class="block truncate text-xs text-muted">{{ logUpstream.marketplaceUrl }}</code>
+              </div>
+              <button class="btn btn-secondary btn-sm shrink-0" @click="closeSyncLog">
+                {{ t('common.close') }}
+              </button>
+            </div>
+            <p v-if="logLoading" role="status" class="py-8 text-center text-muted">
+              {{ t('common.loading') }}
+            </p>
+            <EmptyState v-else-if="!logRuns?.length" :title="t('admin.syncLogEmpty')" />
+            <ol v-else class="space-y-3">
+              <li
+                v-for="run in logRuns"
+                :key="run.runId"
+                class="rounded-xl border border-line p-3 text-sm dark:border-slate-800"
+              >
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <Badge :tone="runStatusTone(run.status)">{{ runStatusLabel(run.status) }}</Badge>
+                  <span class="text-xs text-muted">
+                    {{ formatDateTime(run.startedAt) }}
+                    <template v-if="run.finishedAt"> → {{ formatDateTime(run.finishedAt) }}</template>
+                  </span>
+                  <span class="ml-auto text-xs text-muted">
+                    {{ t('admin.syncImported', { n: run.imported }) }} ·
+                    {{ t('admin.syncSkipped', { n: run.skipped }) }} ·
+                    {{ t('admin.syncFailedCount', { n: run.failed }) }}
+                  </span>
+                </div>
+                <pre
+                  v-if="run.errors?.length"
+                  class="mt-2 max-h-48 overflow-auto rounded-lg bg-surface-muted p-2.5 text-xs whitespace-pre-wrap break-all text-red-600 dark:bg-slate-900 dark:text-red-400"
+                >{{ run.errors.join('\n') }}</pre>
+              </li>
+            </ol>
+          </MagicCard>
         </div>
       </section>
 

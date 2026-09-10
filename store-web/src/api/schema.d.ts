@@ -1126,8 +1126,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Aggregate the upstream now; imported skills run through the full publish pipeline */
+        /** Start an aggregation run in the background; the console polls the source's syncStatus */
         post: operations["syncUpstream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/upstreams/{upstreamId}/sync-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent sync runs of one source, newest first — the admin sync log */
+        get: operations["listUpstreamSyncRuns"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1944,6 +1961,29 @@ export interface components {
             lastSyncAt?: string | null;
             lastSyncOk?: boolean | null;
             lastError?: string | null;
+            /**
+             * @description Latest-run state; null before the first run
+             * @enum {string|null}
+             */
+            syncStatus?: "SYNCING" | "OK" | "FAILED" | null;
+            /** Format: date-time */
+            lastRunStartedAt?: string | null;
+            lastRunImported?: number | null;
+            lastRunSkipped?: number | null;
+            lastRunFailed?: number | null;
+        };
+        UpstreamSyncRun: {
+            runId?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            imported?: number;
+            skipped?: number;
+            failed?: number;
+            /** @enum {string} */
+            status?: "RUNNING" | "OK" | "PARTIAL";
+            errors?: string[];
         };
         CreateUpstreamRequest: {
             name: string;
@@ -3822,13 +3862,35 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Sync summary */
+            /** @description Run accepted; the source is returned with syncStatus SYNCING */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Upstream"];
+                };
+            };
+        };
+    };
+    listUpstreamSyncRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upstreamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sync runs */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UpstreamSyncResult"];
+                    "application/json": components["schemas"]["UpstreamSyncRun"][];
                 };
             };
         };

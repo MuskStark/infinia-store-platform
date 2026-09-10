@@ -22,4 +22,20 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * Upstream aggregation runs. Kept separate from scanExecutor: a sync waits
+     * on scan-pipeline progress, so sharing one pool could queue the scans a
+     * sync is waiting for behind the sync itself.
+     */
+    @Bean(name = "upstreamSyncExecutor")
+    public ThreadPoolTaskExecutor upstreamSyncExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("upstream-sync-");
+        executor.initialize();
+        return executor;
+    }
 }

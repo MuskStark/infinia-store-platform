@@ -148,10 +148,19 @@ export const api = {
     adapterType?: string
   }) => request<Upstream>('/api/v1/admin/upstreams', { method: 'POST', body: JSON.stringify(body) }),
 
+  /**
+   * Starts a run in the background (202): a full aggregation takes minutes, so
+   * the console polls getUpstreams' syncStatus and reads details from the log.
+   */
   syncUpstream: (upstreamId: string) =>
-    request<UpstreamSyncResult>(
+    request<Upstream>(
       `/api/v1/admin/upstreams/${encodeURIComponent(upstreamId)}/sync`,
       { method: 'POST' },
+    ),
+
+  getUpstreamSyncRuns: (upstreamId: string) =>
+    request<UpstreamSyncRun[]>(
+      `/api/v1/admin/upstreams/${encodeURIComponent(upstreamId)}/sync-runs`,
     ),
 
   // ── Admin user management (Infinia Level · 用户管理) ──
@@ -235,13 +244,7 @@ export type Upstream = Partial<components['schemas']['Upstream']> & {
   marketplaceUrl: string
   targetNamespace: string
 };
-export type UpstreamSyncResult = {
-  upstream: string
-  imported: number
-  skipped: number
-  failed: number
-  errors: string[]
-};
+export type UpstreamSyncRun = components['schemas']['UpstreamSyncRun'];
 export type CatalogItem = components['schemas']['CatalogItem'];
 export type CatalogPage = components['schemas']['CatalogPage'];
 export type ListingDetail = components['schemas']['ListingDetail'];

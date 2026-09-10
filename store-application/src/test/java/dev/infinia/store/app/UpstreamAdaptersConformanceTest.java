@@ -82,7 +82,8 @@ class UpstreamAdaptersConformanceTest {
                         "targetNamespace", ns, "adapterType", "MCP_REGISTRY"),
                 Map.class).getBody();
         String upstreamId = (String) created.get("upstreamId");
-        assertEquals(Boolean.TRUE, created.get("lastSyncOk"), "body: " + created);
+        assertEquals("SYNCING", created.get("syncStatus"), "body: " + created);
+        awaitSourceRow(admin, upstreamId, Boolean.TRUE);
 
         // The MCP entry is materialized into a stored, digest-carrying template.
         List<Map<String, Object>> mcp = (List<Map<String, Object>>) http()
@@ -101,9 +102,7 @@ class UpstreamAdaptersConformanceTest {
                 "provenance row recorded");
 
         // Re-sync is idempotent via the exact content digest.
-        Map second = (Map) http().exchangeJson(HttpMethod.POST,
-                "/api/v1/admin/upstreams/" + upstreamId + "/sync", jsonAuth(admin), null,
-                Map.class).getBody();
+        Map second = triggerSyncAndAwait(admin, upstreamId);
         assertEquals(0, ((Number) second.get("imported")).intValue());
         assertEquals(1, ((Number) second.get("skipped")).intValue(), "body: " + second);
 
@@ -130,9 +129,7 @@ class UpstreamAdaptersConformanceTest {
         var stillServed = http().get(downloadUrl.replaceFirst("^http://[^/]+", ""), null);
         assertEquals(200, stillServed.getStatusCode().value(),
                 "published bytes are immutable — drift must not break existing downloads");
-        Map resync = (Map) http().exchangeJson(HttpMethod.POST,
-                "/api/v1/admin/upstreams/" + upstreamId + "/sync", jsonAuth(admin), null,
-                Map.class).getBody();
+        Map resync = triggerSyncAndAwait(admin, upstreamId);
         assertEquals(1, ((Number) resync.get("imported")).intValue(),
                 "drifted metadata must publish a new release: " + resync);
         List<Map<String, Object>> refreshed = (List<Map<String, Object>>) http()
@@ -202,8 +199,10 @@ class UpstreamAdaptersConformanceTest {
                         "marketplaceUrl", "http://127.0.0.1:169.254.169.254/latest/meta-data",
                         "targetNamespace", "blocked"),
                 Map.class).getBody();
-        assertEquals(Boolean.FALSE, created.get("lastSyncOk"));
-        String error = String.valueOf(created.get("lastError")).toLowerCase();
+        String blockedId = (String) created.get("upstreamId");
+        Map<String, Object> blockedRow = awaitSourceRow(admin, blockedId, Boolean.FALSE);
+        assertEquals(Boolean.FALSE, blockedRow.get("lastSyncOk"));
+        String error = String.valueOf(blockedRow.get("lastError")).toLowerCase();
         assertTrue(error.contains("blocked") || error.contains("resolve")
                         || error.contains("aborted") || error.contains("no host"),
                 "SSRF attempt must fail loudly: " + created);
@@ -236,7 +235,8 @@ class UpstreamAdaptersConformanceTest {
                         "http://127.0.0.1:" + skillhubPort, "targetNamespace", ns,
                         "adapterType", "SKILLHUB_REGISTRY"),
                 Map.class).getBody();
-        assertEquals(Boolean.TRUE, created.get("lastSyncOk"), "body: " + created);
+        assertEquals("SYNCING", created.get("syncStatus"), "body: " + created);
+        awaitSourceRow(admin, (String) created.get("upstreamId"), Boolean.TRUE);
         assertEquals(2, skillhubPayloadRequests.get(),
                 "the sync materializes each referenced skill zip exactly once");
 
@@ -261,9 +261,7 @@ class UpstreamAdaptersConformanceTest {
                 "provenance rows recorded for both skills");
 
         // Re-sync is idempotent via the exact metadata digest.
-        Map second = (Map) http().exchangeJson(HttpMethod.POST,
-                "/api/v1/admin/upstreams/" + created.get("upstreamId") + "/sync",
-                jsonAuth(admin), null, Map.class).getBody();
+        Map second = triggerSyncAndAwait(admin, (String) created.get("upstreamId"));
         assertEquals(0, ((Number) second.get("imported")).intValue(), "body: " + second);
         assertEquals(2, ((Number) second.get("skipped")).intValue());
 
@@ -298,13 +296,51 @@ class UpstreamAdaptersConformanceTest {
         var stillServed = http().get(dl.replaceFirst("^http://[^/]+", ""), null);
         assertEquals(200, stillServed.getStatusCode().value(),
                 "published bytes are immutable — drift must not break existing downloads");
-        Map resync = (Map) http().exchangeJson(HttpMethod.POST,
-                "/api/v1/admin/upstreams/" + created.get("upstreamId") + "/sync",
-                jsonAuth(admin), null, Map.class).getBody();
+        Map resync = triggerSyncAndAwait(admin, (String) created.get("upstreamId"));
         assertEquals(1, ((Number) resync.get("imported")).intValue(),
                 "drifted skill must re-publish: " + resync);
         assertEquals(3, skillhubPayloadRequests.get(),
                 "the re-published payload is fetched exactly once more");
+    }
+
+    /** Syncs run in the background; poll the source row until it reports expectOk. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> awaitSourceRow(String admin, String upstreamId,
+            Boolean expectOk) throws Exception {
+        for (int i = 0; i < 150; i++) {
+            List listed = (List) http().getJson("/api/v1/admin/upstreams", List.class,
+                    Http.bearer(admin)).getBody();
+            Map<String, Object> row = (Map<String, Object>) listed.stream()
+                    .filter(s -> upstreamId.equals(((Map<?, ?>) s).get("upstreamId")))
+                    .findFirst().orElseThrow();
+            if (expectOk.equals(row.get("lastSyncOk"))) {
+                return row;
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("sync of " + upstreamId + " never settled to " + expectOk);
+    }
+
+    /** Triggers a run and polls the sync log until the newest run settles. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> triggerSyncAndAwait(String admin, String upstreamId)
+            throws Exception {
+        var accepted = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/admin/upstreams/" + upstreamId + "/sync", jsonAuth(admin), null,
+                Map.class);
+        assertEquals(202, accepted.getStatusCode().value());
+        for (int i = 0; i < 150; i++) {
+            List runs = (List) http().getJson(
+                    "/api/v1/admin/upstreams/" + upstreamId + "/sync-runs", List.class,
+                    Http.bearer(admin)).getBody();
+            Map<String, Object> latest = (Map<String, Object>) runs.stream().findFirst()
+                    .orElseThrow();
+            if (!"RUNNING".equals(latest.get("status"))) {
+                return latest;
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("run of " + upstreamId + " never settled");
     }
 
     private final java.util.concurrent.atomic.AtomicInteger skillhubPayloadRequests =

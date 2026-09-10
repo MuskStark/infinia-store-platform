@@ -39,5 +39,11 @@ public final class UpstreamRepositories {
 
     public interface SyncRunRepository {
         void save(SyncRun run);
+
+        /** Latest run of one source, whatever its status — the sync-state source. */
+        Optional<SyncRun> findLatestBySourceId(UUID sourceId);
+
+        /** Recent runs of one source, newest first — the admin sync log. */
+        List<SyncRun> findRecentBySourceId(UUID sourceId, int limit);
     }
 }

@@ -36,6 +36,7 @@ import dev.infinia.store.domain.service.UuidV7;
 import dev.infinia.store.scanner.ScanResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -44,6 +45,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -97,7 +99,8 @@ public class UpstreamSyncService {
             ClaudeMarketplaceAdapter claude,
             SkillRepositoryAdapter skillRepo, McpRegistryAdapter mcpRegistry,
             SkillHubAdapter skillhub,
-            dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts) {
+            dev.infinia.store.app.upstream.UpstreamArtifactService upstreamArtifacts,
+            @Qualifier("upstreamSyncExecutor") org.springframework.core.task.TaskExecutor syncExecutor) {
         this.upstreams = upstreams;
         this.upstreamItems = upstreamItems;
         this.upstreamReleases = upstreamReleases;
@@ -114,10 +117,16 @@ public class UpstreamSyncService {
         this.packageBuilder = packageBuilder;
         this.adapters = List.of(claude, skillRepo, mcpRegistry, skillhub);
         this.upstreamArtifacts = upstreamArtifacts;
+        this.syncExecutor = syncExecutor;
     }
 
     public record SyncResult(String upstream, int imported, int skipped, int failed,
             List<String> errors) {}
+
+    /** A run older than this while still marked RUNNING is a crash leftover. */
+    private static final Duration RUNNING_STALENESS = Duration.ofHours(6);
+
+    private final org.springframework.core.task.TaskExecutor syncExecutor;
 
     // Deliberately not @Transactional: the review wait polls for progress committed
     // by the async scan worker; each publisher/review call manages its own transaction.
@@ -125,9 +134,39 @@ public class UpstreamSyncService {
         UpstreamSource source = upstreams.findById(upstreamId)
                 .orElseThrow(() -> new DomainException(dev.infinia.store.contract.error
                         .StoreErrorCode.NOT_FOUND, "Upstream source not found"));
+        return execute(source, openRun(source));
+    }
+
+    /**
+     * Opens the run row synchronously (so the admin UI sees 正在同步 the moment
+     * the request returns) and executes the aggregation on the background
+     * executor. A run already in flight for the source is returned instead —
+     * registration and "sync now" must not pile up concurrent runs.
+     */
+    public SyncRun startBackgroundSync(UUID upstreamId) {
+        UpstreamSource source = upstreams.findById(upstreamId)
+                .orElseThrow(() -> new DomainException(dev.infinia.store.contract.error
+                        .StoreErrorCode.NOT_FOUND, "Upstream source not found"));
+        SyncRun inFlight = syncRuns.findLatestBySourceId(upstreamId)
+                .filter(run -> "RUNNING".equals(run.status())
+                        && run.startedAt().isAfter(Instant.now().minus(RUNNING_STALENESS)))
+                .orElse(null);
+        if (inFlight != null) {
+            return inFlight;
+        }
+        SyncRun run = openRun(source);
+        syncExecutor.execute(() -> execute(source, run));
+        return run;
+    }
+
+    private SyncRun openRun(UpstreamSource source) {
         SyncRun run = new SyncRun(UuidV7.generate(), source.id(), Instant.now(), null,
                 0, 0, 0, "RUNNING", null);
         syncRuns.save(run);
+        return run;
+    }
+
+    private SyncResult execute(UpstreamSource source, SyncRun run) {
         List<String> errors = new ArrayList<>();
         int imported = 0;
         int skipped = 0;
@@ -407,7 +446,9 @@ public class UpstreamSyncService {
     private SyncRun finished(SyncRun run, int imported, int skipped, List<String> errors) {
         return new SyncRun(run.id(), run.sourceId(), run.startedAt(), Instant.now(),
                 imported, skipped, errors.size(), errors.isEmpty() ? "OK" : "PARTIAL",
-                errors.isEmpty() ? null : clamp(String.join("; ", errors), 4000));
+                // One error per line: the admin log viewer renders the stored blob
+                // verbatim, and "; " separators read as one unreadable wall of text.
+                errors.isEmpty() ? null : clamp(String.join("\n", errors), 4000));
     }
 
     private static String clamp(String value, int max) {

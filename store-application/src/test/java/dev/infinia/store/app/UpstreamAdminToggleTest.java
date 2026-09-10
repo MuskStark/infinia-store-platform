@@ -55,7 +55,9 @@ class UpstreamAdminToggleTest {
                 Map.class);
         assertEquals(HttpStatus.CREATED, created.getStatusCode());
         String upstreamId = (String) created.getBody().get("upstreamId");
-        assertEquals(Boolean.FALSE, created.getBody().get("lastSyncOk"));
+        assertEquals("SYNCING", created.getBody().get("syncStatus"),
+                "registration returns while the background run is open");
+        awaitUpstreamOutcome(admin, upstreamId, Boolean.FALSE);
 
         assertEquals(dev.infinia.store.app.service.StatusService.DEGRADED,
                 awaitUpstreamIndicator(dev.infinia.store.app.service.StatusService.DEGRADED),
@@ -93,6 +95,22 @@ class UpstreamAdminToggleTest {
             indicator = upstreamIndicator();
         }
         return indicator;
+    }
+
+    /** The background run settles asynchronously; poll the list until it has. */
+    private void awaitUpstreamOutcome(String admin, String upstreamId, Boolean expectOk)
+            throws InterruptedException {
+        for (long deadline = System.currentTimeMillis() + 15_000;
+                System.currentTimeMillis() < deadline; Thread.sleep(150)) {
+            ResponseEntity<List> listed = http().getJson("/api/v1/admin/upstreams",
+                    List.class, Http.bearer(admin));
+            Map<String, Object> row = (Map<String, Object>) listed.getBody().stream()
+                    .filter(s -> upstreamId.equals(((Map<?, ?>) s).get("upstreamId")))
+                    .findFirst().orElseThrow();
+            if (expectOk.equals(row.get("lastSyncOk"))) {
+                return;
+            }
+        }
     }
 
     @SuppressWarnings("unchecked")

@@ -1382,17 +1382,35 @@ paths:
     post:
       operationId: syncUpstream
       tags: [Admin]
-      summary: Aggregate the upstream now; imported skills run through the full publish pipeline
+      summary: Start an aggregation run in the background; the console polls the source's syncStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: upstreamId, in: path, required: true, schema: { type: string } }
+      responses:
+        '202':
+          description: Run accepted; the source is returned with syncStatus SYNCING
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Upstream' }
+
+  /admin/upstreams/{upstreamId}/sync-runs:
+    get:
+      operationId: listUpstreamSyncRuns
+      tags: [Admin]
+      summary: Recent sync runs of one source, newest first — the admin sync log
       security:
         - bearerAuth: []
       parameters:
         - { name: upstreamId, in: path, required: true, schema: { type: string } }
       responses:
         '200':
-          description: Sync summary
+          description: Sync runs
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/UpstreamSyncResult' }
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UpstreamSyncRun' }
 
   /organizations:
     post:
@@ -2317,6 +2335,25 @@ components:
         lastSyncAt: { type: string, format: date-time, nullable: true }
         lastSyncOk: { type: boolean, nullable: true }
         lastError: { type: string, nullable: true }
+        syncStatus: { type: string, nullable: true, enum: [SYNCING, OK, FAILED], description: Latest-run state; null before the first run }
+        lastRunStartedAt: { type: string, format: date-time, nullable: true }
+        lastRunImported: { type: integer, nullable: true }
+        lastRunSkipped: { type: integer, nullable: true }
+        lastRunFailed: { type: integer, nullable: true }
+
+    UpstreamSyncRun:
+      type: object
+      properties:
+        runId: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+        imported: { type: integer }
+        skipped: { type: integer }
+        failed: { type: integer }
+        status: { type: string, enum: [RUNNING, OK, PARTIAL] }
+        errors:
+          type: array
+          items: { type: string }
 
     CreateUpstreamRequest:
       type: object

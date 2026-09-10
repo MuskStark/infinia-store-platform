@@ -78,6 +78,12 @@ public final class ReviewDtos {
 
     public record ResolveReportRequest(String resolution, String note) {}
 
+    /**
+     * Admin view of one aggregated source. {@code syncStatus} folds the latest
+     * sync run into the state the console renders: SYNCING while a run is open,
+     * OK/FAILED from the last completed one, null before the first run ever
+     * finishes.
+     */
     public record UpstreamDto(
             String upstreamId,
             String name,
@@ -87,7 +93,23 @@ public final class ReviewDtos {
             boolean enabled,
             String lastSyncAt,
             Boolean lastSyncOk,
-            String lastError) {}
+            String lastError,
+            String syncStatus,
+            String lastRunStartedAt,
+            Integer lastRunImported,
+            Integer lastRunSkipped,
+            Integer lastRunFailed) {}
+
+    /** One sync run as shown by the admin sync-log viewer. */
+    public record UpstreamSyncRunDto(
+            String runId,
+            String startedAt,
+            String finishedAt,
+            int imported,
+            int skipped,
+            int failed,
+            String status,
+            List<String> errors) {}
 
     public record AdminListingDto(
             String listingId,

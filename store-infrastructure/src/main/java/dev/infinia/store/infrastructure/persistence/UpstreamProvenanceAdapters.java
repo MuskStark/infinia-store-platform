@@ -140,5 +140,23 @@ class UpstreamProvenanceAdapters {
             e.errors = run.errors();
             jpa.save(e);
         }
+
+        @Override
+        public Optional<SyncRun> findLatestBySourceId(UUID sourceId) {
+            return jpa.findTop1BySourceIdOrderByStartedAtDesc(sourceId)
+                    .map(SyncRunAdapter::toDomain);
+        }
+
+        @Override
+        public List<SyncRun> findRecentBySourceId(UUID sourceId, int limit) {
+            return jpa.findBySourceIdOrderByStartedAtDesc(sourceId,
+                            org.springframework.data.domain.PageRequest.of(0, limit)).stream()
+                    .map(SyncRunAdapter::toDomain).toList();
+        }
+
+        private static SyncRun toDomain(SyncRunEntity e) {
+            return new SyncRun(e.id, e.sourceId, e.startedAt, e.finishedAt, e.imported,
+                    e.skipped, e.failed, e.status, e.errors);
+        }
     }
 }

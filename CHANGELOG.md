@@ -2,6 +2,83 @@
 
 ## Unreleased
 
+### Publisher center: step-by-step wizard, package autofill, status board, release deletion
+
+- The Publishing Center is now a focused 3-step wizard in one centered card —
+  ① select or create a listing → ② create or resume a release → ③ upload &
+  submit. Steps unlock in order (walk back any time), drafts resume straight
+  at the upload step, and the Infinia Level gate moved to the listing detail
+  page so publishing stays a single-purpose flow.
+- Creating a listing can read the basics straight from the `.fyp` package:
+  drop the plugin into step ① and name / slug / summary / type (plus the
+  release version and host range for step ②) are prefilled from its
+  `manifest.json` — the hand-typed version mismatch class of rejections is
+  gone. Client-side parse via `fflate` with host-contract validation and
+  distinct error reasons.
+- Step ① groups listings by where their flow stands — 需要处理 (draft /
+  rejected / changes requested), 流程中 (scanning / in review), 已发布,
+  暂无版本 — each card carrying the focus release's status chip and version,
+  refreshed whenever the wizard returns to step ①.
+- Publishers can delete an abandoned unpublished release (draft, rejected,
+  changes requested, in review) from step ③ — `DELETE
+  /api/v1/publisher/releases/{id}`, owner-only, hard delete with the
+  RELEASE_DELETED outbox event and audit trail. Published / withdrawn
+  releases refuse deletion (409); withdrawing stays an admin action.
+
+### PLATFORM_ADMIN may decide their own releases
+
+- The self-review guard ("Reviewers cannot review their own releases") now
+  exempts platform admins — the same trust root the admin force-publish and
+  admin-upload paths already use. Ordinary reviewers keep the guard; the
+  decision is still audited under the admin's own id.
+
+### Scanner: archive-size cap fix + full FengYu host-rule mirror
+
+- Fixed a rejection loop: the disk-backed scan entry applied the 16 MiB
+  non-archive-template read-back cap to every non-SKILL type, so plugin
+  `.fyp` packages between 16 and 100 MB were always rejected as
+  `scanner.file-too-large`. Archives (PLUGIN/FLOW) are now capped at the
+  host's 100 MB package limit, SKILL keeps its streaming scan with the
+  host's 10/50 MB ceilings, and MCP templates stay at 16 MiB.
+- `FengYuHostRules` now mirrors the host's current grammar: npm-style engine
+  ranges (`^4.1.0`, `~4.1.2`, `4.x`, `1.2.x`, `*`, bare partials) are
+  accepted (the host added them in its P3 batch; the store used to reject
+  packages the host installs fine), and the manifest mirror gained the
+  backend install-time contract — worker artifact presence,
+  `protocolVersion`, timeout/resource ceilings, non-empty `rpc.methods`
+  with OBJECT schemas, AI-tool method references and `effect` metadata,
+  1 MB manifest cap and strict SemVer version format.
+
+### Upstream sync runs in the background with a visible state
+
+- Registering an upstream no longer blocks the request for the whole first
+  aggregation (minutes): the run opens on a dedicated executor and the create
+  response returns immediately with `syncStatus=SYNCING`. "Sync now" (POST
+  `…/sync`) does the same and answers `202`. A second run on a source whose
+  latest run is still RUNNING is refused in favor of the open one, so
+  registration and manual triggers cannot pile up concurrent runs.
+- The admin console shows one status line per source — 正在同步… / 同步成功 /
+  同步失败 with imported·skipped·failed counts — refreshed by a poll while any
+  run is open, and the raw error blob moved off the card into a new sync-log
+  dialog (`GET /api/v1/admin/upstreams/{id}/sync-runs`, latest 20 runs with
+  per-run timings, counts and one error per line).
+- `Upstream` DTO/contract gained `syncStatus`, `lastRunStartedAt` and
+  `lastRun{Imported,Skipped,Failed}`; `UpstreamSyncRun` is new. Stored run
+  errors are newline-joined (legacy `"; "` rows still render), and
+  `V14__sync_run_source_index.sql` indexes `sync_run (source_id, started_at)`
+  for the new queries.
+
+### Sign-in navigation hardening
+
+- Sign-in now adopts the user carried by the login/register response and
+  navigates immediately instead of waiting on a second `/api/v1/me` round-trip
+  that could leave the form looking dead; if the SPA navigation itself fails
+  (stale shell after a redeploy), a full page load takes the user to the
+  redirect target instead of stranding them on the sign-in page.
+- The SPA entry script carries `data-cfasync="false"` so Cloudflare Rocket
+  Loader stops rewriting `type="module"` into its own loader (a known SPA
+  breaker). Disabling Rocket Loader for the zone remains the cleaner fix.
+
 ### Automated production deploys (CI → SSH)
 
 - `ci.yml` gained a `deploy` job: after `backend`/`frontend`/`images` are

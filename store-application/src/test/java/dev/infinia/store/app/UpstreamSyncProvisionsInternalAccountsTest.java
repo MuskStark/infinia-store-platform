@@ -81,8 +81,10 @@ class UpstreamSyncProvisionsInternalAccountsTest {
                 Map.class);
         assertEquals(HttpStatus.CREATED, created.getStatusCode(),
                 "sync must succeed without seeded accounts: " + created.getBody());
-        assertEquals(Boolean.TRUE, ((Map<String, Object>) created.getBody()).get("lastSyncOk"),
-                "body: " + created.getBody());
+        assertEquals("SYNCING", ((Map<String, Object>) created.getBody()).get("syncStatus"),
+                "registration returns while the background run is open");
+        String upstreamId = (String) ((Map<String, Object>) created.getBody()).get("upstreamId");
+        awaitSyncOk(adminToken, upstreamId);
 
         // The aggregated skill is published and visible through the host surface.
         ResponseEntity<List> skills = http().getJson(
@@ -102,6 +104,23 @@ class UpstreamSyncProvisionsInternalAccountsTest {
 
     private Http http() {
         return new Http(port);
+    }
+
+    /** Syncs run in the background now; poll the source row until it reports OK. */
+    @SuppressWarnings("unchecked")
+    private void awaitSyncOk(String adminToken, String upstreamId) throws Exception {
+        for (int i = 0; i < 150; i++) {
+            List sources = (List) http().getJson("/api/v1/admin/upstreams", List.class,
+                    Http.bearer(adminToken)).getBody();
+            Map<String, Object> row = (Map<String, Object>) sources.stream()
+                    .filter(s -> upstreamId.equals(((Map<?, ?>) s).get("upstreamId")))
+                    .findFirst().orElseThrow();
+            if ("OK".equals(row.get("syncStatus"))) {
+                return;
+            }
+            Thread.sleep(100);
+        }
+        assertTrue(false, "background sync of " + upstreamId + " never reported OK");
     }
 
     private static HttpHeaders json(String token) {

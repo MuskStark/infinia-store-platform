@@ -94,9 +94,10 @@ class UpstreamSyncFlowTest {
                 "/api/v1/admin/upstreams", jsonAuth(null), Map.of(), String.class);
         assertEquals(401, denied.getStatusCode().value());
 
-        // Registration immediately indexes the source; no separate admin action
-        // is required before the upstream item becomes visible.
-        assertEquals(Boolean.TRUE, created.getBody().get("lastSyncOk"));
+        // Registration opens the background run immediately; no separate admin
+        // action is required before the upstream item becomes visible.
+        assertEquals("SYNCING", created.getBody().get("syncStatus"));
+        awaitSourceSynced(adminToken, upstreamId);
         assertEquals(2, metadataRequests.get(),
                 "transient metadata failures should recover without admin intervention");
         assertEquals(1, payloadRequests.get(),
@@ -108,11 +109,12 @@ class UpstreamSyncFlowTest {
         ResponseEntity<Map> first = http().exchangeJson(HttpMethod.POST,
                 "/api/v1/admin/upstreams/" + upstreamId + "/sync", jsonAuth(adminToken), null,
                 Map.class);
-        assertEquals(200, first.getStatusCode().value());
-        assertEquals(0, ((Number) first.getBody().get("imported")).intValue(),
-                "body: " + first.getBody());
-        assertEquals(1, ((Number) first.getBody().get("skipped")).intValue());
-        assertEquals(0, ((Number) first.getBody().get("failed")).intValue());
+        assertEquals(202, first.getStatusCode().value(),
+                "a full run takes minutes; the trigger only accepts it");
+        Map<String, Object> rerun = awaitLatestRunSettled(adminToken, upstreamId);
+        assertEquals(0, ((Number) rerun.get("imported")).intValue(), "body: " + rerun);
+        assertEquals(1, ((Number) rerun.get("skipped")).intValue());
+        assertEquals(0, ((Number) rerun.get("failed")).intValue());
         assertEquals(1, payloadRequests.get(),
                 "unchanged content must not be fetched or re-published");
 
@@ -185,8 +187,10 @@ class UpstreamSyncFlowTest {
         ResponseEntity<Map> second = http().exchangeJson(HttpMethod.POST,
                 "/api/v1/admin/upstreams/" + upstreamId + "/sync", jsonAuth(adminToken), null,
                 Map.class);
-        assertEquals(0, ((Number) second.getBody().get("imported")).intValue());
-        assertEquals(1, ((Number) second.getBody().get("skipped")).intValue());
+        assertEquals(202, second.getStatusCode().value());
+        Map<String, Object> settled = awaitLatestRunSettled(adminToken, upstreamId);
+        assertEquals(0, ((Number) settled.get("imported")).intValue());
+        assertEquals(1, ((Number) settled.get("skipped")).intValue());
     }
 
     /**
@@ -355,6 +359,43 @@ class UpstreamSyncFlowTest {
 
     Http http() {
         return new Http(port);
+    }
+
+    /** Syncs run in the background now: poll the source row until it reports OK. */
+    @SuppressWarnings("unchecked")
+    private void awaitSourceSynced(String adminToken, String upstreamId) throws Exception {
+        for (int i = 0; i < 100; i++) {
+            ResponseEntity<List> listed = http().getJson("/api/v1/admin/upstreams",
+                    List.class, Http.bearer(adminToken));
+            Map<String, Object> row = (Map<String, Object>) listed.getBody().stream()
+                    .filter(s -> upstreamId.equals(((Map<?, ?>) s).get("upstreamId")))
+                    .findFirst().orElseThrow();
+            if (Boolean.TRUE.equals(row.get("lastSyncOk"))
+                    && "OK".equals(row.get("syncStatus"))) {
+                return;
+            }
+            Thread.sleep(100);
+        }
+        fail("background sync of " + upstreamId + " never reported OK");
+    }
+
+    /** Polls the sync log until the newest run leaves RUNNING, then returns it. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> awaitLatestRunSettled(String adminToken, String upstreamId)
+            throws Exception {
+        for (int i = 0; i < 100; i++) {
+            ResponseEntity<List> runs = http().getJson(
+                    "/api/v1/admin/upstreams/" + upstreamId + "/sync-runs",
+                    List.class, Http.bearer(adminToken));
+            Map<String, Object> latest = (Map<String, Object>) runs.getBody().stream()
+                    .findFirst().orElseThrow();
+            if (!"RUNNING".equals(latest.get("status"))) {
+                return latest;
+            }
+            Thread.sleep(100);
+        }
+        fail("sync run of " + upstreamId + " never settled");
+        return Map.of();
     }
 
     private boolean awaitDownloads(String namespace, String slug, long expected)
