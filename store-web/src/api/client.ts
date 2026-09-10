@@ -98,6 +98,44 @@ export const api = {
     }
   },
 
+  /**
+   * Binary download (install packages, artifacts): streams the response as a
+   * Blob and hands it to the browser via a synthetic anchor click. Returns the
+   * filename from Content-Disposition (falling back to `fallbackName`), so the
+   * saved file keeps the server-side name the host's local install mode
+   * expects. Problem+json errors surface as ApiRequestError like JSON calls.
+   */
+  download: async (path: string, fallbackName: string): Promise<string> => {
+    const headers = new Headers();
+    const token = getAccessToken();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    const response = await fetch(path, { headers });
+    if (!response.ok) {
+      const isJson = response.headers.get('content-type')?.includes('json');
+      const body = isJson ? await response.json() : await response.text();
+      throw new ApiRequestError(
+        (typeof body === 'object' ? body : { detail: String(body) }) as ApiError,
+      );
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const match = disposition.match(/filename\*=(?:UTF-8'')([^;]+)/i)
+      ?? disposition.match(/filename="([^";]+)"/i)
+      ?? disposition.match(/filename=([^;]+)/i);
+    const filename = match ? decodeURIComponent(match[1].replace(/^"|"$/g, '')) : fallbackName;
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+    return filename;
+  },
+
   // ── Upstream aggregation admin (aggregation plan §8) ──
 
   getUpstreams: () =>

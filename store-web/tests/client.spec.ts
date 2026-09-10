@@ -54,4 +54,52 @@ describe('api client', () => {
     expect(init.body).toBe(JSON.stringify([{ idempotencyKey: 'k' }]));
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
   });
+
+  it('download saves the Content-Disposition filename via a synthetic anchor', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Blob(['zip-bytes']), {
+        status: 200,
+        headers: {
+          'content-type': 'application/zip',
+          'content-disposition': 'attachment; filename="official.markdown-2.4.0-install-package.zip"',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    // jsdom lacks createObjectURL — patch, then restore so later tests are unaffected.
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:mock');
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    try {
+      const name = await api.download('/api/v1/releases/r1/install-package', 'fallback.zip');
+
+      expect(name).toBe('official.markdown-2.4.0-install-package.zip');
+      const anchor = click.mock.instances.at(-1) as HTMLAnchorElement;
+      expect(anchor.download).toBe('official.markdown-2.4.0-install-package.zip');
+      expect(anchor.href).toBe('blob:mock');
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock');
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  it('download surfaces problem+json errors as ApiRequestError', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 'bee_level_required', status: 403 }), {
+        status: 403,
+        headers: { 'content-type': 'application/problem+json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const error = await api.download('/api/v1/releases/r1/install-package', 'f.zip')
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiRequestError);
+    expect((error as ApiRequestError).code).toBe('bee_level_required');
+    expect((error as ApiRequestError).status).toBe(403);
+  });
 });

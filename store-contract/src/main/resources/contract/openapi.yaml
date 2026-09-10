@@ -224,6 +224,33 @@ paths:
                   resolvedAt: { type: string, format: date-time }
         '409': { description: Release not installable }
 
+  /releases/{releaseId}/install-package:
+    get:
+      operationId: getInstallPackage
+      tags: [Delivery]
+      summary: Offline install package — Native install manifest + signed artifact + checksums in one ZIP
+      description: |
+        Web-downloadable package for the host's local install mode: the same
+        Native install manifest as /install-manifest (plus a `package` layout
+        block and the in-package artifact filename), the artifact bytes under
+        `artifact/` and a sha256sum-compatible `checksums.txt`. The host
+        verifies the embedded sha256/Ed25519 signature locally, so the file
+        installs without a store connection while preserving full provenance.
+      security:
+        - {}
+      parameters:
+        - { name: releaseId, in: path, required: true, schema: { type: string } }
+        - { name: client, in: query, schema: { type: string, default: fengyu } }
+      responses:
+        '200':
+          description: ZIP install package (attachment)
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '403': { description: Infinia Level below the listing gate }
+        '404': { description: Release, listing or PACKAGE artifact not found }
+        '409': { description: Release not installable }
+
   /compat/fengyu/mcp-catalog:
     get:
       operationId: fengyuMcpCatalog

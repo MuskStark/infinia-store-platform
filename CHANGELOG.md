@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+### Automated production deploys (CI → SSH)
+
+- `ci.yml` gained a `deploy` job: after `backend`/`frontend`/`images` are
+  green on a push to `main` (or a manual *Run workflow* dispatch), it SSHes
+  into the production host and runs the new `scripts/upgrade.sh` pinned to
+  the exact commit — fetch, checkout, `docker compose --profile app up -d
+  --build`, health wait, and an automatic rollback to the previous image and
+  checkout when the store does not come back healthy. Deploys queue behind
+  each other (never cancel mid-deploy) and appear under *Environments →
+  production*; the optional monitor host (split deployment) updates by GHCR
+  image pull in the same run.
+- Everything is opt-in via repository secrets (`DEPLOY_SSH_HOST` +
+  `DEPLOY_SSH_PRIVATE_KEY` at minimum); without them the job prints a notice
+  and CI behaves exactly as before. One-time setup, rollback commands and a
+  NAT-safe server-side polling alternative live in DEPLOYMENT.md
+  "Automated deploys".
+- A self-hosted alternative ships as a root `Jenkinsfile`: the same backend
+  verify + frontend tests/builds run in stage containers (the agent needs
+  only Docker), and a green `main` build deploys through the same
+  `scripts/upgrade.sh` — over SSH, or locally when Jenkins shares the
+  production host. The GitHub Actions deploy and the Jenkins pipeline
+  coexist; setup notes in DEPLOYMENT.md "Automated deploys".
+
+### Direct web download of offline install packages
+
+- New anonymous endpoint `GET /api/v1/releases/{id}/install-package` streams
+  one ZIP per release: the Native install manifest
+  (`install-manifest.json`, same contract as `/install-manifest` plus a
+  `package` layout block and the in-package artifact filename), the signed
+  artifact under `artifact/`, and a `sha256sum -c` compatible
+  `checksums.txt`. The downloaded file installs through the host's local
+  install mode (主程序本地安装) with full provenance — sha256, Ed25519
+  signature and key id travel inside the manifest — and no store connection
+  is required at install time (aggregation plan §5.2 `RAW_ARTIFACT` rule).
+- Infinia Level gates, installable-status checks and upstream
+  materialization run before any bytes are served: gated listings answer
+  `bee_level_required`, DRAFT releases answer `invalid_state_transition`,
+  and legacy virtual `upstream/` artifacts are stored and platform-signed
+  first, so a package never ships digest-less bytes. Completed package
+  downloads count toward the listing's download counter.
+- The listing page gained a 下载安装包 / Download install package button
+  (CTA rail plus per-release buttons on the versions tab) backed by the new
+  `api.download` helper, which streams the response as a Blob and keeps the
+  server-side filename from `Content-Disposition`; APP listings keep their
+  platform-detected binary download.
+- Contract: the operation ships in `openapi.yaml` with regenerated
+  `schema.d.ts` types; InstallPackageDownloadTest covers the ZIP layout,
+  digest/signature propagation, the three install modes
+  (PLUGIN_PACKAGE / SKILL_DIRECTORY / MCP_TEMPLATE stays disabled with
+  LOCAL_ONLY secrets), draft rejection and the bee-level gate.
+
 ### The footer's service-status link goes to the monitor page, not raw JSON
 
 - The SPA's `/status` deep link now reads the monitor's public address at

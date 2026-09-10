@@ -278,6 +278,30 @@ async function downloadArtifact(artifact: { artifactId?: string | null; filename
   }
 }
 
+/**
+ * Direct download of the offline install package (plan §7.1): Native install
+ * manifest + signed artifact + checksums in one ZIP. The saved file installs
+ * through the host's local install mode — 主程序本地安装 — without a store
+ * connection. Tracked per release so the versions tab can offer old versions.
+ */
+const packageDownloads = ref<Record<string, 'loading' | 'error'>>({});
+
+async function downloadInstallPackage(releaseId?: string) {
+  const id = releaseId ?? latestRelease.value?.releaseId;
+  // 'error' must stay retryable — only an in-flight download blocks re-entry.
+  if (!id || packageDownloads.value[id] === 'loading') return;
+  packageDownloads.value[id] = 'loading';
+  try {
+    await api.download(
+      `/api/v1/releases/${id}/install-package`,
+      `${props.namespace}.${props.slug}.zip`,
+    );
+    delete packageDownloads.value[id];
+  } catch {
+    packageDownloads.value[id] = 'error';
+  }
+}
+
 async function toggleFavorite() {
   if (!detail.value) return;
   // listingId is the coordinate-derived key; the API accepts the UUID from /me/library.
@@ -378,7 +402,16 @@ const installLabel = computed(() => {
             {{ installLabel }}
           </button>
           <button
-            v-else-if="recommendedArtifact"
+            v-if="!isAppListing && latestRelease"
+            class="btn btn-secondary"
+            :disabled="packageDownloads[latestRelease.releaseId] === 'loading'"
+            @click="downloadInstallPackage()"
+          >
+            {{ packageDownloads[latestRelease.releaseId] === 'loading'
+              ? t('listing.downloading') : t('listing.downloadPackage') }}
+          </button>
+          <button
+            v-if="isAppListing && recommendedArtifact"
             class="btn btn-primary"
             :disabled="artifactTickets[recommendedArtifact.artifactId ?? ''] === 'loading'"
             @click="downloadArtifact(recommendedArtifact)"
@@ -386,6 +419,12 @@ const installLabel = computed(() => {
             {{ artifactTickets[recommendedArtifact.artifactId ?? ''] === 'loading'
               ? t('listing.downloading') : t('common.download') }}
           </button>
+          <p
+            v-if="!isAppListing && packageDownloads[latestRelease?.releaseId ?? ''] === 'error'"
+            class="text-xs text-red-600 dark:text-red-400"
+          >
+            {{ t('listing.packageDownloadFailed') }}
+          </p>
           <ProgressBar v-if="installStage === 'downloading' || installStage === 'verifying'" />
           <button
             v-if="auth.isAuthenticated"
@@ -548,6 +587,9 @@ const installLabel = computed(() => {
         <div v-if="installInfo" class="rounded-xl bg-surface-muted p-3 text-xs dark:bg-slate-800/60">
           <p class="font-semibold">{{ t('listing.installBehavior') }}: {{ installInfo.mode }}</p>
           <p class="mt-1 text-muted dark:text-slate-400">{{ installInfo.hint }}</p>
+          <p v-if="!isAppListing && latestRelease" class="mt-1 text-muted dark:text-slate-400">
+            {{ t('listing.downloadPackageHint') }}
+          </p>
         </div>
       </aside>
     </section>
@@ -570,7 +612,21 @@ const installLabel = computed(() => {
               {{ t('listing.rollout', { percent: release.rolloutPercent }) }}
             </Badge>
           </div>
-          <span class="text-xs text-muted dark:text-slate-400">{{ formatDate(release.publishedAt) }}</span>
+          <div class="flex items-center gap-2">
+            <button
+              v-if="release.status === 'PUBLISHED' && !isAppListing"
+              class="rounded-lg border border-line px-3 py-1 text-xs font-medium hover:bg-surface-2 disabled:opacity-50 dark:border-slate-800"
+              :disabled="packageDownloads[release.releaseId] === 'loading'"
+              @click="downloadInstallPackage(release.releaseId)"
+            >
+              {{ packageDownloads[release.releaseId] === 'loading'
+                ? t('listing.downloading') : t('listing.downloadPackage') }}
+            </button>
+            <span v-if="packageDownloads[release.releaseId] === 'error'" class="text-xs text-red-500">
+              {{ t('listing.packageDownloadFailed') }}
+            </span>
+            <span class="text-xs text-muted dark:text-slate-400">{{ formatDate(release.publishedAt) }}</span>
+          </div>
         </div>
         <p v-if="release.requiresHost" class="mt-2 text-sm text-muted dark:text-slate-400">
           {{ t('listing.requiresHost') }}: <code>{{ release.requiresHost }}</code>

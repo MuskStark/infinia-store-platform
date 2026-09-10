@@ -62,7 +62,7 @@ public class SecurityConfig {
             "/api/v1/auth/refresh", "/api/v1/auth/revoke",
             "/api/v1/blobs/**", "/api/v1/compat/**",
             "/api/v1/releases/*/download-ticket", "/api/v1/releases/*/install-manifest",
-            "/api/v1/releases/*/checksums.txt",
+            "/api/v1/releases/*/install-package", "/api/v1/releases/*/checksums.txt",
             // Service status must stay reachable exactly when things are broken.
             "/api/v1/status", "/api/v1/status/incidents", "/api/v1/status/monitor"
     };

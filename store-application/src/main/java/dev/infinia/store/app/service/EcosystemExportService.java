@@ -237,7 +237,7 @@ public class EcosystemExportService {
      * deterministic across multi-artifact releases: ecosystem packages are
      * platform-neutral, so UNIVERSAL wins and the rest order by filename.
      */
-    static ArtifactInfo packageArtifact(Release release) {
+    public static ArtifactInfo packageArtifact(Release release) {
         return release.artifacts.stream()
                 .filter(a -> a.kind() == ArtifactKind.PACKAGE)
                 .min(java.util.Comparator

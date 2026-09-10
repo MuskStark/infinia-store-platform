@@ -112,6 +112,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/releases/{releaseId}/install-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Offline install package — Native install manifest + signed artifact + checksums in one ZIP
+         * @description Web-downloadable package for the host's local install mode: the same
+         *     Native install manifest as /install-manifest (plus a `package` layout
+         *     block and the in-package artifact filename), the artifact bytes under
+         *     `artifact/` and a sha256sum-compatible `checksums.txt`. The host
+         *     verifies the embedded sha256/Ed25519 signature locally, so the file
+         *     installs without a store connection while preserving full provenance.
+         */
+        get: operations["getInstallPackage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/compat/fengyu/mcp-catalog": {
         parameters: {
             query?: never;
@@ -2272,6 +2297,51 @@ export interface operations {
                         resolvedAt?: string;
                     };
                 };
+            };
+            /** @description Release not installable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getInstallPackage: {
+        parameters: {
+            query?: {
+                client?: string;
+            };
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ZIP install package (attachment) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            /** @description Infinia Level below the listing gate */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Release */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Release not installable */
             409: {
