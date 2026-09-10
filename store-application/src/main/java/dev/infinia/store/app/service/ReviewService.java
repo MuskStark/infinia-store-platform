@@ -63,8 +63,20 @@ public class ReviewService {
         return reviews.findByStatus(status == null ? "IN_REVIEW" : status, 100);
     }
 
-    @Transactional
     public Review decide(UUID reviewerUserId, UUID reviewId, ReviewDecisionRequest request) {
+        return decide(reviewerUserId, reviewId, request, false);
+    }
+
+    /**
+     * Records a review decision. The self-review guard (design §7.3: a reviewer must
+     * never approve their own release) binds ordinary reviewers; PLATFORM_ADMIN is
+     * the platform's trust root — the same actor the admin force-publish and
+     * admin-upload paths already trust — and may decide their own releases, with
+     * the decision still audited under their own id.
+     */
+    @Transactional
+    public Review decide(UUID reviewerUserId, UUID reviewId, ReviewDecisionRequest request,
+            boolean platformAdminOverride) {
         Review review = reviews.findById(reviewId)
                 .orElseThrow(() -> new DomainException(StoreErrorCode.NOT_FOUND,
                         "Review not found"));
@@ -74,13 +86,12 @@ public class ReviewService {
         Listing listing = listings.findById(release.listingId)
                 .orElseThrow(() -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND,
                         "Listing not found"));
-        // A reviewer must never approve their own release (design §7.3). An
-        // unattributable caller (client-credentials token with no service
-        // account) must not slip past that guard on a null id.
+        // An unattributable caller (client-credentials token with no service
+        // account) must not slip past the guard on a null id.
         if (reviewerUserId == null) {
             throw DomainException.forbidden("Review decisions require an attributed reviewer");
         }
-        if (reviewerUserId.equals(listing.publisherUserId)) {
+        if (!platformAdminOverride && reviewerUserId.equals(listing.publisherUserId)) {
             throw new DomainException(StoreErrorCode.SELF_REVIEW_FORBIDDEN,
                     "Reviewers cannot review their own releases");
         }
@@ -253,6 +264,42 @@ public class ReviewService {
             return envelopeFallback;
         }
         return signing.sign(blobs.open(artifact.blobKey()));
+    }
+
+    /**
+     * Publisher-side deletion of an unpublished release (draft, rejected, changes
+     * requested, in review) so abandoned flows can be cleared from the publishing
+     * board. Owner-only; published and withdrawn releases are out of scope —
+     * withdrawing is an admin action (design §8.1). Mirrors the admin
+     * {@link #deleteRelease} semantics: hard row removal, RELEASE_DELETED outbox
+     * event, audited.
+     */
+    @Transactional
+    public void deleteUnpublished(UUID userId, UUID releaseId) {
+        Release release = releases.findById(releaseId).orElseThrow(
+                () -> new DomainException(StoreErrorCode.RELEASE_NOT_FOUND,
+                        "Release not found"));
+        Listing listing = listings.findById(release.listingId)
+                .orElseThrow(() -> new DomainException(StoreErrorCode.LISTING_NOT_FOUND,
+                        "Listing not found"));
+        if (!listing.publisherUserId.equals(userId)) {
+            throw DomainException.forbidden("You do not own this listing");
+        }
+        if (release.status == ReleaseStatus.PUBLISHED
+                || release.status == ReleaseStatus.DEPRECATED
+                || release.status == ReleaseStatus.YANKED
+                || release.status == ReleaseStatus.QUARANTINED) {
+            throw new DomainException(StoreErrorCode.INVALID_STATE_TRANSITION,
+                    "Only unpublished releases can be deleted (current: "
+                            + release.status + ")");
+        }
+        releases.deleteById(releaseId);
+        enqueue(StoreEventPayloads.RELEASE_DELETED, release.id, toJson(
+                new StoreEventPayloads.ReleaseDeleted(
+                        listing.coordinate().withVersion(release.version).toString(),
+                        release.id.toString(), "deleted by publisher")));
+        audit.record("USER", userId.toString(), "release.delete", "RELEASE",
+                releaseId.toString(), release.status.name(), "publisher delete", null);
     }
 
     /**

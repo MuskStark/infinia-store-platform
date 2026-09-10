@@ -158,6 +158,18 @@ public class PublisherController {
                 review.submittedAt.toString()));
     }
 
+    /**
+     * Deletes an unpublished release (draft, rejected, changes requested, in
+     * review) so abandoned flows can be cleared from the publishing board.
+     * Owner-only; published / withdrawn releases are out of scope — withdrawing
+     * is an admin action (design §8.1).
+     */
+    @DeleteMapping("/releases/{releaseId}")
+    public ResponseEntity<Void> deleteUnpublishedRelease(@PathVariable UUID releaseId) {
+        reviewService.deleteUnpublished(principal.requireUserId(), releaseId);
+        return ResponseEntity.noContent().build();
+    }
+
     /** One release incl. DRAFT state and scan findings — owner or platform admin only. */
     @GetMapping("/releases/{releaseId}")
     public PublisherDtos.PublisherReleaseDto release(@PathVariable UUID releaseId) {

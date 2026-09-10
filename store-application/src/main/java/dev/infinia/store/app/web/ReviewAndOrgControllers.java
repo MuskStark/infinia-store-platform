@@ -52,8 +52,12 @@ class ReviewController {
     @PostMapping("/reviews/{reviewId}/decisions")
     public ReviewDtos.ReviewDto decide(@PathVariable UUID reviewId,
             @RequestBody ReviewDtos.ReviewDecisionRequest request) {
-        UUID reviewerId = principal.current() == null ? null : principal.current().userId();
-        Review review = reviews.decide(reviewerId, reviewId, request);
+        CurrentPrincipal.Principal actor = principal.current();
+        UUID reviewerId = actor == null ? null : actor.userId();
+        // PLATFORM_ADMIN may decide their own releases (admin override, audited);
+        // ordinary reviewers keep the self-review guard.
+        boolean platformAdmin = actor != null && actor.hasRole("PLATFORM_ADMIN");
+        Review review = reviews.decide(reviewerId, reviewId, request, platformAdmin);
         return toDto(review);
     }
 

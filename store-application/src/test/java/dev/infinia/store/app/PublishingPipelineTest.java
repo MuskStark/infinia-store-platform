@@ -297,6 +297,96 @@ class PublishingPipelineTest {
         assertEquals("self_review_forbidden", decision.getBody().get("code"));
     }
 
+    /** PLATFORM_ADMIN is the platform's trust root and may decide their own
+     *  releases (admin override) — the ordinary self-review guard must not
+     *  block the admin curating catalog they published themselves. */
+    @Test
+    void platformAdminMayReviewOwnRelease() throws Exception {
+        String adminToken = AuthTestSupport.login(http(), null, "admin@infinia.local",
+                "Password123!");
+        String slug = "admrev-" + UUID.randomUUID().toString().substring(0, 8);
+        assertEquals(201, http().exchangeJson(HttpMethod.POST, "/api/v1/organizations",
+                jsonAuth(adminToken), Map.of("slug", slug, "name", "Admin Review Org"),
+                Map.class).getStatusCode().value());
+        assertEquals(201, http().exchangeJson(HttpMethod.POST, "/api/v1/publisher/listings",
+                jsonAuth(adminToken), Map.of("namespace", slug, "slug", "tool", "type", "SKILL",
+                        "name", "Admin Tool", "summary", "s"), Map.class)
+                .getStatusCode().value());
+        String listingId = listings.findByCoordinate(
+                        InfiniaCoordinate.parse("infinia://skill/" + slug + "/tool"))
+                .orElseThrow().id.toString();
+        ResponseEntity<Map> release = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/publisher/listings/" + listingId + "/releases", jsonAuth(adminToken),
+                Map.of("version", "1.0.0", "channel", "stable"), Map.class);
+        String releaseId = (String) release.getBody().get("releaseId");
+        String uploadUrl = uploadAndGetUrl(adminToken, releaseId, "tool.fys");
+        HttpHeaders putHeaders = new HttpHeaders();
+        putHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        http().exchange(HttpMethod.PUT, uploadUrl, putHeaders, validSkillZip(
+                slug + ".tool", "1.0.0"));
+        http().exchangeJson(HttpMethod.POST,
+                "/api/v1/publisher/releases/" + releaseId + "/submit",
+                Http.bearer(adminToken), null, Map.class);
+        awaitStatus(adminToken, releaseId, "IN_REVIEW");
+
+        ResponseEntity<List> queue = http().getJson("/api/v1/reviews?status=IN_REVIEW",
+                List.class, Http.bearer(adminToken));
+        Map<String, Object> queued = findReview(queue.getBody(), releaseId);
+        ResponseEntity<Map> decision = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/reviews/" + queued.get("reviewId") + "/decisions",
+                jsonAuth(adminToken), Map.of("decision", "APPROVE"), Map.class);
+        assertEquals(200, decision.getStatusCode().value());
+        assertEquals("PUBLISHED", awaitStatus(adminToken, releaseId, "PUBLISHED").get("status"));
+
+        // A published release is history — publisher deletion must refuse it.
+        ResponseEntity<String> publishedDelete = http().exchange(HttpMethod.DELETE,
+                "/api/v1/publisher/releases/" + releaseId, jsonAuth(adminToken), null);
+        assertEquals(409, publishedDelete.getStatusCode().value());
+    }
+
+    /** Publishers can clear abandoned flows: an unpublished release (draft /
+     *  rejected / in review) is deletable by its owner, never by anyone else. */
+    @Test
+    void publisherCanDeleteUnpublishedRelease() throws Exception {
+        String publisherToken = AuthTestSupport.clientCredentialsToken(http(), "store-cli",
+                "dev-only-cli-secret");
+        String outsiderToken = AuthTestSupport.login(http(), null, "reviewer@infinia.local",
+                "Password123!");
+        String slug = "delrel-" + UUID.randomUUID().toString().substring(0, 8);
+        http().exchangeJson(HttpMethod.POST, "/api/v1/organizations", jsonAuth(publisherToken),
+                Map.of("slug", slug, "name", "Delete Org"), Map.class);
+        http().exchangeJson(HttpMethod.POST, "/api/v1/publisher/listings", jsonAuth(publisherToken),
+                Map.of("namespace", slug, "slug", "tool", "type", "SKILL", "name", "Tool",
+                        "summary", "s"), Map.class);
+        String listingId = listings.findByCoordinate(
+                        InfiniaCoordinate.parse("infinia://skill/" + slug + "/tool"))
+                .orElseThrow().id.toString();
+        ResponseEntity<Map> release = http().exchangeJson(HttpMethod.POST,
+                "/api/v1/publisher/listings/" + listingId + "/releases", jsonAuth(publisherToken),
+                Map.of("version", "1.0.0", "channel", "stable"), Map.class);
+        String releaseId = (String) release.getBody().get("releaseId");
+
+        // A non-owner cannot delete someone else's unpublished release.
+        assertEquals(403, http().exchange(HttpMethod.DELETE,
+                "/api/v1/publisher/releases/" + releaseId, jsonAuth(outsiderToken),
+                null).getStatusCode().value());
+
+        // The owner deletes their own draft — the flow disappears from the board.
+        assertEquals(204, http().exchange(HttpMethod.DELETE,
+                "/api/v1/publisher/releases/" + releaseId, jsonAuth(publisherToken),
+                null).getStatusCode().value());
+        ResponseEntity<List> remaining = http().exchangeJson(HttpMethod.GET,
+                "/api/v1/publisher/listings/" + listingId + "/releases",
+                jsonAuth(publisherToken), null, List.class);
+        assertTrue(remaining.getBody().isEmpty(),
+                () -> String.valueOf(remaining.getBody()));
+
+        // Gone is gone: a second delete misses the row entirely.
+        assertEquals(404, http().exchange(HttpMethod.DELETE,
+                "/api/v1/publisher/releases/" + releaseId, jsonAuth(publisherToken),
+                null).getStatusCode().value());
+    }
+
     // ---- helpers ----
 
     private String uploadAndGetUrl(String token, String releaseId, String filename) {
