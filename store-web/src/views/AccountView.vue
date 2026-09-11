@@ -21,9 +21,10 @@ import { beeMark } from '../bee-levels';
 /**
  * User Center (用户中心): one signed-in landing page aggregating identity,
  * the current Infinia Level with the purchased-membership status and its
- * upgrade entry, profile editing, library/organization summaries, role-aware
- * quick links and account security (password, sessions, devices). The full
- * ladder lives on /membership — here only the viewer's own position shows.
+ * upgrade entry, account details (display name + password), library and
+ * organization summaries, role-aware quick links, and sign-in sessions &
+ * devices. The full ladder lives on /membership — here only the viewer's own
+ * position shows.
  *
  * The overview is the page's hero ("hive passport"): hexagon identity mark,
  * display-size level statement tinted by the tier, and the membership pill.
@@ -198,7 +199,7 @@ function listingRoute(coordinate: string) {
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="space-y-6">
     <PageHeader :title="t('account.title')" />
     <ErrorState v-if="error" :message="error" @retry="load" />
     <LoadingGrid v-else-if="loading" />
@@ -206,7 +207,7 @@ function listingRoute(coordinate: string) {
     <template v-else-if="user">
       <!-- Hero — the hive passport: identity cell, level statement, membership.
            The tier-tinted hex cluster is the page's one ornamental act. -->
-      <MagicCard class="hive-hero relative overflow-hidden p-6 sm:p-8">
+      <MagicCard class="hive-hero relative overflow-hidden p-5 sm:p-6">
         <svg
           class="hive-hives pointer-events-none absolute -right-6 -top-10 hidden sm:block"
           width="240"
@@ -247,21 +248,21 @@ function listingRoute(coordinate: string) {
             <p class="text-sm text-muted">{{ user.email }}</p>
 
             <!-- Level statement: display type, tier-tinted crest and numeral. -->
-            <div class="mt-4 flex items-center gap-3">
+            <div class="mt-3 flex items-center gap-3">
               <span class="shrink-0" :class="tierTextClass">
-                <BeeCrest :level="effectiveLevel" :size="40" />
+                <BeeCrest :level="effectiveLevel" :size="36" />
               </span>
               <div>
                 <p class="flex items-baseline gap-2">
-                  <span class="text-[1.6rem] font-bold leading-none tracking-tight">
+                  <span class="text-[1.5rem] font-bold leading-none tracking-tight">
                     {{ t(`beeLevel.${effectiveLevel}`) }}
                   </span>
                   <span
-                    class="text-[1.6rem] font-bold leading-none tabular-nums"
+                    class="text-[1.5rem] font-bold leading-none tabular-nums"
                     :class="tierTextClass"
                   >Lv{{ effectiveLevel }}</span>
                 </p>
-                <p class="mt-1.5 text-xs tracking-wide text-muted">
+                <p class="mt-1 text-xs tracking-wide text-muted">
                   {{ t('beeLevel.title') }}
                   <template v-if="nextLevel !== null">
                     · {{ t('account.levelNext', { next: t(`beeLevel.${nextLevel}`) }) }}
@@ -274,7 +275,7 @@ function listingRoute(coordinate: string) {
             <!-- Membership pill: status plus the purchase/renew CTA. -->
             <div
               v-if="canUpgrade"
-              class="mt-4 inline-flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-accent/30 bg-accent/5 px-4 py-2.5"
+              class="mt-3 inline-flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-accent/30 bg-accent/5 px-3.5 py-2"
               data-testid="account-membership-card"
             >
               <span
@@ -301,14 +302,14 @@ function listingRoute(coordinate: string) {
             </div>
           </div>
 
-          <div class="flex w-full flex-col gap-2 sm:w-48">
+          <div class="flex w-full flex-col gap-1.5 sm:w-44">
             <dt class="text-xs tracking-wider text-muted">{{ t('account.roles') }}</dt>
             <dd class="flex flex-wrap gap-1">
               <Badge v-for="role in user.roles" :key="role" tone="accent">
                 {{ t(`role.${role}`) }}
               </Badge>
             </dd>
-            <dt class="mt-2 text-xs tracking-wider text-muted">{{ t('account.quickLinks') }}</dt>
+            <dt class="mt-1.5 text-xs tracking-wider text-muted">{{ t('account.quickLinks') }}</dt>
             <dd class="flex flex-col gap-1">
               <RouterLink
                 v-for="link in quickLinks"
@@ -323,10 +324,11 @@ function listingRoute(coordinate: string) {
         </div>
       </MagicCard>
 
-      <!-- Everything below the hero lives in a quiet two-column utility grid. -->
-      <div class="grid gap-6 lg:grid-cols-2">
-        <!-- Profile editing -->
-        <MagicCard class="p-6">
+      <!-- Utility grid: every card earns its place — account (name + password),
+           library, organizations, sign-in sessions/devices. -->
+      <div class="grid gap-4 lg:grid-cols-2 lg:gap-5">
+        <!-- Account details: display name and password live together. -->
+        <MagicCard class="p-5">
           <h2 class="mb-3 font-semibold">{{ t('account.editProfile') }}</h2>
           <form class="flex flex-col gap-2 sm:flex-row sm:items-end" @submit.prevent="saveProfile">
             <label class="w-full text-sm">
@@ -352,10 +354,41 @@ function listingRoute(coordinate: string) {
           <p v-if="profileError" class="alert alert-error mt-2" role="alert">
             {{ profileError }}
           </p>
+
+          <div class="my-4 border-t border-line dark:border-slate-800" aria-hidden="true" />
+          <h3 class="mb-2 text-sm font-semibold">{{ t('account.changePassword') }}</h3>
+          <form class="flex flex-col gap-2 sm:flex-row sm:items-end" @submit.prevent="changePassword">
+            <label class="w-full text-sm">
+              {{ t('account.currentPassword') }}
+              <input
+                v-model="currentPassword"
+                type="password"
+                required
+                autocomplete="current-password"
+                class="input mt-1"
+              />
+            </label>
+            <label class="w-full text-sm">
+              {{ t('account.newPassword') }}
+              <input
+                v-model="newPassword"
+                type="password"
+                required
+                minlength="8"
+                autocomplete="new-password"
+                class="input mt-1"
+              />
+            </label>
+            <button class="btn btn-primary shrink-0 self-end whitespace-nowrap">
+              {{ t('account.changePassword') }}
+            </button>
+          </form>
+          <p v-if="passwordMessage" class="alert alert-success mt-2" role="status">{{ passwordMessage }}</p>
+          <p v-if="passwordError" class="alert alert-error mt-2" role="alert">{{ passwordError }}</p>
         </MagicCard>
 
         <!-- Library summary -->
-        <MagicCard class="p-6">
+        <MagicCard class="p-5">
           <div class="mb-3 flex items-center justify-between">
             <h2 class="font-semibold">{{ t('account.myLibrary') }}</h2>
             <RouterLink to="/library" class="text-sm text-accent hover:underline">
@@ -404,7 +437,7 @@ function listingRoute(coordinate: string) {
         </MagicCard>
 
         <!-- Organizations summary -->
-        <MagicCard class="p-6">
+        <MagicCard class="p-5">
           <div class="mb-3 flex items-center justify-between">
             <h2 class="font-semibold">{{ t('account.myOrganizations') }}</h2>
             <RouterLink to="/organizations" class="text-sm text-accent hover:underline">
@@ -422,39 +455,11 @@ function listingRoute(coordinate: string) {
           </ul>
         </MagicCard>
 
-        <!-- Security: password, sessions, devices -->
-        <MagicCard class="p-6">
-          <h2 class="mb-3 font-semibold">{{ t('account.security') }}</h2>
-          <form class="flex flex-col gap-2 sm:flex-row sm:items-end" @submit.prevent="changePassword">
-            <label class="w-full text-sm">
-              {{ t('account.currentPassword') }}
-              <input
-                v-model="currentPassword"
-                type="password"
-                required
-                autocomplete="current-password"
-                class="input mt-1"
-              />
-            </label>
-            <label class="w-full text-sm">
-              {{ t('account.newPassword') }}
-              <input
-                v-model="newPassword"
-                type="password"
-                required
-                minlength="8"
-                autocomplete="new-password"
-                class="input mt-1"
-              />
-            </label>
-            <button class="btn btn-primary shrink-0 self-end whitespace-nowrap">
-              {{ t('account.changePassword') }}
-            </button>
-          </form>
-          <p v-if="passwordMessage" class="alert alert-success mt-2" role="status">{{ passwordMessage }}</p>
-          <p v-if="passwordError" class="alert alert-error mt-2" role="alert">{{ passwordError }}</p>
+        <!-- Sign-in sessions and devices -->
+        <MagicCard class="p-5">
+          <h2 class="mb-3 font-semibold">{{ t('account.signinDevices') }}</h2>
 
-          <details class="mt-4">
+          <details>
             <summary class="cursor-pointer text-sm font-medium text-muted hover:text-accent">
               {{ t('account.sessions') }} ({{ sessions.length }})
             </summary>
