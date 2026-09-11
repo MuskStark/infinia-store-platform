@@ -131,7 +131,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
     <!-- Marketplace shell: the near-black bar is the signature element; it stays
          dark in both themes so the Infinia mark and white nav pop. -->
     <header class="header-bar sticky top-0 z-40">
-      <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-4 py-2.5 max-md:gap-y-1">
+      <div class="mx-auto flex max-w-[90rem] flex-wrap items-center gap-4 px-4 py-2.5 max-md:gap-y-1">
         <RouterLink :to="{ name: 'discover' }" class="flex shrink-0 items-center gap-2">
           <!-- Official Infinia mark, shared with the FengYu host frontend. -->
           <img src="/infinia-logo.svg" alt="" class="h-8 w-8" />
@@ -391,14 +391,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
       </div>
     </header>
 
-    <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-8">
+    <main class="mx-auto w-full max-w-[90rem] flex-1 px-4 py-8">
       <RouteContent />
     </main>
 
     <!-- Light-gray marketplace footer band: links left, brand right. -->
     <footer class="border-t border-line bg-surface-muted dark:border-slate-800 dark:bg-slate-950">
       <div
-        class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-5 text-xs text-muted dark:text-slate-400"
+        class="mx-auto flex max-w-[90rem] flex-wrap items-center justify-between gap-3 px-4 py-5 text-xs text-muted dark:text-slate-400"
       >
         <p>
           {{ t('common.footerTagline') }}

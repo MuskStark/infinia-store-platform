@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { api, type Library, type MembershipStatus, type PublicUser } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeCrest from '../components/BeeCrest.vue';
+import HexCluster from '../components/HexCluster.vue';
 import EmptyState from '../components/EmptyState.vue';
 import ErrorState from '../components/ErrorState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
@@ -178,34 +179,9 @@ async function changePassword() {
       <!-- Hero — the hive passport. One line says where you stand and what to
            do next: tier crest, level, membership deadline, renew/purchase. -->
       <MagicCard class="hive-hero relative overflow-hidden p-5 sm:p-6">
-        <svg
-          class="hive-hives pointer-events-none absolute -right-6 -top-10 hidden sm:block"
-          width="240"
-          height="240"
-          viewBox="0 0 240 240"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M150 8 208 41v66l-58 33-58-33V41L150 8Z"
-            :stroke="tierHex"
-            stroke-width="1.5"
-            opacity=".16"
-          />
-          <path
-            d="M88 96 128 119v46l-40 23-40-23v-46l40-23Z"
-            :stroke="tierHex"
-            stroke-width="1.5"
-            opacity=".24"
-          />
-          <path
-            d="M170 138 196 153v30l-26 15-26-15v-30l26-15Z"
-            :stroke="tierHex"
-            stroke-width="1.5"
-            opacity=".1"
-          />
-          <path d="M88 119v23l20 11.5v-23L88 119Z" :fill="tierHex" opacity=".14" />
-        </svg>
+        <div class="absolute -right-6 -top-10 hidden h-60 w-60 sm:block" aria-hidden="true">
+          <HexCluster :color="tierHex" />
+        </div>
 
         <div class="relative flex flex-wrap items-center gap-5">
           <!-- Identity cell: the avatar is a honeycomb hexagon, brand-filled. -->

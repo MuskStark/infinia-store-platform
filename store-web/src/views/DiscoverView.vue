@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
+import HexCluster from '../components/HexCluster.vue';
 import { api, type CatalogItem, type CatalogPage } from '../api/client';
 import { BlurFade, NumberTicker } from '@infinia/magic-ui-vue';
 import ListingCard from '../components/ListingCard.vue';
@@ -47,16 +48,20 @@ const totalDownloads = computed(() =>
   items.value.reduce((sum, item) => sum + (item.downloads ?? 0), 0),
 );
 const types = ['APP', 'PLUGIN', 'SKILL', 'MCP', 'FLOW'] as const;
+
 </script>
 
 <template>
   <div class="space-y-12">
-    <!-- Marketplace hero: light band with JetBrains gradient honeycomb cells
+    <!-- Marketplace hero: light band with the store's outlined honeycomb wash
          drifting at the edges; content first, composite search below. -->
     <section class="relative -mx-4 -mt-8 overflow-hidden border-b border-line bg-surface-muted px-4 pb-14 pt-16 dark:border-slate-800 dark:bg-slate-950">
-      <div class="hero-shape right-[-72px] top-[-48px] hidden h-72 w-72 opacity-90 lg:block" aria-hidden="true" />
-      <div class="hero-shape left-[-96px] bottom-[-120px] hidden h-80 w-80 opacity-80 lg:block" aria-hidden="true" />
-      <div class="hero-shape right-[280px] bottom-[-90px] hidden h-40 w-40 opacity-40 md:block" aria-hidden="true" />
+      <div class="absolute -right-10 -top-14 hidden h-[24rem] w-[24rem] opacity-90 lg:block" aria-hidden="true">
+        <HexCluster />
+      </div>
+      <div class="absolute -bottom-28 -left-20 hidden h-[20rem] w-[20rem] opacity-80 lg:block" aria-hidden="true">
+        <HexCluster />
+      </div>
 
       <div class="relative mx-auto max-w-7xl">
         <div class="max-w-2xl">
@@ -128,14 +133,14 @@ const types = ['APP', 'PLUGIN', 'SKILL', 'MCP', 'FLOW'] as const;
       </div>
       <ErrorState v-if="error" :message="error" @retry="load" />
       <LoadingGrid v-else-if="loading" />
-      <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <ListingCard v-for="item in featured" :key="item.coordinate" :item="item" featured />
       </div>
     </section>
 
     <section aria-labelledby="latest-heading">
       <h2 id="latest-heading" class="mb-4 text-lg font-bold">{{ t('discover.latest') }}</h2>
-      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <ListingCard v-for="item in latest" :key="item.coordinate" :item="item" />
       </div>
     </section>
