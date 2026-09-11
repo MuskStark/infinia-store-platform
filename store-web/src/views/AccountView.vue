@@ -246,7 +246,7 @@ async function changePassword() {
               <RouterLink
                 v-if="canUpgrade"
                 to="/membership"
-                class="btn btn-primary btn-sm shrink-0"
+                class="btn btn-primary btn-sm shrink-0 hive-cta"
                 data-testid="account-membership-cta"
               >
                 {{ hasMembership ? t('membership.renew') : t('account.membershipCta') }}
@@ -403,5 +403,11 @@ async function changePassword() {
   height: 8px;
   border-radius: 999px;
   flex: none;
+}
+
+/* The level line's action is a capsule — it must out-rank .btn's unlayered
+   rounded-lg, hence a scoped rule instead of a rounded-full utility. */
+.hive-cta {
+  border-radius: 999px;
 }
 </style>
