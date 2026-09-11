@@ -269,8 +269,10 @@ export default {
     channel: {
       WECHAT: 'WeChat Pay',
       ALIPAY: 'Alipay',
+      BMAC: 'Buy Me a Coffee',
       MOCK: 'Mock payment (local)',
     },
+    bmacHint: 'Paying through Buy Me a Coffee: use the SAME email as your store account — the payment is matched and your level applied automatically (usually within a minute). Check back here after paying.',
     errors: {
       notConfigured: 'No payment channel configured yet — buying is unavailable',
       tooLow: 'That level is not above your current effective level',
@@ -279,6 +281,7 @@ export default {
     result: {
       title: 'Payment result',
       waiting: 'Confirming your payment…',
+      waitingNoOrder: 'Your membership shows up here once the payment lands. If it does not, make sure you paid with the same email as your account.',
       order: 'Order',
       success: 'Payment received — your level is live!',
       paidFor: 'Membership extended by {n} days',
@@ -475,6 +478,8 @@ export default {
     membershipStatus: 'Status',
     membershipPaidAt: 'Paid at',
     membershipUntil: 'member until {date}',
+    membershipExternalUrl: 'External checkout link',
+    membershipExternalUrlPlaceholder: 'https://buymeacoffee.com/…/extras/… (optional)',
     minBeeLevel: 'Infinia Level gate',
     beeLevelPublic: 'Public (no gate)',
     databases: 'Databases',

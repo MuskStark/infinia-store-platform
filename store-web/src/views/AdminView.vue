@@ -196,7 +196,7 @@ const membershipError = ref<string | null>(null);
 const busyPlanId = ref<string | null>(null);
 /** Editable draft for the create row; levels 1-4 only (LARVA is not for sale). */
 const PURCHASABLE_LEVELS = [1, 2, 3, 4];
-const newPlan = ref({ beeLevel: 1, durationDays: 30, priceFen: 600, sort: 1 });
+const newPlan = ref({ beeLevel: 1, durationDays: 30, priceFen: 600, sort: 1, externalUrl: '' });
 
 async function loadMembership() {
   membershipLoading.value = true;
@@ -233,7 +233,8 @@ async function addPlan() {
   }
 }
 
-async function updatePlan(plan: AdminMembershipPlan, body: Partial<AdminMembershipPlan>) {
+async function updatePlan(plan: AdminMembershipPlan,
+    body: Partial<Omit<AdminMembershipPlan, 'externalUrl'>> & { externalUrl?: string }) {
   busyPlanId.value = plan.planId;
   membershipError.value = null;
   try {
@@ -243,6 +244,8 @@ async function updatePlan(plan: AdminMembershipPlan, body: Partial<AdminMembersh
       priceFen: body.priceFen ?? plan.priceFen,
       active: body.active ?? plan.active,
       sort: body.sort ?? plan.sort,
+      // Blank clears the link; undefined keeps the stored one (partial update).
+      externalUrl: body.externalUrl !== undefined ? body.externalUrl : plan.externalUrl ?? '',
     });
     Object.assign(plan, updated);
   } catch (e) {
@@ -792,6 +795,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                   <th>{{ t('beeLevel.title') }}</th>
                   <th>{{ t('admin.membershipDuration') }}</th>
                   <th>{{ t('admin.membershipPrice') }}</th>
+                  <th>{{ t('admin.membershipExternalUrl') }}</th>
                   <th>{{ t('admin.visibility') }}</th>
                   <th>{{ t('admin.membershipSort') }}</th>
                   <th></th>
@@ -845,6 +849,19 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                     />
                   </td>
                   <td>
+                    <!-- Hosted-checkout link (Buy Me a Coffee Extra); blank = gateway checkout. -->
+                    <label class="sr-only" :for="`url-${plan.planId}`">{{ t('admin.membershipExternalUrl') }}</label>
+                    <input
+                      :id="`url-${plan.planId}`"
+                      class="input w-56 font-mono text-xs"
+                      type="url"
+                      :value="plan.externalUrl ?? ''"
+                      :placeholder="t('admin.membershipExternalUrlPlaceholder')"
+                      :disabled="busyPlanId === plan.planId"
+                      @change="updatePlan(plan, { externalUrl: ($event.target as HTMLInputElement).value.trim() })"
+                    />
+                  </td>
+                  <td>
                     <button
                       class="btn btn-sm"
                       :class="plan.active ? 'btn-danger-outline' : 'btn-success'"
@@ -880,7 +897,7 @@ async function deleteAppRelease(rel: AdminAppRelease) {
           </div>
 
           <!-- Create row: yuan in, fen out. -->
-          <form class="card grid gap-3 p-4 sm:grid-cols-5 sm:items-end" @submit.prevent="addPlan">
+          <form class="card grid gap-3 p-4 sm:grid-cols-6 sm:items-end" @submit.prevent="addPlan">
             <label class="block text-sm">
               {{ t('beeLevel.title') }}
               <SelectMenu
@@ -915,7 +932,16 @@ async function deleteAppRelease(rel: AdminAppRelease) {
               {{ t('admin.membershipSort') }}
               <input v-model.number="newPlan.sort" class="input mt-1" type="number" />
             </label>
-            <button class="btn btn-primary" :disabled="membershipLoading">
+            <label class="block text-sm sm:col-span-2">
+              {{ t('admin.membershipExternalUrl') }}
+              <input
+                v-model.trim="newPlan.externalUrl"
+                class="input mt-1 font-mono text-xs"
+                type="url"
+                :placeholder="t('admin.membershipExternalUrlPlaceholder')"
+              />
+            </label>
+            <button class="btn btn-primary sm:col-span-6" :disabled="membershipLoading">
               {{ t('admin.membershipAdd') }}
             </button>
           </form>

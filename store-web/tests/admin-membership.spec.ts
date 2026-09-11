@@ -14,8 +14,10 @@ import en from '../src/locales/en';
 
 const PLANS = [
   { planId: 'plan-worker', beeLevel: 1, durationDays: 30, priceFen: 600, active: true, sort: 1,
+    externalUrl: 'https://buymeacoffee.com/infinia/extras/worker-30d',
     createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' },
   { planId: 'plan-queen', beeLevel: 4, durationDays: 365, priceFen: 6600, active: false, sort: 4,
+    externalUrl: null,
     createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' },
 ];
 
@@ -126,11 +128,29 @@ describe('AdminView membership console (管理 · 会员套餐)', () => {
     createAdminMembershipPlan.mockResolvedValue(PLANS[0]);
     wrapper = await mountMembershipTab();
     const form = wrapper.find('form');
-    // Default draft: level WORKER, 30 days, ¥6.
+    // Default draft: level WORKER, 30 days, ¥6, no external link.
     await form.trigger('submit');
     await flushPromises();
     expect(createAdminMembershipPlan).toHaveBeenCalledWith(
-      expect.objectContaining({ beeLevel: 1, durationDays: 30, priceFen: 600 }),
+      expect.objectContaining({ beeLevel: 1, durationDays: 30, priceFen: 600,
+        externalUrl: '' }),
+    );
+  });
+
+  it('edits a plan external checkout link in place', async () => {
+    updateAdminMembershipPlan.mockImplementation(async (id: string, body: Record<string, unknown>) =>
+      ({ ...PLANS.find((p) => p.planId === id), ...body }));
+    wrapper = await mountMembershipTab();
+    const urlInput = wrapper.find('input[id^="url-"]');
+    expect((urlInput.element as HTMLInputElement).value)
+      .toBe('https://buymeacoffee.com/infinia/extras/worker-30d');
+    await urlInput.setValue('https://buymeacoffee.com/infinia/extras/worker-90d');
+    await urlInput.trigger('change');
+    await flushPromises();
+    expect(updateAdminMembershipPlan).toHaveBeenCalledWith(
+      'plan-worker',
+      expect.objectContaining({ externalUrl: 'https://buymeacoffee.com/infinia/extras/worker-90d',
+        priceFen: 600 }),
     );
   });
 });

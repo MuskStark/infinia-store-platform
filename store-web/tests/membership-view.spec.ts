@@ -116,4 +116,18 @@ describe('MembershipView (会员等级购买)', () => {
     ).toBe(true);
     expect(window.location.href).toBe('');
   });
+
+  it('shows the Buy Me a Coffee email-matching hint when it is the channel', async () => {
+    const { api } = await import('../src/api/client');
+    vi.mocked(api.getMembershipStatus).mockResolvedValueOnce({
+      ...STATUS,
+      channels: ['BMAC'],
+    });
+    wrapper = await mountView();
+    expect(wrapper.find('[data-testid="membership-bmac-hint"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain(en.membership.channel.BMAC === 'Buy Me a Coffee'
+      ? 'Buy Me a Coffee' : en.membership.bmacHint);
+    // Single-channel gateways hide the picker entirely.
+    expect(wrapper.text()).not.toContain(en.membership.payWith);
+  });
 });

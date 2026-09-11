@@ -778,6 +778,35 @@ paths:
             text/plain:
               schema: { type: string, example: fail }
 
+  /payments/bmac/notify:
+    post:
+      operationId: bmacNotify
+      tags: [Membership]
+      summary: Buy Me a Coffee webhook — HMAC-SHA256 signed (x-signature-sha256)
+      description: >-
+        Signed JSON body per the BMAC webhook spec; payments are matched back to
+        pending orders by supporter email + amount. Acknowledged events answer
+        the literal text "success"; only a bad signature answers "fail".
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Event envelope with event-specific data fields.
+      responses:
+        '200':
+          description: Verified or acknowledged — body is the literal text "success"
+          content:
+            text/plain:
+              schema: { type: string, example: success }
+        '400':
+          description: Signature verification failed — body is the literal text "fail"
+          content:
+            text/plain:
+              schema: { type: string, example: fail }
+
   /install-events:
     post:
       operationId: reportInstallEvents
@@ -2203,14 +2232,14 @@ components:
         effectiveBeeLevel: { type: integer, minimum: 0, maximum: 4 }
         membershipLevel: { type: integer, minimum: 1, maximum: 4, nullable: true, description: Active purchased membership level, null when none }
         membershipExpiresAt: { type: string, format: date-time, nullable: true }
-        channels: { type: array, items: { type: string, enum: [WECHAT, ALIPAY, MOCK] }, description: Gateway channels the configured credentials support }
+        channels: { type: array, items: { type: string, enum: [WECHAT, ALIPAY, BMAC, MOCK] }, description: Gateway channels the configured credentials support }
 
     CreateMembershipOrderRequest:
       type: object
       required: [planId]
       properties:
         planId: { type: string }
-        channel: { type: string, enum: [WECHAT, ALIPAY, MOCK], description: Defaults to the first configured channel }
+        channel: { type: string, enum: [WECHAT, ALIPAY, BMAC, MOCK], description: Defaults to the first configured channel }
 
     MembershipOrder:
       type: object
@@ -2237,6 +2266,7 @@ components:
         priceFen: { type: integer, format: int64 }
         active: { type: boolean }
         sort: { type: integer }
+        externalUrl: { type: string, format: uri, nullable: true, description: Plan-specific checkout link (e.g. a Buy Me a Coffee Extra); null = gateway-built checkout }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -2249,6 +2279,7 @@ components:
         priceFen: { type: integer, format: int64, minimum: 0 }
         active: { type: boolean }
         sort: { type: integer }
+        externalUrl: { type: string, format: uri, maxLength: 512, description: Absolute http(s) checkout link for hosted gateways (Buy Me a Coffee Extra); blank clears it }
 
     AdminMembershipOrder:
       type: object

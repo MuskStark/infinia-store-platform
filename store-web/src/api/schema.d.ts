@@ -609,6 +609,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/payments/bmac/notify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Buy Me a Coffee webhook — HMAC-SHA256 signed (x-signature-sha256)
+         * @description Signed JSON body per the BMAC webhook spec; payments are matched back to pending orders by supporter email + amount. Acknowledged events answer the literal text "success"; only a bad signature answers "fail".
+         */
+        post: operations["bmacNotify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/install-events": {
         parameters: {
             query?: never;
@@ -1800,7 +1820,7 @@ export interface components {
             /** Format: date-time */
             membershipExpiresAt?: string | null;
             /** @description Gateway channels the configured credentials support */
-            channels: ("WECHAT" | "ALIPAY" | "MOCK")[];
+            channels: ("WECHAT" | "ALIPAY" | "BMAC" | "MOCK")[];
         };
         CreateMembershipOrderRequest: {
             planId: string;
@@ -1808,7 +1828,7 @@ export interface components {
              * @description Defaults to the first configured channel
              * @enum {string}
              */
-            channel?: "WECHAT" | "ALIPAY" | "MOCK";
+            channel?: "WECHAT" | "ALIPAY" | "BMAC" | "MOCK";
         };
         MembershipOrder: {
             orderNo: string;
@@ -1839,6 +1859,11 @@ export interface components {
             priceFen: number;
             active: boolean;
             sort: number;
+            /**
+             * Format: uri
+             * @description Plan-specific checkout link (e.g. a Buy Me a Coffee Extra); null = gateway-built checkout
+             */
+            externalUrl?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -1853,6 +1878,11 @@ export interface components {
             priceFen?: number;
             active?: boolean;
             sort?: number;
+            /**
+             * Format: uri
+             * @description Absolute http(s) checkout link for hosted gateways (Buy Me a Coffee Extra); blank clears it
+             */
+            externalUrl?: string;
         };
         AdminMembershipOrder: {
             orderNo: string;
@@ -3323,6 +3353,39 @@ export interface operations {
                 };
             };
             /** @description Verification failed — body is the literal text "fail" */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    bmacNotify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Verified or acknowledged — body is the literal text "success" */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Signature verification failed — body is the literal text "fail" */
             400: {
                 headers: {
                     [name: string]: unknown;

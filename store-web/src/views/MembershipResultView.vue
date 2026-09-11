@@ -2,17 +2,19 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { api, formatFen, type MembershipOrder } from '../api/client';
+import { api, formatFen, type MembershipOrder, type MembershipStatus } from '../api/client';
 import { useAuthStore } from '../stores/auth';
 import { Badge } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
 import PageHeader from '../components/PageHeader.vue';
 
 /**
- * Where the gateway's return_url lands after the cashier (支付回跳): the
- * browser comes back before the async callback may have arrived, so this page
- * polls the order until it flips to PAID (and refreshes /me so the header
- * badge updates), CLOSED, or the polling budget runs out.
+ * Where payment returns land. Gateways that carry the order number back
+ * (易支付/虎皮椒 return_url) poll the ORDER; Buy Me a Coffee keeps the
+ * supporter on its own page and matches the payment by email, so a bare
+ * visit (no orderNo) polls the caller's STATUS instead — either way the
+ * page settles once the membership is live (and refreshes /me so the
+ * header badge catches up).
  */
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLLS = 60;
@@ -23,25 +25,44 @@ const auth = useAuthStore();
 
 const orderNo = computed(() => String(route.query.orderNo ?? ''));
 const order = ref<MembershipOrder | null>(null);
+const membership = ref<MembershipStatus | null>(null);
 const state = ref<'polling' | 'paid' | 'closed' | 'missing' | 'error'>('polling');
 let polls = 0;
 let timer: number | undefined;
 
+const succeeded = computed(() => {
+  if (state.value === 'paid' && order.value) return order.value;
+  if (state.value === 'paid' && membership.value) {
+    return { targetLevel: membership.value.membershipLevel ?? 0 } as MembershipOrder;
+  }
+  return null;
+});
+
 async function poll() {
   polls += 1;
   try {
-    order.value = await api.getMembershipOrder(orderNo.value);
-    if (order.value.status === 'PAID') {
-      state.value = 'paid';
-      // The effective level lives on the account row — refresh the badge.
-      await auth.load();
-      stop();
-      return;
-    }
-    if (order.value.status === 'CLOSED') {
-      state.value = 'closed';
-      stop();
-      return;
+    if (orderNo.value) {
+      order.value = await api.getMembershipOrder(orderNo.value);
+      if (order.value.status === 'PAID') {
+        state.value = 'paid';
+        await auth.load();
+        stop();
+        return;
+      }
+      if (order.value.status === 'CLOSED') {
+        state.value = 'closed';
+        stop();
+        return;
+      }
+    } else {
+      // Bare visit (Buy Me a Coffee): watch the membership itself.
+      membership.value = await api.getMembershipStatus();
+      if (membership.value.membershipLevel != null) {
+        state.value = 'paid';
+        await auth.load();
+        stop();
+        return;
+      }
     }
   } catch {
     state.value = 'error';
@@ -61,10 +82,6 @@ function stop() {
 }
 
 onMounted(() => {
-  if (!orderNo.value) {
-    state.value = 'missing';
-    return;
-  }
   void poll();
   timer = window.setInterval(() => void poll(), POLL_INTERVAL_MS);
 });
@@ -88,18 +105,21 @@ onBeforeUnmount(stop);
         <code class="text-xs">{{ order.orderNo }}</code>
         · {{ formatFen(order.priceFen ?? 0) }}
       </p>
+      <p v-else class="text-sm text-muted dark:text-slate-400">
+        {{ t('membership.result.waitingNoOrder') }}
+      </p>
     </div>
 
     <div
-      v-else-if="state === 'paid' && order"
+      v-else-if="state === 'paid' && succeeded"
       class="card flex flex-col items-center gap-4 p-8 text-center"
       data-testid="membership-result-paid"
     >
       <span class="text-4xl" aria-hidden="true">🐝</span>
       <p class="text-lg font-semibold">{{ t('membership.result.success') }}</p>
-      <BeeLevelBadge :level="order.targetLevel ?? 0" />
-      <p class="text-sm text-muted dark:text-slate-400">
-        {{ t('membership.result.paidFor', { n: order.durationDays ?? 0 }) }}
+      <BeeLevelBadge :level="succeeded.targetLevel ?? 0" />
+      <p v-if="succeeded.durationDays" class="text-sm text-muted dark:text-slate-400">
+        {{ t('membership.result.paidFor', { n: succeeded.durationDays ?? 0 }) }}
       </p>
       <RouterLink to="/library" class="btn btn-primary">{{ t('membership.result.browse') }}</RouterLink>
     </div>

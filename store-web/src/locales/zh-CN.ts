@@ -266,8 +266,10 @@ export default {
     channel: {
       WECHAT: '微信支付',
       ALIPAY: '支付宝',
+      BMAC: 'Buy Me a Coffee',
       MOCK: '模拟支付（本地）',
     },
+    bmacHint: '通过 Buy Me a Coffee 付款：请务必使用与商店账户相同的邮箱完成支付，系统会在到账后自动匹配并升级（通常 1 分钟内）。支付完成后可回到此页查看结果。',
     errors: {
       notConfigured: '收款通道尚未配置，暂时无法购买',
       tooLow: '该等级不高于你当前的生效等级',
@@ -276,6 +278,7 @@ export default {
     result: {
       title: '支付结果',
       waiting: '正在确认支付结果…',
+      waitingNoOrder: '支付完成并自动到账后，此处会显示你的会员状态。若长时间未生效，请确认支付邮箱与账户邮箱一致。',
       order: '订单',
       success: '支付成功，等级已生效！',
       paidFor: '会员有效期已延长 {n} 天',
@@ -472,6 +475,8 @@ export default {
     membershipStatus: '状态',
     membershipPaidAt: '支付时间',
     membershipUntil: '会员至 {date}',
+    membershipExternalUrl: '外部收款链接',
+    membershipExternalUrlPlaceholder: 'https://buymeacoffee.com/…/extras/…（可空）',
     minBeeLevel: 'Infinia Level 门槛',
     beeLevelPublic: '公开（无门槛）',
     databases: '数据库',

@@ -122,6 +122,19 @@ const paymentDisabled = computed(() => !status.value?.channels?.length);
         </Badge>
       </section>
 
+      <!-- Buy Me a Coffee has no order metadata: the webhook matches by the
+           supporter's payment email, so tell the buyer up front. -->
+      <p
+        v-if="channel === 'BMAC'"
+        class="rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm"
+        data-testid="membership-bmac-hint"
+      >
+        {{ t('membership.bmacHint') }}
+        <RouterLink to="/membership/result" class="font-semibold text-accent">
+          {{ t('membership.result.title') }} →
+        </RouterLink>
+      </p>
+
       <!-- Channel picker: only the configured gateway apps appear. -->
       <section v-if="!paymentDisabled && (status.channels?.length ?? 0) > 1" class="flex items-center gap-2 text-sm">
         <span class="text-muted dark:text-slate-400">{{ t('membership.payWith') }}</span>

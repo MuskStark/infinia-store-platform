@@ -18,6 +18,13 @@ vi.mock('../src/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/api/client')>()),
   api: {
     getMembershipOrder: (orderNo: string) => getMembershipOrder(orderNo),
+    getMembershipStatus: vi.fn(async () => ({
+      baseBeeLevel: 1,
+      effectiveBeeLevel: 1,
+      membershipLevel: null,
+      membershipExpiresAt: null,
+      channels: ['BMAC'],
+    })),
     get: vi.fn(async () => ({ userId: 'u1', effectiveBeeLevel: 3 })),
   },
 }));
@@ -103,5 +110,28 @@ describe('MembershipResultView (支付结果轮询)', () => {
     await flushPromises();
     expect(getMembershipOrder.mock.calls.length).toBe(calls);
     expect(wrapper.find('[data-testid="membership-result-polling"]').exists()).toBe(true);
+  });
+
+  it('polls membership status on a bare visit (Buy Me a Coffee has no return URL)', async () => {
+    const { api } = await import('../src/api/client');
+    // First polls: no membership yet; then the webhook lands.
+    vi.mocked(api.getMembershipStatus)
+      .mockResolvedValueOnce({
+        baseBeeLevel: 1, effectiveBeeLevel: 1, membershipLevel: null,
+        membershipExpiresAt: null, channels: ['BMAC'],
+      })
+      .mockResolvedValue({
+        baseBeeLevel: 1, effectiveBeeLevel: 3, membershipLevel: 3,
+        membershipExpiresAt: '2026-12-11T02:00:00Z', channels: ['BMAC'],
+      });
+    wrapper = await mountResult('');
+    expect(wrapper.find('[data-testid="membership-result-polling"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain(en.membership.result.waitingNoOrder);
+
+    vi.advanceTimersByTime(2100);
+    await flushPromises();
+    const paid = wrapper.find('[data-testid="membership-result-paid"]');
+    expect(paid.exists()).toBe(true);
+    expect(paid.text()).toContain(en.membership.result.success);
   });
 });

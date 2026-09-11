@@ -151,8 +151,15 @@ services:
       # disable or retarget it per deployment.
       STORE_UPSTREAM_DEFAULTS_ENABLED: ${STORE_UPSTREAM_DEFAULTS_ENABLED:-true}
       STORE_UPSTREAM_SKILLHUB_URL: ${STORE_UPSTREAM_SKILLHUB_URL:-https://api.skillhub.cn/api/skills?pages=1}
-      # Membership purchase via XunHuPay (虎皮椒): all optional — unset means
-      # the purchase page reports payment_not_configured and nothing else changes.
+      # Membership purchase gateways: all optional — the first configured one
+      # wins (bmac → epay → xunhu); unset means the purchase page reports
+      # payment_not_configured and nothing else changes.
+      STORE_PAY_BMAC_PAGE_URL: ${STORE_PAY_BMAC_PAGE_URL:-}
+      STORE_PAY_BMAC_WEBHOOK_SECRET: ${STORE_PAY_BMAC_WEBHOOK_SECRET:-}
+      STORE_PAY_BMAC_MATCH_WINDOW_MINUTES: ${STORE_PAY_BMAC_MATCH_WINDOW_MINUTES:-1440}
+      STORE_PAY_EPAY_API_BASE: ${STORE_PAY_EPAY_API_BASE:-}
+      STORE_PAY_EPAY_PID: ${STORE_PAY_EPAY_PID:-}
+      STORE_PAY_EPAY_KEY: ${STORE_PAY_EPAY_KEY:-}
       STORE_PAY_XUNHU_API_BASE: ${STORE_PAY_XUNHU_API_BASE:-https://api.xunhupay.com}
       STORE_PAY_XUNHU_WECHAT_APPID: ${STORE_PAY_XUNHU_WECHAT_APPID:-}
       STORE_PAY_XUNHU_WECHAT_APPSECRET: ${STORE_PAY_XUNHU_WECHAT_APPSECRET:-}
