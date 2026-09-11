@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type AdminAppRelease, type AdminAppUploadSession, type AdminListing, type AdminUser, type AuditEvent, type DataSourceStatus, type PublisherRelease, type RemoteDatabase, type RemoteDatabaseTestResult, type Report, type Upstream, type UpstreamSyncRun } from '../api/client';
+import { api, formatFen, type AdminAppRelease, type AdminAppUploadSession, type AdminListing, type AdminMembershipOrder, type AdminMembershipPlan, type AdminUser, type AuditEvent, type DataSourceStatus, type PublisherRelease, type RemoteDatabase, type RemoteDatabaseTestResult, type Report, type Upstream, type UpstreamSyncRun } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -19,7 +19,7 @@ import { formatDate, formatDateTime } from '../utils/format';
  */
 const { t } = useI18n();
 
-type AdminTab = 'users' | 'databases' | 'upstreams' | 'listings' | 'reports' | 'appRelease' | 'withdraw' | 'audit';
+type AdminTab = 'users' | 'membership' | 'databases' | 'upstreams' | 'listings' | 'reports' | 'appRelease' | 'withdraw' | 'audit';
 const tab = ref<AdminTab>('users');
 
 /**
@@ -29,7 +29,7 @@ const tab = ref<AdminTab>('users');
  */
 const navGroups = computed(() =>
   [
-    { labelKey: 'admin.group.users', items: ['users'] },
+    { labelKey: 'admin.group.users', items: ['users', 'membership'] },
     { labelKey: 'admin.group.content', items: ['listings', 'upstreams', 'appRelease'] },
     { labelKey: 'admin.group.trust', items: ['reports', 'withdraw', 'audit'] },
     { labelKey: 'admin.group.system', items: ['databases'] },
@@ -186,6 +186,93 @@ async function toggleUserStatus(user: AdminUser) {
   } finally {
     savingUserId.value = null;
   }
+}
+
+// ---- membership plans & orders (管理 · 会员套餐) ----
+const membershipPlans = ref<AdminMembershipPlan[]>([]);
+const membershipOrders = ref<AdminMembershipOrder[]>([]);
+const membershipLoading = ref(false);
+const membershipError = ref<string | null>(null);
+const busyPlanId = ref<string | null>(null);
+/** Editable draft for the create row; levels 1-4 only (LARVA is not for sale). */
+const PURCHASABLE_LEVELS = [1, 2, 3, 4];
+const newPlan = ref({ beeLevel: 1, durationDays: 30, priceFen: 600, sort: 1 });
+
+async function loadMembership() {
+  membershipLoading.value = true;
+  membershipError.value = null;
+  try {
+    const [plans, orders] = await Promise.all([
+      api.getAdminMembershipPlans(),
+      api.getAdminMembershipOrders(),
+    ]);
+    membershipPlans.value = plans;
+    membershipOrders.value = orders;
+  } catch (e) {
+    membershipError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    membershipLoading.value = false;
+  }
+}
+
+/** The create form works in yuan for readability; the API speaks fen. */
+const newPlanYuan = computed({
+  get: () => (newPlan.value.priceFen / 100).toString(),
+    set: (value: string) => {
+    newPlan.value.priceFen = Math.round(Number.parseFloat(value || '0') * 100) || 0;
+  },
+});
+
+async function addPlan() {
+  membershipError.value = null;
+  try {
+    await api.createAdminMembershipPlan({ ...newPlan.value });
+    await loadMembership();
+  } catch (e) {
+    membershipError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function updatePlan(plan: AdminMembershipPlan, body: Partial<AdminMembershipPlan>) {
+  busyPlanId.value = plan.planId;
+  membershipError.value = null;
+  try {
+    const updated = await api.updateAdminMembershipPlan(plan.planId, {
+      beeLevel: body.beeLevel ?? plan.beeLevel,
+      durationDays: body.durationDays ?? plan.durationDays,
+      priceFen: body.priceFen ?? plan.priceFen,
+      active: body.active ?? plan.active,
+      sort: body.sort ?? plan.sort,
+    });
+    Object.assign(plan, updated);
+  } catch (e) {
+    membershipError.value = e instanceof Error ? e.message : String(e);
+    await loadMembership();
+  } finally {
+    busyPlanId.value = null;
+  }
+}
+
+async function removePlan(plan: AdminMembershipPlan) {
+  if (!window.confirm(t('admin.membershipDeleteConfirm', { level: plan.beeLevel, n: plan.durationDays }))) {
+    return;
+  }
+  busyPlanId.value = plan.planId;
+  membershipError.value = null;
+  try {
+    await api.deleteAdminMembershipPlan(plan.planId);
+    await loadMembership();
+  } catch (e) {
+    membershipError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busyPlanId.value = null;
+  }
+}
+
+function membershipOrderTone(status: string): 'success' | 'muted' | 'gold' {
+  if (status === 'PAID') return 'success';
+  if (status === 'PENDING') return 'gold';
+  return 'muted';
 }
 
 // ---- upstream aggregation (aggregation plan §3/§8) ----
@@ -392,6 +479,7 @@ onMounted(() => {
   void loadListings();
   void loadUpstreams();
   void loadAppReleases();
+  void loadMembership();
 });
 
 async function resolve(report: Report, resolution: 'ACTIONED' | 'DISMISSED') {
@@ -662,6 +750,15 @@ async function deleteAppRelease(rel: AdminAppRelease) {
                       </span>
                     </template>
                   </SelectMenu>
+                  <!-- A purchased membership riding above the granted level. -->
+                  <span
+                    v-if="row.effectiveBeeLevel > row.beeLevel"
+                    class="mt-1 flex items-center gap-1 text-xs text-muted"
+                    :title="formatDateTime(row.membershipExpiresAt)"
+                  >
+                    <BeeLevelBadge :level="row.effectiveBeeLevel" compact />
+                    {{ t('admin.membershipUntil', { date: formatDate(row.membershipExpiresAt) }) }}
+                  </span>
                 </td>
                 <td>
                   <button
@@ -678,6 +775,188 @@ async function deleteAppRelease(rel: AdminAppRelease) {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section v-if="tab === 'membership'" class="space-y-5">
+        <p class="text-sm text-muted dark:text-slate-400">{{ t('admin.membershipHint') }}</p>
+        <p v-if="membershipError" class="alert alert-error" role="alert">
+          {{ membershipError }}
+        </p>
+        <LoadingGrid v-if="membershipLoading && !membershipPlans.length" />
+
+        <template v-else>
+          <div class="table-card">
+            <table data-testid="membership-plans-table">
+              <thead>
+                <tr>
+                  <th>{{ t('beeLevel.title') }}</th>
+                  <th>{{ t('admin.membershipDuration') }}</th>
+                  <th>{{ t('admin.membershipPrice') }}</th>
+                  <th>{{ t('admin.visibility') }}</th>
+                  <th>{{ t('admin.membershipSort') }}</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="plan in membershipPlans"
+                  :key="plan.planId"
+                  class="border-t border-line dark:border-slate-800"
+                >
+                  <td>
+                    <SelectMenu
+                      :model-value="plan.beeLevel"
+                      :options="PURCHASABLE_LEVELS.map((level) => ({ value: level, label: beeLevelLabel(level) }))"
+                      :aria-label="t('admin.setBeeLevel')"
+                      :disabled="busyPlanId === plan.planId"
+                      @update:model-value="updatePlan(plan, { beeLevel: Number($event) })"
+                    >
+                      <template #trigger>
+                        <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                          <BeeLevelBadge :level="plan.beeLevel" />
+                          <span class="text-xs text-muted" aria-hidden="true">▾</span>
+                        </span>
+                      </template>
+                    </SelectMenu>
+                  </td>
+                  <td>
+                    <label class="sr-only" :for="`duration-${plan.planId}`">{{ t('admin.membershipDuration') }}</label>
+                    <input
+                      :id="`duration-${plan.planId}`"
+                      class="input w-24"
+                      type="number"
+                      min="1"
+                      :value="plan.durationDays"
+                      :disabled="busyPlanId === plan.planId"
+                      @change="updatePlan(plan, { durationDays: Math.max(1, Number(($event.target as HTMLInputElement).value)) })"
+                    />
+                    <span class="ml-1 text-xs text-muted">{{ t('membership.daysUnit') }}</span>
+                  </td>
+                  <td>
+                    <label class="sr-only" :for="`price-${plan.planId}`">{{ t('admin.membershipPrice') }}</label>
+                    <input
+                      :id="`price-${plan.planId}`"
+                      class="input w-24"
+                      type="text"
+                      inputmode="decimal"
+                      :value="(plan.priceFen / 100).toString()"
+                      :disabled="busyPlanId === plan.planId"
+                      @change="updatePlan(plan, { priceFen: Math.max(0, Math.round(Number(($event.target as HTMLInputElement).value || '0') * 100)) })"
+                    />
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-sm"
+                      :class="plan.active ? 'btn-danger-outline' : 'btn-success'"
+                      :disabled="busyPlanId === plan.planId"
+                      @click="updatePlan(plan, { active: !plan.active })"
+                    >
+                      {{ plan.active ? t('admin.delist') : t('admin.relist') }}
+                    </button>
+                  </td>
+                  <td>
+                    <label class="sr-only" :for="`sort-${plan.planId}`">{{ t('admin.membershipSort') }}</label>
+                    <input
+                      :id="`sort-${plan.planId}`"
+                      class="input w-16"
+                      type="number"
+                      :value="plan.sort"
+                      :disabled="busyPlanId === plan.planId"
+                      @change="updatePlan(plan, { sort: Number(($event.target as HTMLInputElement).value) })"
+                    />
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-danger-outline"
+                      :disabled="busyPlanId === plan.planId"
+                      @click="removePlan(plan)"
+                    >
+                      {{ t('admin.dbDelete') }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Create row: yuan in, fen out. -->
+          <form class="card grid gap-3 p-4 sm:grid-cols-5 sm:items-end" @submit.prevent="addPlan">
+            <label class="block text-sm">
+              {{ t('beeLevel.title') }}
+              <SelectMenu
+                v-model="newPlan.beeLevel"
+                :options="PURCHASABLE_LEVELS.map((level) => ({ value: level, label: beeLevelLabel(level) }))"
+                :aria-label="t('admin.setBeeLevel')"
+                class="mt-1"
+              >
+                <template #trigger>
+                  <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                    <BeeLevelBadge :level="newPlan.beeLevel" />
+                    <span class="text-xs text-muted" aria-hidden="true">▾</span>
+                  </span>
+                </template>
+              </SelectMenu>
+            </label>
+            <label class="block text-sm">
+              {{ t('admin.membershipDuration') }}
+              <input
+                v-model.number="newPlan.durationDays"
+                class="input mt-1"
+                type="number"
+                min="1"
+                required
+              />
+            </label>
+            <label class="block text-sm">
+              {{ t('admin.membershipPrice') }}（¥）
+              <input v-model="newPlanYuan" class="input mt-1" inputmode="decimal" required />
+            </label>
+            <label class="block text-sm">
+              {{ t('admin.membershipSort') }}
+              <input v-model.number="newPlan.sort" class="input mt-1" type="number" />
+            </label>
+            <button class="btn btn-primary" :disabled="membershipLoading">
+              {{ t('admin.membershipAdd') }}
+            </button>
+          </form>
+
+          <!-- Order stream -->
+          <h3 class="pt-2 text-lg font-semibold">{{ t('admin.membershipOrders') }}</h3>
+          <EmptyState v-if="!membershipOrders.length" :title="t('common.empty')" />
+          <div v-else class="table-card">
+            <table>
+              <thead>
+                <tr>
+                  <th>{{ t('admin.membershipOrderNo') }}</th>
+                  <th>{{ t('admin.userAccount') }}</th>
+                  <th>{{ t('beeLevel.title') }}</th>
+                  <th>{{ t('admin.membershipPrice') }}</th>
+                  <th>{{ t('admin.membershipStatus') }}</th>
+                  <th>{{ t('admin.membershipPaidAt') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="order in membershipOrders"
+                  :key="order.orderNo"
+                  class="border-t border-line dark:border-slate-800"
+                >
+                  <td><code class="text-xs">{{ order.orderNo }}</code></td>
+                  <td>
+                    <div class="font-medium">{{ order.displayName ?? '—' }}</div>
+                    <code class="block text-xs text-muted">{{ order.email }}</code>
+                  </td>
+                  <td><BeeLevelBadge :level="order.targetLevel" /></td>
+                  <td>{{ formatFen(order.priceFen ?? 0) }}</td>
+                  <td>
+                    <Badge :tone="membershipOrderTone(order.status ?? '')">{{ order.status }}</Badge>
+                  </td>
+                  <td class="text-xs text-muted">{{ formatDateTime(order.paidAt) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </section>
 
       <section v-if="tab === 'databases'" class="space-y-5">

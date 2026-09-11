@@ -225,6 +225,50 @@ export const api = {
   getDataSourceStatus: () =>
     request<DataSourceStatus>('/api/v1/admin/databases/status'),
 
+  // ── Membership purchase (会员等级购买) ──
+
+  getMembershipPlans: () =>
+    request<MembershipPlan[]>('/api/v1/membership/plans'),
+
+  getMembershipStatus: () =>
+    request<MembershipStatus>('/api/v1/membership/status'),
+
+  createMembershipOrder: (body: { planId: string; channel?: string }) =>
+    request<MembershipOrder>('/api/v1/membership/orders', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getMembershipOrder: (orderNo: string) =>
+    request<MembershipOrder>(
+      `/api/v1/membership/orders/${encodeURIComponent(orderNo)}`,
+    ),
+
+  // ── Admin membership console (管理 · 会员套餐) ──
+
+  getAdminMembershipPlans: () =>
+    request<AdminMembershipPlan[]>('/api/v1/admin/membership/plans'),
+
+  createAdminMembershipPlan: (body: AdminPlanRequest) =>
+    request<AdminMembershipPlan>('/api/v1/admin/membership/plans', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateAdminMembershipPlan: (planId: string, body: AdminPlanRequest) =>
+    request<AdminMembershipPlan>(
+      `/api/v1/admin/membership/plans/${encodeURIComponent(planId)}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+
+  deleteAdminMembershipPlan: (planId: string) =>
+    request<void>(`/api/v1/admin/membership/plans/${encodeURIComponent(planId)}`, {
+      method: 'DELETE',
+    }),
+
+  getAdminMembershipOrders: () =>
+    request<AdminMembershipOrder[]>('/api/v1/admin/membership/orders'),
+
   // ── Public service status (服务监控页) ──
 
   getServiceStatus: () => request<ServiceStatus>('/api/v1/status'),
@@ -266,6 +310,22 @@ export type OrganizationMember = components['schemas']['OrganizationMember'];
 export type Webhook = components['schemas']['Webhook'];
 export type InstalledItem = components['schemas']['InstalledItem'];
 
+// ---- membership purchase (会员等级购买) ----
+export type MembershipPlan = components['schemas']['MembershipPlan'];
+export type MembershipStatus = components['schemas']['MembershipStatus'];
+export type MembershipOrder = components['schemas']['MembershipOrder'];
+export type AdminMembershipPlan = components['schemas']['AdminMembershipPlan'];
+export type AdminMembershipOrder = components['schemas']['AdminMembershipOrder'];
+export type AdminPlanRequest = components['schemas']['AdminPlanRequest'];
+
+/** ¥ display for integer fen prices. */
+export function formatFen(fen: number): string {
+  return `¥${(fen / 100).toLocaleString(undefined, {
+    minimumFractionDigits: fen % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 // ---- admin console types (users / curation incl. Infinia Levels) ----
 export type AdminUser = {
   userId: string;
@@ -274,6 +334,8 @@ export type AdminUser = {
   roles: string[];
   status: string;
   beeLevel: number;
+  effectiveBeeLevel: number;
+  membershipExpiresAt: string | null;
   mfaEnabled: boolean;
   createdAt: string;
   lastLoginAt: string | null;

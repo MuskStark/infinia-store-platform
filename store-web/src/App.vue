@@ -178,6 +178,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
             {{ t('nav.library') }}
           </RouterLink>
           <RouterLink
+            v-if="auth.isAuthenticated"
+            class="inline-flex items-center whitespace-nowrap rounded-lg px-2.5 py-2 transition-colors hover:bg-white/10 hover:text-white"
+            active-class="text-white font-semibold"
+            :to="{ name: 'membership' }"
+          >
+            {{ t('nav.membership') }}
+          </RouterLink>
+          <RouterLink
             v-if="isPublisher"
             class="inline-flex items-center whitespace-nowrap rounded-lg px-2.5 py-2 transition-colors hover:bg-white/10 hover:text-white"
             active-class="text-white font-semibold"

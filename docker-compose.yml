@@ -151,6 +151,14 @@ services:
       # disable or retarget it per deployment.
       STORE_UPSTREAM_DEFAULTS_ENABLED: ${STORE_UPSTREAM_DEFAULTS_ENABLED:-true}
       STORE_UPSTREAM_SKILLHUB_URL: ${STORE_UPSTREAM_SKILLHUB_URL:-https://api.skillhub.cn/api/skills?pages=1}
+      # Membership purchase via XunHuPay (虎皮椒): all optional — unset means
+      # the purchase page reports payment_not_configured and nothing else changes.
+      STORE_PAY_XUNHU_API_BASE: ${STORE_PAY_XUNHU_API_BASE:-https://api.xunhupay.com}
+      STORE_PAY_XUNHU_WECHAT_APPID: ${STORE_PAY_XUNHU_WECHAT_APPID:-}
+      STORE_PAY_XUNHU_WECHAT_APPSECRET: ${STORE_PAY_XUNHU_WECHAT_APPSECRET:-}
+      STORE_PAY_XUNHU_ALIPAY_APPID: ${STORE_PAY_XUNHU_ALIPAY_APPID:-}
+      STORE_PAY_XUNHU_ALIPAY_APPSECRET: ${STORE_PAY_XUNHU_ALIPAY_APPSECRET:-}
+      STORE_PAY_ORDER_EXPIRE_MINUTES: ${STORE_PAY_ORDER_EXPIRE_MINUTES:-30}
     ports:
       # All interfaces by default: a WAF on another host (or LAN clients)
       # reaches it directly. Restrict with STORE_BIND_HOST=127.0.0.1 when the

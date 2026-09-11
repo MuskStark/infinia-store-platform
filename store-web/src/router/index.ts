@@ -41,6 +41,19 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/membership',
+      name: 'membership',
+      component: () => import('../views/MembershipView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      // Where the payment gateway's return_url lands (orderNo in the query).
+      path: '/membership/result',
+      name: 'membership-result',
+      component: () => import('../views/MembershipResultView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/organizations',
       name: 'organizations',
       component: () => import('../views/OrganizationsView.vue'),

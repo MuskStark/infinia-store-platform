@@ -28,6 +28,7 @@ tags:
   - name: Updates
   - name: Account
   - name: Library
+  - name: Membership
   - name: Telemetry
   - name: Publisher
   - name: Review
@@ -662,6 +663,121 @@ paths:
       responses:
         '204': { description: Removed }
 
+  /membership/plans:
+    get:
+      operationId: listMembershipPlans
+      tags: [Membership]
+      summary: Public Infinia Level pricing (会员套餐)
+      security: []
+      responses:
+        '200':
+          description: Active plans, display order first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MembershipPlan' }
+
+  /membership/status:
+    get:
+      operationId: getMembershipStatus
+      tags: [Membership]
+      summary: The caller's ladder position and payable channels
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Base level, effective level and active membership
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MembershipStatus' }
+
+  /membership/orders:
+    post:
+      operationId: createMembershipOrder
+      tags: [Membership]
+      summary: Create a purchase order and a gateway cashier session
+      description: >-
+        Redirect the buyer's browser to the returned payUrl. Plans must climb
+        the ladder (or renew the active tier); the order snapshots the plan's
+        terms. The payment window closes after store.pay.order-expire-minutes.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateMembershipOrderRequest' }
+      responses:
+        '200':
+          description: Created order with the cashier URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MembershipOrder' }
+
+  /membership/orders/{orderNo}:
+    get:
+      operationId: getMembershipOrder
+      tags: [Membership]
+      summary: The caller's order status (return-page polling)
+      parameters:
+        - { name: orderNo, in: path, required: true, schema: { type: string } }
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Order (PENDING orders past their window close lazily)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MembershipOrder' }
+
+  /payments/xunhu/notify:
+    get:
+      operationId: xunhuNotifyGet
+      tags: [Membership]
+      summary: XunHuPay payment callback (GET variant) — signature-verified
+      security: []
+      parameters:
+        - in: query
+          name: params
+          required: true
+          schema: { type: string }
+          description: All gateway callback fields incl. hash
+      responses:
+        '200':
+          description: Verified and applied — body is the literal text "success"
+          content:
+            text/plain:
+              schema: { type: string, example: success }
+        '400':
+          description: Verification failed — body is the literal text "fail"
+          content:
+            text/plain:
+              schema: { type: string, example: fail }
+    post:
+      operationId: xunhuNotifyPost
+      tags: [Membership]
+      summary: XunHuPay payment callback (form POST) — signature-verified
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              description: Gateway callback fields incl. hash
+      responses:
+        '200':
+          description: Verified and applied — body is the literal text "success"
+          content:
+            text/plain:
+              schema: { type: string, example: success }
+        '400':
+          description: Verification failed — body is the literal text "fail"
+          content:
+            text/plain:
+              schema: { type: string, example: fail }
+
   /install-events:
     post:
       operationId: reportInstallEvents
@@ -1236,6 +1352,87 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AdminUser' }
+
+  /admin/membership/plans:
+    get:
+      operationId: listAdminMembershipPlans
+      tags: [Admin]
+      summary: Every membership plan incl. inactive — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Plans, display order first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminMembershipPlan' }
+    post:
+      operationId: createAdminMembershipPlan
+      tags: [Admin]
+      summary: Create a membership plan — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminPlanRequest' }
+      responses:
+        '200':
+          description: Created plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminMembershipPlan' }
+
+  /admin/membership/plans/{planId}:
+    put:
+      operationId: updateAdminMembershipPlan
+      tags: [Admin]
+      summary: Partial update (price, duration, level, availability, sort) — PLATFORM_ADMIN
+      description: Omitted fields keep their current values. Existing orders keep their snapshotted terms.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminPlanRequest' }
+      responses:
+        '200':
+          description: Updated plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminMembershipPlan' }
+    delete:
+      operationId: deleteAdminMembershipPlan
+      tags: [Admin]
+      summary: Delete a plan — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Deleted }
+
+  /admin/membership/orders:
+    get:
+      operationId: listAdminMembershipOrders
+      tags: [Admin]
+      summary: Recent purchase orders with buyer info — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Orders, newest first (capped at 200)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminMembershipOrder' }
 
   /admin/listings/{listingId}/min-bee-level:
     post:
@@ -1903,7 +2100,8 @@ components:
         email: { type: string }
         displayName: { type: string }
         roles: { type: array, items: { type: string } }
-        beeLevel: { type: integer, minimum: 0, maximum: 4, description: 'Infinia Level position: 0 LARVA · 1 WORKER · 2 FORAGER · 3 GUARD · 4 QUEEN' }
+        beeLevel: { type: integer, minimum: 0, maximum: 4, description: 'Permanent admin-granted Infinia Level: 0 LARVA · 1 WORKER · 2 FORAGER · 3 GUARD · 4 QUEEN' }
+        effectiveBeeLevel: { type: integer, minimum: 0, maximum: 4, description: 'The level the store enforces: max(beeLevel, active purchased membership level) — what badges and gates should use' }
         createdAt: { type: string, format: date-time }
 
     RemoteDatabase:
@@ -1968,7 +2166,9 @@ components:
         displayName: { type: string }
         roles: { type: array, items: { type: string } }
         status: { type: string, enum: [ACTIVE, DISABLED] }
-        beeLevel: { type: integer, minimum: 0, maximum: 4 }
+        beeLevel: { type: integer, minimum: 0, maximum: 4, description: Permanent admin-granted level }
+        effectiveBeeLevel: { type: integer, minimum: 0, maximum: 4, description: max(beeLevel, active purchased membership level) }
+        membershipExpiresAt: { type: string, format: date-time, nullable: true, description: Active purchased membership deadline, null when none }
         mfaEnabled: { type: boolean }
         createdAt: { type: string, format: date-time }
         lastLoginAt: { type: string, format: date-time, nullable: true }
@@ -1981,6 +2181,92 @@ components:
         status: { type: string, enum: [ACTIVE, DISABLED] }
         roles: { type: array, items: { type: string }, description: Full replacement role list; USER is always kept }
         displayName: { type: string, minLength: 1, maxLength: 64 }
+
+    MembershipPlan:
+      type: object
+      description: A purchasable Infinia Level tier for a fixed duration (会员套餐).
+      required: [planId, beeLevel, durationDays, priceFen, active, sort]
+      properties:
+        planId: { type: string }
+        beeLevel: { type: integer, minimum: 1, maximum: 4 }
+        durationDays: { type: integer, minimum: 1 }
+        priceFen: { type: integer, format: int64, description: Price in fen (分) }
+        active: { type: boolean }
+        sort: { type: integer }
+
+    MembershipStatus:
+      type: object
+      description: The caller's ladder position and payable channels.
+      required: [baseBeeLevel, effectiveBeeLevel, channels]
+      properties:
+        baseBeeLevel: { type: integer, minimum: 0, maximum: 4 }
+        effectiveBeeLevel: { type: integer, minimum: 0, maximum: 4 }
+        membershipLevel: { type: integer, minimum: 1, maximum: 4, nullable: true, description: Active purchased membership level, null when none }
+        membershipExpiresAt: { type: string, format: date-time, nullable: true }
+        channels: { type: array, items: { type: string, enum: [WECHAT, ALIPAY, MOCK] }, description: Gateway channels the configured credentials support }
+
+    CreateMembershipOrderRequest:
+      type: object
+      required: [planId]
+      properties:
+        planId: { type: string }
+        channel: { type: string, enum: [WECHAT, ALIPAY, MOCK], description: Defaults to the first configured channel }
+
+    MembershipOrder:
+      type: object
+      required: [orderNo, targetLevel, durationDays, priceFen, status, channel, createdAt, expiresAt]
+      properties:
+        orderNo: { type: string }
+        targetLevel: { type: integer, minimum: 1, maximum: 4 }
+        durationDays: { type: integer }
+        priceFen: { type: integer, format: int64 }
+        status: { type: string, enum: [PENDING, PAID, CLOSED] }
+        channel: { type: string }
+        payUrl: { type: string, nullable: true, description: Cashier URL; only present while PENDING (one-shot, short-lived) }
+        createdAt: { type: string, format: date-time }
+        paidAt: { type: string, format: date-time, nullable: true }
+        expiresAt: { type: string, format: date-time, description: End of the payment window }
+
+    AdminMembershipPlan:
+      type: object
+      required: [planId, beeLevel, durationDays, priceFen, active, sort, createdAt, updatedAt]
+      properties:
+        planId: { type: string }
+        beeLevel: { type: integer, minimum: 1, maximum: 4 }
+        durationDays: { type: integer, minimum: 1 }
+        priceFen: { type: integer, format: int64 }
+        active: { type: boolean }
+        sort: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AdminPlanRequest:
+      type: object
+      description: Plan terms; create requires beeLevel/durationDays/priceFen, update is partial.
+      properties:
+        beeLevel: { type: integer, minimum: 1, maximum: 4, description: 1 WORKER .. 4 QUEEN; LARVA is not purchasable }
+        durationDays: { type: integer, minimum: 1 }
+        priceFen: { type: integer, format: int64, minimum: 0 }
+        active: { type: boolean }
+        sort: { type: integer }
+
+    AdminMembershipOrder:
+      type: object
+      required: [orderNo, userId, targetLevel, durationDays, priceFen, status, channel, createdAt, expiresAt]
+      properties:
+        orderNo: { type: string }
+        userId: { type: string }
+        email: { type: string, nullable: true }
+        displayName: { type: string, nullable: true }
+        targetLevel: { type: integer, minimum: 1, maximum: 4 }
+        durationDays: { type: integer }
+        priceFen: { type: integer, format: int64 }
+        status: { type: string, enum: [PENDING, PAID, CLOSED] }
+        channel: { type: string }
+        gatewayTradeNo: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        paidAt: { type: string, format: date-time, nullable: true }
+        expiresAt: { type: string, format: date-time }
 
     Session:
       type: object

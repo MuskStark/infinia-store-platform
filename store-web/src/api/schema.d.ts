@@ -520,6 +520,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/membership/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Public Infinia Level pricing (会员套餐) */
+        get: operations["listMembershipPlans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/membership/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's ladder position and payable channels */
+        get: operations["getMembershipStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/membership/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a purchase order and a gateway cashier session
+         * @description Redirect the buyer's browser to the returned payUrl. Plans must climb the ladder (or renew the active tier); the order snapshots the plan's terms. The payment window closes after store.pay.order-expire-minutes.
+         */
+        post: operations["createMembershipOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/membership/orders/{orderNo}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's order status (return-page polling) */
+        get: operations["getMembershipOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/payments/xunhu/notify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** XunHuPay payment callback (GET variant) — signature-verified */
+        get: operations["xunhuNotifyGet"];
+        put?: never;
+        /** XunHuPay payment callback (form POST) — signature-verified */
+        post: operations["xunhuNotifyPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/install-events": {
         parameters: {
             query?: never;
@@ -1007,6 +1096,62 @@ export interface paths {
          * @description Disabling an account revokes its live sessions immediately. Admins cannot disable themselves or drop their own PLATFORM_ADMIN role. All changes are audited.
          */
         put: operations["updateAdminUser"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/membership/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every membership plan incl. inactive — PLATFORM_ADMIN */
+        get: operations["listAdminMembershipPlans"];
+        put?: never;
+        /** Create a membership plan — PLATFORM_ADMIN */
+        post: operations["createAdminMembershipPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/membership/plans/{planId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Partial update (price, duration, level, availability, sort) — PLATFORM_ADMIN
+         * @description Omitted fields keep their current values. Existing orders keep their snapshotted terms.
+         */
+        put: operations["updateAdminMembershipPlan"];
+        post?: never;
+        /** Delete a plan — PLATFORM_ADMIN */
+        delete: operations["deleteAdminMembershipPlan"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/membership/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent purchase orders with buyer info — PLATFORM_ADMIN */
+        get: operations["listAdminMembershipOrders"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1541,8 +1686,10 @@ export interface components {
             email: string;
             displayName: string;
             roles: string[];
-            /** @description Infinia Level position: 0 LARVA · 1 WORKER · 2 FORAGER · 3 GUARD · 4 QUEEN */
+            /** @description Permanent admin-granted Infinia Level: 0 LARVA · 1 WORKER · 2 FORAGER · 3 GUARD · 4 QUEEN */
             beeLevel?: number;
+            /** @description The level the store enforces: max(beeLevel, active purchased membership level) — what badges and gates should use */
+            effectiveBeeLevel?: number;
             /** Format: date-time */
             createdAt?: string;
         };
@@ -1607,7 +1754,15 @@ export interface components {
             roles?: string[];
             /** @enum {string} */
             status?: "ACTIVE" | "DISABLED";
+            /** @description Permanent admin-granted level */
             beeLevel?: number;
+            /** @description max(beeLevel */
+            effectiveBeeLevel?: number;
+            /**
+             * Format: date-time
+             * @description Active purchased membership deadline
+             */
+            membershipExpiresAt?: string | null;
             mfaEnabled?: boolean;
             /** Format: date-time */
             createdAt?: string;
@@ -1622,6 +1777,102 @@ export interface components {
             /** @description Full replacement role list; USER is always kept */
             roles?: string[];
             displayName?: string;
+        };
+        /** @description A purchasable Infinia Level tier for a fixed duration (会员套餐). */
+        MembershipPlan: {
+            planId: string;
+            beeLevel: number;
+            durationDays: number;
+            /**
+             * Format: int64
+             * @description Price in fen (分)
+             */
+            priceFen: number;
+            active: boolean;
+            sort: number;
+        };
+        /** @description The caller's ladder position and payable channels. */
+        MembershipStatus: {
+            baseBeeLevel: number;
+            effectiveBeeLevel: number;
+            /** @description Active purchased membership level */
+            membershipLevel?: number | null;
+            /** Format: date-time */
+            membershipExpiresAt?: string | null;
+            /** @description Gateway channels the configured credentials support */
+            channels: ("WECHAT" | "ALIPAY" | "MOCK")[];
+        };
+        CreateMembershipOrderRequest: {
+            planId: string;
+            /**
+             * @description Defaults to the first configured channel
+             * @enum {string}
+             */
+            channel?: "WECHAT" | "ALIPAY" | "MOCK";
+        };
+        MembershipOrder: {
+            orderNo: string;
+            targetLevel: number;
+            durationDays: number;
+            /** Format: int64 */
+            priceFen: number;
+            /** @enum {string} */
+            status: "PENDING" | "PAID" | "CLOSED";
+            channel: string;
+            /** @description Cashier URL; only present while PENDING (one-shot */
+            payUrl?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            paidAt?: string | null;
+            /**
+             * Format: date-time
+             * @description End of the payment window
+             */
+            expiresAt: string;
+        };
+        AdminMembershipPlan: {
+            planId: string;
+            beeLevel: number;
+            durationDays: number;
+            /** Format: int64 */
+            priceFen: number;
+            active: boolean;
+            sort: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        /** @description Plan terms; create requires beeLevel/durationDays/priceFen, update is partial. */
+        AdminPlanRequest: {
+            /** @description 1 WORKER .. 4 QUEEN; LARVA is not purchasable */
+            beeLevel?: number;
+            durationDays?: number;
+            /** Format: int64 */
+            priceFen?: number;
+            active?: boolean;
+            sort?: number;
+        };
+        AdminMembershipOrder: {
+            orderNo: string;
+            userId: string;
+            email?: string | null;
+            displayName?: string | null;
+            targetLevel: number;
+            durationDays: number;
+            /** Format: int64 */
+            priceFen: number;
+            /** @enum {string} */
+            status: "PENDING" | "PAID" | "CLOSED";
+            channel: string;
+            gatewayTradeNo?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            paidAt?: string | null;
+            /** Format: date-time */
+            expiresAt: string;
         };
         Session: {
             sessionId?: string;
@@ -2931,6 +3182,157 @@ export interface operations {
             };
         };
     };
+    listMembershipPlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active plans, display order first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipPlan"][];
+                };
+            };
+        };
+    };
+    getMembershipStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Base level, effective level and active membership */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipStatus"];
+                };
+            };
+        };
+    };
+    createMembershipOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMembershipOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Created order with the cashier URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipOrder"];
+                };
+            };
+        };
+    };
+    getMembershipOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderNo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Order (PENDING orders past their window close lazily) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipOrder"];
+                };
+            };
+        };
+    };
+    xunhuNotifyGet: {
+        parameters: {
+            query: {
+                /** @description All gateway callback fields incl. hash */
+                params: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verified and applied — body is the literal text "success" */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Verification failed — body is the literal text "fail" */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    xunhuNotifyPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Verified and applied — body is the literal text "success" */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Verification failed — body is the literal text "fail" */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
     reportInstallEvents: {
         parameters: {
             query?: never;
@@ -3676,6 +4078,116 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminUser"];
+                };
+            };
+        };
+    };
+    listAdminMembershipPlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Plans, display order first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMembershipPlan"][];
+                };
+            };
+        };
+    };
+    createAdminMembershipPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Created plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMembershipPlan"];
+                };
+            };
+        };
+    };
+    updateAdminMembershipPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMembershipPlan"];
+                };
+            };
+        };
+    };
+    deleteAdminMembershipPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listAdminMembershipOrders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Orders, newest first (capped at 200) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMembershipOrder"][];
                 };
             };
         };

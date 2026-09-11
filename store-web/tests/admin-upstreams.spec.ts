@@ -101,6 +101,8 @@ vi.mock('../src/api/client', () => ({
     }),
     getAdminUsers: vi.fn(async () => []),
     getRemoteDatabases: vi.fn(async () => []),
+    getAdminMembershipPlans: vi.fn(async () => []),
+    getAdminMembershipOrders: vi.fn(async () => []),
     getDataSourceStatus: vi.fn(async () => ({
       productName: null, productVersion: null, url: null,
       username: null, remoteOverrideActive: false, overrideName: null,
