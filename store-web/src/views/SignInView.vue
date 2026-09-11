@@ -163,6 +163,7 @@ async function register() {
     <div class="relative hidden overflow-hidden bg-[#19191c] lg:flex lg:w-[44%] lg:items-center">
       <HoneycombField
         class="absolute inset-0"
+        animated
         color="rgba(252, 128, 29, 0.45)"
         wax-color="#fc801d"
         :rows="6"

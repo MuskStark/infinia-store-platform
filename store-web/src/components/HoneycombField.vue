@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 /**
  * HoneycombField — a full-bleed wall of thin-stroked comb cells with a few
@@ -21,6 +21,9 @@ const props = withDefaults(
     cell?: number;
     /** Linear indexes (row × cols + col) of cells rendered as filled wax. */
     waxed?: number[];
+    /** Randomly light cells for a living-wall feel; skipped under
+     *  prefers-reduced-motion. */
+    animated?: boolean;
   }>(),
   {
     color: 'rgba(252, 128, 29, 0.30)',
@@ -29,6 +32,7 @@ const props = withDefaults(
     cols: 6,
     cell: 46,
     waxed: () => [7, 16],
+    animated: false,
   },
 );
 
@@ -65,6 +69,33 @@ const cells = computed(() => {
   return out;
 });
 
+const lit = ref<Set<number>>(new Set());
+let lightTimer: number | undefined;
+
+function lightTick() {
+  const next = new Set<number>();
+  const count = 1 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < count; i++) {
+    const index = Math.floor(Math.random() * cells.value.length);
+    if (!props.waxed.includes(index)) {
+      next.add(index);
+    }
+  }
+  lit.value = next;
+}
+
+onMounted(() => {
+  if (!props.animated || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return;
+  }
+  lightTimer = window.setInterval(lightTick, 750);
+});
+onBeforeUnmount(() => {
+  if (lightTimer !== undefined) {
+    window.clearInterval(lightTimer);
+  }
+});
+
 const viewBox = computed(() => {
   const width = W.value * props.cols + W.value / 2;
   const height = ROW_STEP.value * (props.rows - 1) + 2 * props.cell;
@@ -82,11 +113,24 @@ const viewBox = computed(() => {
     <polygon
       v-for="(cell, index) in cells"
       :key="index"
+      class="comb-cell"
       :points="cell.points"
-      :fill="cell.waxed ? waxColor : 'none'"
+      :fill="waxColor"
+      :fill-opacity="cell.waxed ? 1 : lit.has(index) ? 0.55 : 0"
       :stroke="color"
       stroke-width="1.6"
       stroke-linejoin="round"
     />
   </svg>
 </template>
+
+<style scoped>
+.comb-cell {
+  transition: fill-opacity 1.2s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .comb-cell {
+    transition: none;
+  }
+}
+</style>
