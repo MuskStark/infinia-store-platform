@@ -7,7 +7,6 @@ import { useAuthStore } from '../stores/auth';
 import { submitOAuthSessionLogin } from '../auth/sessionLogin';
 import { MagicCard } from '@infinia/magic-ui-vue';
 import HoneycombField from '../components/HoneycombField.vue';
-import BeeCrest from '../components/BeeCrest.vue';
 
 /**
  * Sign-in / registration (design §7.4).
@@ -174,7 +173,6 @@ async function register() {
       <div class="absolute inset-0 bg-gradient-to-t from-[#19191c] via-transparent to-[#19191c]/60" />
 
       <div class="relative px-12">
-        <BeeCrest :level="4" :size="52" class="mb-6" />
         <p class="text-xs font-semibold uppercase tracking-[0.2em] text-white/40">
           Infinia Store
         </p>
