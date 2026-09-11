@@ -131,5 +131,27 @@ pipeline {
         }
       }
     }
+
+    stage('Verify store signing key') {
+      when { expression { env.BRANCH_NAME == 'main' || env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main' } }
+      steps {
+        script {
+          if (env.PROD_HOST?.trim()) {
+            sshagent(credentials: [env.DEPLOY_KEY_ID]) {
+              sh '''
+                set +x
+                ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
+                    "$PROD_USER@$PROD_HOST" \
+                    "cd '$PROD_PATH' && sudo -n python3 -" \
+                    < scripts/export-store-trust.py > trusted-store-keys.json
+              '''
+            }
+          } else {
+            sh 'cd "$PROD_PATH" && sudo -n python3 scripts/export-store-trust.py > "$WORKSPACE/trusted-store-keys.json"'
+          }
+          archiveArtifacts artifacts: 'trusted-store-keys.json', fingerprint: true
+        }
+      }
+    }
   }
 }

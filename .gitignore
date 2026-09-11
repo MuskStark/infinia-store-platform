@@ -34,3 +34,6 @@ logs/
 
 # Host-local monitor release image selection
 .monitor-release.yml
+
+# ZCode CLI local session state
+.zcode/
