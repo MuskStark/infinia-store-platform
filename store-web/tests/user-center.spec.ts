@@ -138,7 +138,9 @@ describe('User Center (用户中心)', () => {
     expect(wrapper.find('[data-testid="account-membership-active"]').text())
       .toContain('member until');
     expect(wrapper.text()).toContain('Guard');
-    expect(wrapper.text()).not.toContain('Queen');
+    // "Next up: Queen" may name the neighbor tier once — what must stay gone
+    // is the full ladder list.
+    expect(wrapper.find('ol').exists()).toBe(false);
     const cta = wrapper.find('[data-testid="account-membership-cta"]');
     expect(cta.text()).toBe(en.membership.renew);
   });

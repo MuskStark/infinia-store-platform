@@ -308,7 +308,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
                 {{ initial }}
               </span>
               <span class="hidden max-w-36 truncate md:inline">{{ auth.user?.displayName }}</span>
-              <BeeLevelBadge :level="auth.user?.beeLevel ?? 0" compact />
+              <BeeLevelBadge :level="auth.user?.effectiveBeeLevel ?? auth.user?.beeLevel ?? 0" compact />
               <svg
                 class="text-white/60 transition-transform"
                 :class="menuOpen ? 'rotate-180' : ''"
@@ -330,7 +330,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
                 <p class="truncate text-sm font-semibold">{{ auth.user?.displayName }}</p>
                 <p class="truncate text-xs text-muted">{{ auth.user?.email }}</p>
                 <p class="mt-1.5">
-                  <BeeLevelBadge :level="auth.user?.beeLevel ?? 0" />
+                  <BeeLevelBadge :level="auth.user?.effectiveBeeLevel ?? auth.user?.beeLevel ?? 0" />
                 </p>
               </div>
               <div class="p-1.5">

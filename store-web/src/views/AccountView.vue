@@ -9,12 +9,14 @@ import {
 } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
+import BeeCrest from '../components/BeeCrest.vue';
 import EmptyState from '../components/EmptyState.vue';
 import ErrorState from '../components/ErrorState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
 import PageHeader from '../components/PageHeader.vue';
 import { formatDate, formatDateTime } from '../utils/format';
 import { useAuthStore } from '../stores/auth';
+import { beeMark } from '../bee-levels';
 
 /**
  * User Center (用户中心): one signed-in landing page aggregating identity,
@@ -22,6 +24,10 @@ import { useAuthStore } from '../stores/auth';
  * upgrade entry, profile editing, library/organization summaries, role-aware
  * quick links and account security (password, sessions, devices). The full
  * ladder lives on /membership — here only the viewer's own position shows.
+ *
+ * The overview is the page's hero ("hive passport"): hexagon identity mark,
+ * display-size level statement tinted by the tier, and the membership pill.
+ * Everything below stays quiet utility.
  */
 const { t } = useI18n();
 const auth = useAuthStore();
@@ -61,6 +67,31 @@ const nextLevel = computed(() => (effectiveLevel.value < 4 ? effectiveLevel.valu
 const hasMembership = computed(() => membership.value?.membershipLevel != null);
 /** An upgrade makes sense while the ladder has room or a renewal is possible. */
 const canUpgrade = computed(() => effectiveLevel.value < 4 || hasMembership.value);
+
+/** The tier's own color drives the hero's hex wash and the level numeral. */
+const tierHex = computed(() => {
+  const level = effectiveLevel.value;
+  if (level >= 4) return '#a73afd'; // queen — the gradient is spoken by the avatar
+  return beeMark(level).hex || '#6c707e'; // larva has no fill; fall back to muted ink
+});
+
+const tierTextClass = computed(() => {
+  switch (beeMark(effectiveLevel.value).tier) {
+    case 'worker':
+      return 'text-accent';
+    case 'forager':
+      return 'text-success';
+    case 'guard':
+      return 'text-warning';
+    case 'queen':
+      return 'bg-gradient-to-r from-jb-orange via-accent2 to-jb-purple bg-clip-text text-transparent';
+    default:
+      return 'text-ink';
+  }
+});
+
+const userInitial = computed(() =>
+  (user.value?.displayName ?? user.value?.email ?? '?').charAt(0).toUpperCase());
 
 const quickLinks = computed(() => {
   const links: { to: string; label: string }[] = [
@@ -173,58 +204,111 @@ function listingRoute(coordinate: string) {
     <LoadingGrid v-else-if="loading" />
 
     <template v-else-if="user">
-      <!-- Overview: identity, Infinia Level ladder, roles, quick links -->
-      <MagicCard class="p-6">
-        <div class="flex flex-wrap items-start gap-6">
-          <div
-            class="grid h-16 w-16 shrink-0 place-items-center rounded-xl text-2xl font-bold text-white"
-            style="background: var(--hero-gradient)"
-          >
-            {{ (user.displayName ?? user.email).charAt(0).toUpperCase() }}
+      <!-- Hero — the hive passport: identity cell, level statement, membership.
+           The tier-tinted hex cluster is the page's one ornamental act. -->
+      <MagicCard class="hive-hero relative overflow-hidden p-6 sm:p-8">
+        <svg
+          class="hive-hives pointer-events-none absolute -right-6 -top-10 hidden sm:block"
+          width="240"
+          height="240"
+          viewBox="0 0 240 240"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M150 8 208 41v66l-58 33-58-33V41L150 8Z"
+            :stroke="tierHex"
+            stroke-width="1.5"
+            opacity=".16"
+          />
+          <path
+            d="M88 96 128 119v46l-40 23-40-23v-46l40-23Z"
+            :stroke="tierHex"
+            stroke-width="1.5"
+            opacity=".24"
+          />
+          <path
+            d="M170 138 196 153v30l-26 15-26-15v-30l26-15Z"
+            :stroke="tierHex"
+            stroke-width="1.5"
+            opacity=".1"
+          />
+          <path d="M88 119v23l20 11.5v-23L88 119Z" :fill="tierHex" opacity=".14" />
+        </svg>
+
+        <div class="relative flex flex-wrap items-start gap-6">
+          <!-- Identity cell: the avatar is a honeycomb hexagon, brand-filled. -->
+          <div class="hive-avatar shrink-0" aria-hidden="true">
+            <span class="hive-avatar__initial">{{ userInitial }}</span>
           </div>
+
           <div class="min-w-0 flex-1">
             <h2 class="text-xl font-bold">{{ user.displayName }}</h2>
             <p class="text-sm text-muted">{{ user.email }}</p>
-            <!-- Only the viewer's own position: effective level, then the
-                 purchased membership riding on it (details on /membership). -->
-            <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <BeeLevelBadge :level="effectiveLevel" />
-              <span v-if="hasMembership" class="text-xs text-muted" data-testid="account-membership-active">
-                {{ t('membership.activeMembership', { level: membership?.membershipLevel }) }}
-                · {{ t('account.memberUntil', { date: formatDate(membership?.membershipExpiresAt ?? '') }) }}
+
+            <!-- Level statement: display type, tier-tinted crest and numeral. -->
+            <div class="mt-4 flex items-center gap-3">
+              <span class="shrink-0" :class="tierTextClass">
+                <BeeCrest :level="effectiveLevel" :size="40" />
               </span>
-              <span v-else-if="effectiveLevel > beeLevel" class="text-xs text-muted">
-                {{ t('membership.permanentLevel') }}
-              </span>
-              <span v-else class="text-xs text-muted">
-                {{ nextLevel !== null
-                  ? t('account.levelNext', { next: t(`beeLevel.${nextLevel}`) })
-                  : t('account.levelTop') }}
-              </span>
+              <div>
+                <p class="flex items-baseline gap-2">
+                  <span class="text-[1.6rem] font-bold leading-none tracking-tight">
+                    {{ t(`beeLevel.${effectiveLevel}`) }}
+                  </span>
+                  <span
+                    class="text-[1.6rem] font-bold leading-none tabular-nums"
+                    :class="tierTextClass"
+                  >Lv{{ effectiveLevel }}</span>
+                </p>
+                <p class="mt-1.5 text-xs tracking-wide text-muted">
+                  {{ t('beeLevel.title') }}
+                  <template v-if="nextLevel !== null">
+                    · {{ t('account.levelNext', { next: t(`beeLevel.${nextLevel}`) }) }}
+                  </template>
+                  <template v-else>· {{ t('account.levelTop') }}</template>
+                </p>
+              </div>
             </div>
-            <!-- Membership entry: status plus the purchase/upgrade CTA. -->
+
+            <!-- Membership pill: status plus the purchase/renew CTA. -->
             <div
               v-if="canUpgrade"
-              class="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3"
+              class="mt-4 inline-flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-accent/30 bg-accent/5 px-4 py-2.5"
               data-testid="account-membership-card"
             >
-              <div class="min-w-0 flex-1 text-sm">
-                <p class="font-medium">{{ t('account.membershipCardTitle') }}</p>
-                <p class="text-xs text-muted">{{ t('account.membershipCardHint') }}</p>
-              </div>
-              <RouterLink to="/membership" class="btn btn-primary btn-sm shrink-0" data-testid="account-membership-cta">
+              <span
+                v-if="hasMembership"
+                class="inline-flex items-center gap-2 text-sm"
+                data-testid="account-membership-active"
+              >
+                <span class="hive-dot" :style="{ background: tierHex }" aria-hidden="true" />
+                {{ t('membership.activeMembership', { level: membership?.membershipLevel }) }}
+                <span class="text-muted">
+                  {{ t('account.memberUntil', { date: formatDate(membership?.membershipExpiresAt ?? '') }) }}
+                </span>
+              </span>
+              <span v-else class="text-sm text-muted">
+                {{ t('account.membershipCardHint') }}
+              </span>
+              <RouterLink
+                to="/membership"
+                class="btn btn-primary btn-sm shrink-0"
+                data-testid="account-membership-cta"
+              >
                 {{ hasMembership ? t('membership.renew') : t('account.membershipCta') }}
               </RouterLink>
             </div>
           </div>
+
           <div class="flex w-full flex-col gap-2 sm:w-48">
-            <dt class="text-xs text-muted">{{ t('account.roles') }}</dt>
+            <dt class="text-xs tracking-wider text-muted">{{ t('account.roles') }}</dt>
             <dd class="flex flex-wrap gap-1">
               <Badge v-for="role in user.roles" :key="role" tone="accent">
                 {{ t(`role.${role}`) }}
               </Badge>
             </dd>
-            <dt class="mt-2 text-xs text-muted">{{ t('account.quickLinks') }}</dt>
+            <dt class="mt-2 text-xs tracking-wider text-muted">{{ t('account.quickLinks') }}</dt>
             <dd class="flex flex-col gap-1">
               <RouterLink
                 v-for="link in quickLinks"
@@ -239,7 +323,7 @@ function listingRoute(coordinate: string) {
         </div>
       </MagicCard>
 
-      <!-- Everything below the overview lives in a compact two-column grid. -->
+      <!-- Everything below the hero lives in a quiet two-column utility grid. -->
       <div class="grid gap-6 lg:grid-cols-2">
         <!-- Profile editing -->
         <MagicCard class="p-6">
@@ -280,16 +364,22 @@ function listingRoute(coordinate: string) {
           </div>
           <dl class="grid grid-cols-3 gap-3 text-center">
             <div class="card p-3">
-              <dd class="text-2xl font-bold">{{ library?.favorites?.length ?? 0 }}</dd>
-              <dt class="text-xs text-muted">{{ t('account.favoritesCount') }}</dt>
+              <dd class="text-3xl font-bold tabular-nums tracking-tight">
+                {{ library?.favorites?.length ?? 0 }}
+              </dd>
+              <dt class="mt-0.5 text-xs text-muted">{{ t('account.favoritesCount') }}</dt>
             </div>
             <div class="card p-3">
-              <dd class="text-2xl font-bold">{{ library?.entitlements?.length ?? 0 }}</dd>
-              <dt class="text-xs text-muted">{{ t('account.entitlementsCount') }}</dt>
+              <dd class="text-3xl font-bold tabular-nums tracking-tight">
+                {{ library?.entitlements?.length ?? 0 }}
+              </dd>
+              <dt class="mt-0.5 text-xs text-muted">{{ t('account.entitlementsCount') }}</dt>
             </div>
             <div class="card p-3">
-              <dd class="text-2xl font-bold">{{ library?.installHistory?.length ?? 0 }}</dd>
-              <dt class="text-xs text-muted">{{ t('account.installedCount') }}</dt>
+              <dd class="text-3xl font-bold tabular-nums tracking-tight">
+                {{ library?.installHistory?.length ?? 0 }}
+              </dd>
+              <dt class="mt-0.5 text-xs text-muted">{{ t('account.installedCount') }}</dt>
             </div>
           </dl>
           <EmptyState
@@ -418,3 +508,32 @@ function listingRoute(coordinate: string) {
     </template>
   </div>
 </template>
+
+<style scoped>
+/* The signature: the avatar is a honeycomb cell, brand-gradient filled. */
+.hive-avatar {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 80px;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: var(--hero-gradient);
+}
+.hive-avatar__initial {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+  /* Optically center within the hexagon's usable area. */
+  transform: translateY(2px);
+}
+
+/* Wax-seal dot for the active membership pill. */
+.hive-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+</style>
