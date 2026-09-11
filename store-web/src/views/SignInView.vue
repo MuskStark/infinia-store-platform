@@ -6,6 +6,8 @@ import { api, ApiRequestError, setAccessToken, type PublicUser } from '../api/cl
 import { useAuthStore } from '../stores/auth';
 import { submitOAuthSessionLogin } from '../auth/sessionLogin';
 import { MagicCard } from '@infinia/magic-ui-vue';
+import HoneycombField from '../components/HoneycombField.vue';
+import BeeCrest from '../components/BeeCrest.vue';
 
 /**
  * Sign-in / registration (design §7.4).
@@ -156,145 +158,187 @@ async function register() {
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-md py-10">
-    <MagicCard class="p-8">
-      <div class="mb-6 flex items-center gap-3">
-        <img src="/infinia-logo.svg" alt="" class="h-10 w-10" />
-        <h1 class="text-xl font-bold">
-          {{ mode === 'signin' ? t('auth.signInTitle') : t('auth.registerTitle') }}
-        </h1>
+  <div class="-mx-4 -my-8 lg:flex lg:min-h-[calc(100vh-9.5rem)]">
+    <!-- Brand panel: the hive wall. Near-black in both themes like the header
+         bar; the comb texture is the store's signature, not a wallpaper. -->
+    <div class="relative hidden overflow-hidden bg-[#19191c] lg:flex lg:w-[44%] lg:items-center">
+      <HoneycombField
+        class="absolute inset-0"
+        color="rgba(252, 128, 29, 0.45)"
+        wax-color="#fc801d"
+        :rows="6"
+        :cols="7"
+        :cell="52"
+        :waxed="[5, 8, 25, 34]"
+      />
+      <div class="absolute inset-0 bg-gradient-to-t from-[#19191c] via-transparent to-[#19191c]/60" />
+
+      <div class="relative px-12">
+        <BeeCrest :level="4" :size="52" class="mb-6" />
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-white/40">
+          Infinia Store
+        </p>
+        <h2 class="mt-3 text-4xl font-bold leading-tight tracking-tight text-white">
+          {{ t('auth.brandTitle') }}
+        </h2>
+        <p class="mt-4 max-w-sm text-sm leading-6 text-white/55">
+          {{ t('discover.heroSubtitle') }}
+        </p>
       </div>
+    </div>
 
-      <nav class="mb-6 flex gap-1 rounded-xl bg-surface-muted p-1" role="tablist" :aria-label="t('auth.signInTitle')">
-        <button
-          v-for="key in ['signin', 'register'] as const"
-          :key="key"
-          role="tab"
-          :aria-selected="mode === key"
-          class="flex-1 rounded-lg px-4 py-2 text-sm font-medium"
-          :class="mode === key ? 'bg-surface shadow-sm dark:bg-slate-800' : 'text-muted'"
-          @click="switchMode(key)"
-        >
-          {{ key === 'signin' ? t('nav.signIn') : t('auth.register') }}
-        </button>
-      </nav>
+    <!-- Form panel -->
+    <div class="flex w-full items-center justify-center px-4 py-10 lg:flex-1">
+      <div class="w-full max-w-md">
+        <!-- Slim brand strip keeps the identity on mobile where the wall is hidden. -->
+        <div class="mb-6 flex items-center gap-3 lg:hidden">
+          <img src="/infinia-logo.svg" alt="" class="h-9 w-9" />
+          <span class="text-base font-bold">Infinia Store</span>
+        </div>
 
-      <form class="space-y-4" novalidate @submit.prevent="mode === 'signin' ? signIn() : register()">
-        <label class="block text-sm">
-          {{ t('auth.email') }}
-          <input
-            v-model="email"
-            type="email"
-            required
-            autocomplete="username"
-            :aria-invalid="emailInvalid || undefined"
-            placeholder="you@example.com"
-            class="input mt-1"
-          />
-          <span v-if="emailInvalid" class="mt-1 block text-xs text-red-600 dark:text-red-400">
-            {{ t('auth.emailInvalid') }}
-          </span>
-        </label>
+        <MagicCard class="p-8">
+          <div class="mb-6 hidden items-center gap-3 lg:flex">
+            <img src="/infinia-logo.svg" alt="" class="h-10 w-10" />
+            <h1 class="text-xl font-bold">
+              {{ mode === 'signin' ? t('auth.signInTitle') : t('auth.registerTitle') }}
+            </h1>
+          </div>
+          <h1 class="mb-6 text-xl font-bold lg:hidden">
+            {{ mode === 'signin' ? t('auth.signInTitle') : t('auth.registerTitle') }}
+          </h1>
 
-        <label class="block text-sm">
-          {{ t('auth.password') }}
-          <span class="relative mt-1 block">
-            <input
-              v-model="password"
-              :type="showPassword ? 'text' : 'password'"
-              required
-              :minlength="mode === 'register' ? 8 : undefined"
-              :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
-              :aria-invalid="passwordShort || undefined"
-              placeholder="••••••••"
-              class="input pr-16!"
-            />
+          <nav class="mb-6 flex gap-1 rounded-xl bg-surface-muted p-1" role="tablist" :aria-label="t('auth.signInTitle')">
             <button
-              type="button"
-              class="absolute inset-y-0 right-2 my-auto rounded-lg px-2 text-xs text-muted"
-              :aria-label="t('auth.togglePassword')"
-              @click="showPassword = !showPassword"
+              v-for="key in ['signin', 'register'] as const"
+              :key="key"
+              role="tab"
+              :aria-selected="mode === key"
+              class="flex-1 rounded-lg px-4 py-2 text-sm font-medium"
+              :class="mode === key ? 'bg-surface shadow-sm dark:bg-slate-800' : 'text-muted'"
+              @click="switchMode(key)"
             >
-              {{ showPassword ? t('auth.hide') : t('auth.show') }}
+              {{ key === 'signin' ? t('nav.signIn') : t('auth.register') }}
             </button>
-          </span>
-          <span v-if="passwordShort" class="mt-1 block text-xs text-red-600 dark:text-red-400">
-            {{ t('auth.passwordShort') }}
-          </span>
-        </label>
+          </nav>
 
-        <template v-if="mode === 'register'">
-          <label class="block text-sm">
-            {{ t('auth.passwordConfirm') }}
-            <input
-              v-model="passwordConfirm"
-              :type="showPassword ? 'text' : 'password'"
-              required
-              autocomplete="new-password"
-              :aria-invalid="passwordMismatch || undefined"
-              class="input mt-1"
-            />
-            <span v-if="passwordMismatch" class="mt-1 block text-xs text-red-600 dark:text-red-400">
-              {{ t('auth.passwordMismatch') }}
-            </span>
-          </label>
+          <form class="space-y-4" novalidate @submit.prevent="mode === 'signin' ? signIn() : register()">
+            <label class="block text-sm">
+              {{ t('auth.email') }}
+              <input
+                v-model="email"
+                type="email"
+                required
+                autocomplete="username"
+                :aria-invalid="emailInvalid || undefined"
+                placeholder="you@example.com"
+                class="input mt-1"
+              />
+              <span v-if="emailInvalid" class="mt-1 block text-xs text-red-600 dark:text-red-400">
+                {{ t('auth.emailInvalid') }}
+              </span>
+            </label>
 
-          <label class="block text-sm">
-            {{ t('account.displayName') }}
-            <input
-              v-model="displayName"
-              autocomplete="nickname"
-              :placeholder="t('auth.displayNamePlaceholder')"
-              class="input mt-1"
-            />
-          </label>
-        </template>
+            <label class="block text-sm">
+              {{ t('auth.password') }}
+              <span class="relative mt-1 block">
+                <input
+                  v-model="password"
+                  :type="showPassword ? 'text' : 'password'"
+                  required
+                  :minlength="mode === 'register' ? 8 : undefined"
+                  :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
+                  :aria-invalid="passwordShort || undefined"
+                  placeholder="••••••••"
+                  class="input pr-16!"
+                />
+                <button
+                  type="button"
+                  class="absolute inset-y-0 right-2 my-auto rounded-lg px-2 text-xs text-muted"
+                  :aria-label="t('auth.togglePassword')"
+                  @click="showPassword = !showPassword"
+                >
+                  {{ showPassword ? t('auth.hide') : t('auth.show') }}
+                </button>
+              </span>
+              <span v-if="passwordShort" class="mt-1 block text-xs text-red-600 dark:text-red-400">
+                {{ t('auth.passwordShort') }}
+              </span>
+            </label>
 
-        <button type="submit" class="btn btn-primary h-11 w-full" :disabled="busy || formInvalid">
-          {{ busy ? t('common.loading') : mode === 'signin' ? t('nav.signIn') : t('auth.register') }}
-        </button>
-      </form>
+            <template v-if="mode === 'register'">
+              <label class="block text-sm">
+                {{ t('auth.passwordConfirm') }}
+                <input
+                  v-model="passwordConfirm"
+                  :type="showPassword ? 'text' : 'password'"
+                  required
+                  autocomplete="new-password"
+                  :aria-invalid="passwordMismatch || undefined"
+                  class="input mt-1"
+                />
+                <span v-if="passwordMismatch" class="mt-1 block text-xs text-red-600 dark:text-red-400">
+                  {{ t('auth.passwordMismatch') }}
+                </span>
+              </label>
 
-      <p v-if="error" class="alert alert-error mt-4" role="alert">
-        {{ error }}
-      </p>
-      <p v-else-if="notice" class="alert alert-info mt-4" role="status">
-        {{ notice }}
-      </p>
+              <label class="block text-sm">
+                {{ t('account.displayName') }}
+                <input
+                  v-model="displayName"
+                  autocomplete="nickname"
+                  :placeholder="t('auth.displayNamePlaceholder')"
+                  class="input mt-1"
+                />
+              </label>
+            </template>
 
-      <details v-if="mode === 'signin' && showDemoAccounts" class="mt-5 text-sm">
-        <summary class="cursor-pointer select-none text-muted hover:text-accent dark:text-slate-400">
-          {{ t('auth.demoAccounts') }}
-        </summary>
-        <ul class="mt-2 space-y-1">
-          <li v-for="demo in demoAccounts" :key="demo.email">
-            <button
-              type="button"
-              class="flex w-full items-center justify-between rounded-lg border border-line px-3 py-2 text-left text-xs hover:bg-surface-muted dark:border-slate-800"
-              @click="useDemoAccount(demo)"
-            >
-              <code>{{ demo.email }}</code>
-              <span class="text-muted">{{ demo.label }}</span>
+            <button type="submit" class="btn btn-primary h-11 w-full" :disabled="busy || formInvalid">
+              {{ busy ? t('common.loading') : mode === 'signin' ? t('nav.signIn') : t('auth.register') }}
             </button>
-          </li>
-        </ul>
-        <p class="mt-2 text-xs text-muted">{{ t('auth.demoHint') }}</p>
-      </details>
+          </form>
 
-      <p class="mt-4 text-center text-sm">
-        <template v-if="mode === 'signin'">
-          {{ t('auth.noAccount') }}
-          <button class="font-semibold text-accent" @click="switchMode('register')">
-            {{ t('auth.register') }}
-          </button>
-        </template>
-        <template v-else>
-          {{ t('auth.haveAccount') }}
-          <button class="font-semibold text-accent" @click="switchMode('signin')">
-            {{ t('nav.signIn') }}
-          </button>
-        </template>
-      </p>
-    </MagicCard>
+          <p v-if="error" class="alert alert-error mt-4" role="alert">
+            {{ error }}
+          </p>
+          <p v-else-if="notice" class="alert alert-info mt-4" role="status">
+            {{ notice }}
+          </p>
+
+          <details v-if="mode === 'signin' && showDemoAccounts" class="mt-5 text-sm">
+            <summary class="cursor-pointer select-none text-muted hover:text-accent dark:text-slate-400">
+              {{ t('auth.demoAccounts') }}
+            </summary>
+            <ul class="mt-2 space-y-1">
+              <li v-for="demo in demoAccounts" :key="demo.email">
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between rounded-lg border border-line px-3 py-2 text-left text-xs hover:bg-surface-muted dark:border-slate-800"
+                  @click="useDemoAccount(demo)"
+                >
+                  <code>{{ demo.email }}</code>
+                  <span class="text-muted">{{ demo.label }}</span>
+                </button>
+              </li>
+            </ul>
+            <p class="mt-2 text-xs text-muted">{{ t('auth.demoHint') }}</p>
+          </details>
+
+          <p class="mt-4 text-center text-sm">
+            <template v-if="mode === 'signin'">
+              {{ t('auth.noAccount') }}
+              <button class="font-semibold text-accent" @click="switchMode('register')">
+                {{ t('auth.register') }}
+              </button>
+            </template>
+            <template v-else>
+              {{ t('auth.haveAccount') }}
+              <button class="font-semibold text-accent" @click="switchMode('signin')">
+                {{ t('nav.signIn') }}
+              </button>
+            </template>
+          </p>
+        </MagicCard>
+      </div>
+    </div>
   </div>
 </template>

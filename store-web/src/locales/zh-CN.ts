@@ -579,6 +579,7 @@ export default {
     },
   },
   auth: {
+    brandTitle: '回到蜂巢',
     signInTitle: '登录 Infinia 商店',
     registerTitle: '创建账号',
     register: '注册',

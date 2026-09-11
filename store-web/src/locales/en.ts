@@ -582,6 +582,7 @@ export default {
     },
   },
   auth: {
+    brandTitle: 'Back to the hive',
     signInTitle: 'Sign in to Infinia Store',
     registerTitle: 'Create account',
     register: 'Register',
