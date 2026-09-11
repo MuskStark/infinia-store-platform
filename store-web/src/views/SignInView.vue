@@ -157,7 +157,7 @@ async function register() {
 </script>
 
 <template>
-  <div class="-mx-4 -my-8 lg:flex lg:min-h-[calc(100vh-9.5rem)]">
+  <div class="flex lg:min-h-screen">
     <!-- Brand panel: the hive wall. Near-black in both themes like the header
          bar; the comb texture is the store's signature, not a wallpaper. -->
     <div class="relative hidden overflow-hidden bg-[#19191c] lg:flex lg:w-[44%] lg:items-center">

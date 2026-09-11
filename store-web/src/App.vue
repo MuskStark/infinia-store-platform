@@ -10,6 +10,8 @@ import RouteContent from './components/RouteContent.vue';
 const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
+/** The sign-in page renders full-bleed — no nav bar, no footer band. */
+const bareChrome = computed(() => route.path === '/signin');
 const auth = useAuthStore();
 
 // Plain ref, not a computed over document.documentElement: the DOM is not
@@ -130,7 +132,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
   <div class="flex min-h-screen flex-col">
     <!-- Marketplace shell: the near-black bar is the signature element; it stays
          dark in both themes so the Infinia mark and white nav pop. -->
-    <header class="header-bar sticky top-0 z-40">
+    <header v-if="!bareChrome" class="header-bar sticky top-0 z-40">
       <div class="mx-auto flex max-w-[90rem] flex-wrap items-center gap-4 px-4 py-2.5 max-md:gap-y-1">
         <RouterLink :to="{ name: 'discover' }" class="flex shrink-0 items-center gap-2">
           <!-- Official Infinia mark, shared with the FengYu host frontend. -->
@@ -391,12 +393,12 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
       </div>
     </header>
 
-    <main class="mx-auto w-full max-w-[90rem] flex-1 px-4 py-8">
+    <main :class="bareChrome ? 'w-full flex-1' : 'mx-auto w-full max-w-[90rem] flex-1 px-4 py-8'">
       <RouteContent />
     </main>
 
     <!-- Light-gray marketplace footer band: links left, brand right. -->
-    <footer class="border-t border-line bg-surface-muted dark:border-slate-800 dark:bg-slate-950">
+    <footer v-if="!bareChrome" class="border-t border-line bg-surface-muted dark:border-slate-800 dark:bg-slate-950">
       <div
         class="mx-auto flex max-w-[90rem] flex-wrap items-center justify-between gap-3 px-4 py-5 text-xs text-muted dark:text-slate-400"
       >
