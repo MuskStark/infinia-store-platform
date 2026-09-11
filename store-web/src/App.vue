@@ -350,6 +350,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateNavFades));
                   {{ t('nav.library') }}
                 </RouterLink>
                 <RouterLink
+                  class="block rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-muted dark:hover:bg-slate-800"
+                  :to="{ name: 'organizations' }"
+                  role="menuitem"
+                  @click="menuOpen = false"
+                >
+                  {{ t('nav.organizations') }}
+                </RouterLink>
+                <RouterLink
                   v-if="isPublisher"
                   class="block rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-muted dark:hover:bg-slate-800"
                   :to="{ name: 'publisher' }"
