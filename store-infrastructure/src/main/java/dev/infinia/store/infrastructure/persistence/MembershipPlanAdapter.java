@@ -39,6 +39,7 @@ public class MembershipPlanAdapter implements BillingRepositories.MembershipPlan
         e.priceFen = plan.priceFen;
         e.active = plan.active;
         e.sort = plan.sort;
+        e.externalUrl = plan.externalUrl;
         e.createdAt = plan.createdAt;
         e.updatedAt = plan.updatedAt;
         jpa.save(e);
@@ -51,6 +52,6 @@ public class MembershipPlanAdapter implements BillingRepositories.MembershipPlan
 
     static MembershipPlan toDomain(MembershipPlanEntity e) {
         return new MembershipPlan(e.id, e.beeLevel, e.durationDays, e.priceFen, e.active,
-                e.sort, e.createdAt, e.updatedAt);
+                e.sort, e.externalUrl, e.createdAt, e.updatedAt);
     }
 }

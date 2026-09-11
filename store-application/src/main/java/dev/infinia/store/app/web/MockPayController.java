@@ -3,6 +3,7 @@ package dev.infinia.store.app.web;
 import dev.infinia.store.app.service.MembershipService;
 import dev.infinia.store.app.service.MockPaymentGateway;
 import dev.infinia.store.domain.port.BillingRepositories;
+import dev.infinia.store.domain.port.PaymentGateway;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpHeaders;
@@ -23,7 +24,8 @@ import java.util.Map;
  * The built-in simulated cashier (模拟收银台) for local development: shows the
  * order and a confirm button whose POST drives the same notify path a real
  * gateway callback takes. Registered only with the local profile plus
- * {@code store.pay.mock-enabled=true}; the public security rule for
+ * {@code store.pay.mock-enabled=true} (which also makes the active gateway the
+ * MockPaymentGateway); the public security rule for
  * {@code /api/v1/payments/mock/**} is inert everywhere else because this
  * controller bean does not exist and unknown API paths 404.
  */
@@ -34,22 +36,28 @@ import java.util.Map;
 public class MockPayController {
 
     private final BillingRepositories.MembershipOrderRepository orders;
-    private final MockPaymentGateway gateway;
+    private final PaymentGateway gateway;
     private final MembershipService membership;
 
     public MockPayController(BillingRepositories.MembershipOrderRepository orders,
-            MockPaymentGateway gateway, MembershipService membership) {
+            PaymentGateway gateway, MembershipService membership) {
         this.orders = orders;
         this.gateway = gateway;
         this.membership = membership;
+    }
+
+    /** Null unless the wired gateway really is the local simulator. */
+    private MockPaymentGateway mock() {
+        return gateway instanceof MockPaymentGateway mock ? mock : null;
     }
 
     @GetMapping(value = "/{orderNo}", produces = MediaType.TEXT_HTML_VALUE)
     @ResponseBody
     public ResponseEntity<String> cashier(@PathVariable String orderNo,
             @RequestParam String token) {
-        var order = orders.findByOrderNo(orderNo).orElse(null);
-        if (order == null || !gateway.token(orderNo, order.priceFen).equals(token)) {
+        MockPaymentGateway mock = mock();
+        var order = mock == null ? null : orders.findByOrderNo(orderNo).orElse(null);
+        if (order == null || !mock.token(orderNo, order.priceFen).equals(token)) {
             return ResponseEntity.status(404).contentType(MediaType.TEXT_PLAIN)
                     .body("Unknown or forged mock order");
         }
@@ -85,8 +93,9 @@ public class MockPayController {
     @PostMapping("/{orderNo}/confirm")
     public ResponseEntity<Void> confirm(@PathVariable String orderNo,
             @RequestParam String token) {
-        var order = orders.findByOrderNo(orderNo).orElse(null);
-        if (order == null || !gateway.token(orderNo, order.priceFen).equals(token)) {
+        MockPaymentGateway mock = mock();
+        var order = mock == null ? null : orders.findByOrderNo(orderNo).orElse(null);
+        if (order == null || !mock.token(orderNo, order.priceFen).equals(token)) {
             return ResponseEntity.status(404).build();
         }
         membership.handleNotify(Map.of(

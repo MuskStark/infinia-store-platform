@@ -50,6 +50,11 @@ public final class MembershipTestSupport {
         }
 
         @Override
+        public String notifyPath() {
+            return "/api/v1/payments/stub/notify";
+        }
+
+        @Override
         public PaymentCreated createPayment(PaymentRequest request) {
             requests.add(request);
             if (request.orderNo().equals(failOrderNo)) {

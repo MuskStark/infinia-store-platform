@@ -35,6 +35,11 @@ public class MembershipOrderAdapter
     }
 
     @Override
+    public Optional<MembershipOrder> findByGatewayTradeNo(String gatewayTradeNo) {
+        return jpa.findByGatewayTradeNo(gatewayTradeNo).map(MembershipOrderAdapter::toDomain);
+    }
+
+    @Override
     public List<MembershipOrder> findByUserId(UUID userId) {
         return jpa.findByUserIdOrderByCreatedAtDesc(userId).stream()
                 .map(MembershipOrderAdapter::toDomain).toList();

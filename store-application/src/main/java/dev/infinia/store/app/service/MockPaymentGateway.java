@@ -2,10 +2,6 @@ package dev.infinia.store.app.service;
 
 import dev.infinia.store.app.config.StoreProperties;
 import dev.infinia.store.domain.port.PaymentGateway;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Primary;
-import org.springframework.context.annotation.Profile;
-import org.springframework.stereotype.Component;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -16,21 +12,15 @@ import java.util.Map;
 
 /**
  * Local-development gateway behind the {@link PaymentGateway} port: instead of
- * calling XunHuPay it hands back the built-in simulated cashier URL
+ * calling a real provider it hands back the built-in simulated cashier URL
  * ({@code /api/v1/payments/mock/...}) whose confirm button drives the very same
  * {@code handleNotify} path a real callback takes. Tokens are HMAC-SHA256 over
  * {@code orderNo|amountFen} with the deployment's ticket secret, so a forged
  * cashier link cannot confirm an order.
  *
- * <p>Both guards matter: the {@code local} profile keeps it out of every
- * deployment runtime, and {@code store.pay.mock-enabled=true} (default false)
- * makes even local runs opt-in. {@code @Primary} overrides the unconfigured
- * XunHuPay adapter so the whole purchase flow works without credentials.</p>
+ * <p>Selected by PaymentGatewayConfig only when {@code store.pay.mock-enabled=true}
+ * AND the local profile is active — no deployment runtime can ever wire it.</p>
  */
-@Component
-@Profile("local")
-@ConditionalOnProperty(prefix = "store.pay", name = "mock-enabled", havingValue = "true")
-@Primary
 public class MockPaymentGateway implements PaymentGateway {
 
     public static final String CHANNEL_MOCK = "MOCK";
@@ -44,6 +34,13 @@ public class MockPaymentGateway implements PaymentGateway {
     @Override
     public List<String> supportedChannels() {
         return List.of(CHANNEL_MOCK);
+    }
+
+    @Override
+    public String notifyPath() {
+        // The simulated cashier drives handleNotify in-process; the confirm
+        // endpoint stands in for the gateway callback.
+        return "/api/v1/payments/mock/notify";
     }
 
     @Override

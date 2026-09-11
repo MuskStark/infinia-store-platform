@@ -14,13 +14,17 @@ import dev.infinia.store.domain.port.BillingRepositories;
 import dev.infinia.store.domain.port.IdentityRepositories;
 import dev.infinia.store.domain.port.PaymentGateway;
 import dev.infinia.store.domain.service.UuidV7;
+import dev.infinia.store.infrastructure.payment.BmacProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
-import java.security.SecureRandom;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -40,7 +44,7 @@ import java.util.UUID;
 public class MembershipService {
 
     private static final Logger log = LoggerFactory.getLogger(MembershipService.class);
-    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
 
     private final BillingRepositories.MembershipPlanRepository plans;
     private final BillingRepositories.MembershipOrderRepository orders;
@@ -49,12 +53,15 @@ public class MembershipService {
     private final PaymentGateway gateway;
     private final StoreProperties properties;
     private final AuditService audit;
+    private final BmacProperties bmac;
+    private final ObjectMapper mapper;
 
     public MembershipService(BillingRepositories.MembershipPlanRepository plans,
             BillingRepositories.MembershipOrderRepository orders,
             BillingRepositories.UserMembershipRepository memberships,
             IdentityRepositories.UserRepository users,
-            PaymentGateway gateway, StoreProperties properties, AuditService audit) {
+            PaymentGateway gateway, StoreProperties properties, AuditService audit,
+            BmacProperties bmac, ObjectMapper mapper) {
         this.plans = plans;
         this.orders = orders;
         this.memberships = memberships;
@@ -62,6 +69,8 @@ public class MembershipService {
         this.gateway = gateway;
         this.properties = properties;
         this.audit = audit;
+        this.bmac = bmac;
+        this.mapper = mapper;
     }
 
     // ---- buyer surface ----
@@ -144,8 +153,9 @@ public class MembershipService {
 
         PaymentGateway.PaymentCreated created = gateway.createPayment(new PaymentGateway.PaymentRequest(
                 order.orderNo, order.priceFen, orderTitle(order), channel,
-                properties.baseUrl() + "/api/v1/payments/xunhu/notify",
-                properties.baseUrl() + "/membership/result?orderNo=" + order.orderNo));
+                properties.baseUrl() + gateway.notifyPath(),
+                properties.baseUrl() + "/membership/result?orderNo=" + order.orderNo,
+                plan.externalUrl));
         order.payUrl = created.payUrl();
         orders.save(order);
         return orderDto(order);
@@ -216,6 +226,118 @@ public class MembershipService {
     }
 
     /**
+     * Consumes a Buy Me a Coffee webhook (raw JSON body + {@code x-signature-sha256}
+     * header). Returns true when BMAC should consider the delivery done — which
+     * includes events we deliberately ignore (refunds, subscription lifecycle,
+     * dashboard test events), because replying "fail" only burns their four
+     * retries and eventually auto-disables the webhook. False (delivery error)
+     * is reserved for a bad signature, which retrying will never fix either but
+     * should stay loud in the dashboard.
+     *
+     * <p>Matching: BMAC cannot carry order metadata, so a paid
+     * {@code donation.created}/{@code extra_purchase.created} is matched to the
+     * buyer's most recent PENDING order created within the match window whose
+     * price equals the paid amount ({@code amount × 100}, creator-currency
+     * cents — plans for BMAC price accordingly). No exact match → audited and
+     * acknowledged (a human resolves it from the console); replayed transaction
+     * ids are idempotent.</p>
+     */
+    @Transactional
+    public boolean handleBmacWebhook(String rawBody, String signature) {
+        if (!bmac.configured()) {
+            return false;
+        }
+        if (!bmacSignatureValid(rawBody, signature)) {
+            log.warn("BMAC webhook failed signature verification");
+            return false;
+        }
+        JsonNode event;
+        try {
+            event = mapper.readTree(rawBody);
+        } catch (Exception e) {
+            log.warn("BMAC webhook body is not JSON: {}", e.getMessage());
+            return false;
+        }
+        String type = event.path("type").asText("");
+        if (!"donation.created".equals(type) && !"extra_purchase.created".equals(type)) {
+            // Refunds/subscription lifecycle/shop orders: keep the level a human
+            // sold; acknowledge so BMAC stops retrying.
+            log.debug("BMAC webhook {} acknowledged without action", type);
+            return true;
+        }
+        if (!event.path("live_mode").asBoolean(false)) {
+            // Dashboard "Send test event" must never grant a real membership.
+            log.info("BMAC test event ignored (live_mode=false)");
+            return true;
+        }
+        JsonNode data = event.path("data");
+        if (!"succeeded".equals(data.path("status").asText(""))) {
+            return true;
+        }
+        String email = AccountService.normalizeEmail(data.path("supporter_email").asText(""));
+        long amountFen = Math.round(data.path("amount").asDouble(0) * 100);
+        String ref = "BMAC-" + data.path("transaction_id").asText(
+                String.valueOf(data.path("id").asLong(0)));
+        if (email.isBlank() || amountFen <= 0) {
+            log.warn("BMAC webhook {} without supporter_email/amount", type);
+            return true;
+        }
+        if (orders.findByGatewayTradeNo(ref).isPresent()) {
+            return true; // replayed delivery — already applied
+        }
+
+        StoreUser buyer = users.findByEmailNormalized(email).orElse(null);
+        MembershipOrder matched = null;
+        if (buyer != null) {
+            Instant windowStart = Instant.now()
+                    .minus(Duration.ofMinutes(bmac.matchWindowMinutes()));
+            matched = orders.findByUserId(buyer.id).stream()
+                    .filter(o -> o.status == MembershipOrderStatus.PENDING)
+                    .filter(o -> o.createdAt.isAfter(windowStart))
+                    .filter(o -> o.priceFen == amountFen)
+                    .findFirst().orElse(null);
+        }
+        if (matched == null) {
+            audit.record("GATEWAY", "bmac", "membership.bmacUnmatched", "MEMBERSHIP_ORDER",
+                    ref, null, email + "/" + amountFen + "fen/" + type, null);
+            log.warn("BMAC payment {} from {} ({}fen) matched no pending order", ref, email,
+                    amountFen);
+            return true;
+        }
+
+        Instant now = Instant.now();
+        matched.status = MembershipOrderStatus.PAID;
+        matched.paidAt = now;
+        matched.gatewayTradeNo = ref;
+        applyMembership(matched, now);
+        orders.save(matched);
+        UserMembership membership = memberships.findByUserId(matched.userId).orElse(null);
+        audit.record("USER", matched.userId.toString(), "membership.purchased",
+                "MEMBERSHIP_ORDER", matched.orderNo, null,
+                "L" + matched.targetLevel + "/" + matched.durationDays + "d"
+                        + (membership == null ? "" : " expires " + membership.expiresAt),
+                null);
+        return true;
+    }
+
+    /** HMAC-SHA256 of the raw body with the webhook signing secret, constant-time. */
+    private boolean bmacSignatureValid(String rawBody, String signature) {
+        if (rawBody == null || signature == null || signature.isBlank()) {
+            return false;
+        }
+        try {
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(
+                    bmac.webhookSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] expected = mac.doFinal(rawBody.getBytes(StandardCharsets.UTF_8));
+            byte[] provided = java.util.HexFormat.of().parseHex(signature.trim());
+            return MessageDigest.isEqual(expected, provided);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * Closes PENDING orders whose payment window lapsed. Runs on a schedule; a
      * late-arriving callback still flips a CLOSED order to PAID because the
      * money moved — {@link #handleNotify} only short-circuits on PAID.
@@ -248,7 +370,8 @@ public class MembershipService {
         MembershipPlan plan = new MembershipPlan(UuidV7.generate(), request.beeLevel(),
                 request.durationDays(), request.priceFen(),
                 request.active() == null ? true : request.active(),
-                request.sort() == null ? request.beeLevel() : request.sort(), now, now);
+                request.sort() == null ? request.beeLevel() : request.sort(),
+                normalizeExternalUrl(request.externalUrl()), now, now);
         plans.save(plan);
         audit.record("USER", adminId.toString(), "membership.planCreated", "MEMBERSHIP_PLAN",
                 plan.id.toString(), null, adminPlanDto(plan).toString(), null);
@@ -271,9 +394,12 @@ public class MembershipService {
                 request.priceFen() == null ? plan.priceFen : request.priceFen(),
                 request.active() == null ? plan.active : request.active(),
                 request.sort() == null ? plan.sort : request.sort(),
+                request.externalUrl() == null ? plan.externalUrl
+                        : normalizeExternalUrl(request.externalUrl()),
                 plan.createdAt, Instant.now());
         requirePlanTerms(new MembershipDtos.AdminPlanRequest(updated.beeLevel,
-                updated.durationDays, updated.priceFen, updated.active, updated.sort), false);
+                updated.durationDays, updated.priceFen, updated.active, updated.sort,
+                updated.externalUrl), false);
         plans.save(updated);
         audit.record("USER", adminId.toString(), "membership.planUpdated", "MEMBERSHIP_PLAN",
                 plan.id.toString(), adminPlanDto(plan).toString(),
@@ -378,6 +504,21 @@ public class MembershipService {
             throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
                     "priceFen cannot be negative");
         }
+        normalizeExternalUrl(request.externalUrl());
+    }
+
+    /** Blank → null; otherwise an absolute http(s) URL within 512 chars. */
+    private static String normalizeExternalUrl(String externalUrl) {
+        if (externalUrl == null || externalUrl.isBlank()) {
+            return null;
+        }
+        String trimmed = externalUrl.trim();
+        if (trimmed.length() > 512 || !(trimmed.startsWith("https://")
+                || trimmed.startsWith("http://"))) {
+            throw new DomainException(StoreErrorCode.VALIDATION_FAILED,
+                    "externalUrl must be an absolute http(s) URL of at most 512 characters");
+        }
+        return trimmed;
     }
 
     /** MEM + yyMMddHHmmss + 12 random letters/digits — fits the gateway charset. */
@@ -413,7 +554,7 @@ public class MembershipService {
 
     private static MembershipDtos.AdminMembershipPlanDto adminPlanDto(MembershipPlan plan) {
         return new MembershipDtos.AdminMembershipPlanDto(plan.id.toString(), plan.beeLevel,
-                plan.durationDays, plan.priceFen, plan.active, plan.sort,
+                plan.durationDays, plan.priceFen, plan.active, plan.sort, plan.externalUrl,
                 plan.createdAt.toString(), plan.updatedAt.toString());
     }
 

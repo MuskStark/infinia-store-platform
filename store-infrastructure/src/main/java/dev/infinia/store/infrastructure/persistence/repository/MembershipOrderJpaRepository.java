@@ -22,6 +22,8 @@ public interface MembershipOrderJpaRepository extends JpaRepository<MembershipOr
 
     Optional<MembershipOrderEntity> findByOrderNo(String orderNo);
 
+    Optional<MembershipOrderEntity> findByGatewayTradeNo(String gatewayTradeNo);
+
     List<MembershipOrderEntity> findByUserIdOrderByCreatedAtDesc(UUID userId);
 
     List<MembershipOrderEntity> findTop200ByOrderByCreatedAtDesc();

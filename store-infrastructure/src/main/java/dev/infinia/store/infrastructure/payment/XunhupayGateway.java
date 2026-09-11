@@ -24,8 +24,6 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import org.springframework.stereotype.Component;
-
 /**
  * XunHuPay (虎皮椒) adapter — the personal-developer payment channel behind the
  * {@link PaymentGateway} port. Speaks the documented protocol: form POST to
@@ -34,8 +32,13 @@ import org.springframework.stereotype.Component;
  * directly; the cashier page comes back in {@code url}; the async callback
  * repeats the same signing scheme and must be answered with the literal
  * {@code success}.
+ *
+ * <p>Instantiated by PaymentGatewayConfig (not a component) so exactly one
+ * adapter family backs the {@link PaymentGateway} port per deployment. The
+ * platform charges an account-opening fee, so deployments that did not pay it
+ * simply leave its credentials unset — selection then falls through to the
+ * Epay adapter.</p>
  */
-@Component
 public class XunhupayGateway implements PaymentGateway {
 
     public static final String CHANNEL_WECHAT = "WECHAT";
@@ -66,6 +69,11 @@ public class XunhupayGateway implements PaymentGateway {
             channels.add(CHANNEL_ALIPAY);
         }
         return channels;
+    }
+
+    @Override
+    public String notifyPath() {
+        return "/api/v1/payments/xunhu/notify";
     }
 
     @Override

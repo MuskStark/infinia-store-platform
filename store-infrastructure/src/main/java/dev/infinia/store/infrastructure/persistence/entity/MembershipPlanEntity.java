@@ -23,6 +23,9 @@ public class MembershipPlanEntity {
     public boolean active;
     @Column(name = "sort", nullable = false)
     public int sort;
+    /** Plan-specific checkout link (e.g. a Buy Me a Coffee Extra); null = gateway-built URL. */
+    @Column(name = "external_url")
+    public String externalUrl;
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;
     @Column(name = "updated_at", nullable = false)

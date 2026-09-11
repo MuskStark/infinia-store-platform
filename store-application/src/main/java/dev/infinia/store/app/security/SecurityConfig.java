@@ -65,9 +65,11 @@ public class SecurityConfig {
             "/api/v1/releases/*/install-package", "/api/v1/releases/*/checksums.txt",
             // Service status must stay reachable exactly when things are broken.
             "/api/v1/status", "/api/v1/status/incidents", "/api/v1/status/monitor",
-            // Membership pricing is public marketing surface; the payment callback
-            // must be callable by the gateway (signature-verified in the handler).
-            "/api/v1/membership/plans", "/api/v1/payments/xunhu/notify",
+            // Membership pricing is public marketing surface; payment callbacks
+            // must be callable by the gateway (signature-verified in the handler),
+            // one path per protocol (Buy Me a Coffee / 易支付 / 虎皮椒).
+            "/api/v1/membership/plans", "/api/v1/payments/bmac/notify",
+            "/api/v1/payments/epay/notify", "/api/v1/payments/xunhu/notify",
             // Local-only simulated cashier (MockPaymentConfig); 404 everywhere else.
             "/api/v1/payments/mock/**",
             // Platform trust anchors (public keys only — JWKS precedent).

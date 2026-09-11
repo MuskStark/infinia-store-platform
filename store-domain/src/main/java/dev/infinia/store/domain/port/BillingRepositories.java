@@ -36,6 +36,9 @@ public final class BillingRepositories {
 
         Optional<MembershipOrder> findByOrderNo(String orderNo);
 
+        /** Idempotency probe for webhook-driven gateways (e.g. BMAC transaction ids). */
+        Optional<MembershipOrder> findByGatewayTradeNo(String gatewayTradeNo);
+
         /** The user's orders, newest first. */
         List<MembershipOrder> findByUserId(UUID userId);
 

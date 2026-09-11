@@ -58,6 +58,7 @@ public final class MembershipDtos {
             long priceFen,
             boolean active,
             int sort,
+            String externalUrl,
             String createdAt,
             String updatedAt) {
     }
@@ -68,7 +69,8 @@ public final class MembershipDtos {
             Integer durationDays,
             Long priceFen,
             Boolean active,
-            Integer sort) {
+            Integer sort,
+            String externalUrl) {
     }
 
     /** Admin-console view of one purchase order. */

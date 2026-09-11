@@ -8,9 +8,14 @@ package dev.infinia.store.domain.port;
  */
 public interface PaymentGateway {
 
-    /** Charge request handed to the gateway. Money is integer fen end to end. */
+    /**
+     * Charge request handed to the gateway. Money is integer fen end to end.
+     * {@code productUrl} is the plan's own checkout link when it has one
+     * (e.g. a Buy Me a Coffee Extra); gateways without per-product links
+     * ignore it and build their own cashier URL.
+     */
     record PaymentRequest(String orderNo, long amountFen, String title, String channel,
-            String notifyUrl, String returnUrl) {
+            String notifyUrl, String returnUrl, String productUrl) {
     }
 
     /** The cashier entry to send the buyer's browser to. */
@@ -29,6 +34,12 @@ public interface PaymentGateway {
 
     /** Channel identifiers the configured credentials support, e.g. ["WECHAT"]. */
     java.util.List<String> supportedChannels();
+
+    /**
+     * The application-relative callback path this gateway posts to; the service
+     * builds the absolute notify URL from {@code store.base-url} + this path.
+     */
+    String notifyPath();
 
     PaymentCreated createPayment(PaymentRequest request);
 

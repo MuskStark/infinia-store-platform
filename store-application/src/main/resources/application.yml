@@ -72,16 +72,33 @@ store:
   # Infinia Level purchase (会员等级购买): orders close after their payment
   # window; the closing job's interval is property-driven so tests can pin it
   # far in the future and drive closeExpiredOrders() by hand. Gateway
-  # credentials live under store.pay.xunhu.* — unset means the purchase flow
-  # reports payment_not_configured and nothing else changes.
+  # credentials live under store.pay.bmac/epay/xunhu.* — PaymentGatewayConfig
+  # picks the first configured one; unset means the purchase flow reports
+  # payment_not_configured and nothing else changes.
   pay:
     order-expire-minutes: ${STORE_PAY_ORDER_EXPIRE_MINUTES:30}
     order-close-interval-ms: ${STORE_PAY_ORDER_CLOSE_INTERVAL_MS:60000}
-    # Local-only simulated cashier (MockPaymentConfig also requires the local
-    # profile; production can never enable it).
+    # Local-only simulated cashier (also requires the local profile;
+    # production can never enable it).
     mock-enabled: ${STORE_PAY_MOCK_ENABLED:false}
-    # XunHuPay (虎皮椒) — personal-developer WeChat/Alipay channel. WeChat and
-    # Alipay are separate apps on the platform; configure the pairs you own.
+    # Buy Me a Coffee — free to start (BMAC keeps 5%); buyers pay on the
+    # creator page and the webhook matches by supporter email + amount, so
+    # plans price in the creator currency's cents and each plan should link a
+    # priced Extra (membership_plan.external_url).
+    bmac:
+      page-url: ${STORE_PAY_BMAC_PAGE_URL:}
+      webhook-secret: ${STORE_PAY_BMAC_WEBHOOK_SECRET:}
+      # How long a pending order stays matchable to an incoming payment.
+      match-window-minutes: ${STORE_PAY_BMAC_MATCH_WINDOW_MINUTES:1440}
+    # Epay protocol (易支付协议): self-hosted V免付 / 彩虹易支付 or any
+    # compatible provider — the zero-fee domestic option. One pid/key pair
+    # serves both channels.
+    epay:
+      api-base: ${STORE_PAY_EPAY_API_BASE:}
+      pid: ${STORE_PAY_EPAY_PID:}
+      key: ${STORE_PAY_EPAY_KEY:}
+    # XunHuPay (虎皮椒) — personal WeChat/Alipay channel (account-opening fee
+    # applies on the platform). WeChat and Alipay are separate apps there.
     xunhu:
       api-base: ${STORE_PAY_XUNHU_API_BASE:https://api.xunhupay.com}
       wechat-appid: ${STORE_PAY_XUNHU_WECHAT_APPID:}
