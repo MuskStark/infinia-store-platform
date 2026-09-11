@@ -51,12 +51,12 @@ const types = ['APP', 'PLUGIN', 'SKILL', 'MCP', 'FLOW'] as const;
 
 <template>
   <div class="space-y-12">
-    <!-- Marketplace hero: light band clipped with the JetBrains gradient squares
+    <!-- Marketplace hero: light band with JetBrains gradient honeycomb cells
          drifting at the edges; content first, composite search below. -->
     <section class="relative -mx-4 -mt-8 overflow-hidden border-b border-line bg-surface-muted px-4 pb-14 pt-16 dark:border-slate-800 dark:bg-slate-950">
-      <div class="hero-shape right-[-72px] top-[-48px] hidden h-72 w-72 rotate-12 opacity-90 lg:block" aria-hidden="true" />
-      <div class="hero-shape left-[-96px] bottom-[-120px] hidden h-80 w-80 -rotate-[18deg] opacity-80 lg:block" aria-hidden="true" />
-      <div class="hero-shape right-[280px] bottom-[-90px] hidden h-40 w-40 rotate-45 opacity-40 md:block" aria-hidden="true" />
+      <div class="hero-shape right-[-72px] top-[-48px] hidden h-72 w-72 opacity-90 lg:block" aria-hidden="true" />
+      <div class="hero-shape left-[-96px] bottom-[-120px] hidden h-80 w-80 opacity-80 lg:block" aria-hidden="true" />
+      <div class="hero-shape right-[280px] bottom-[-90px] hidden h-40 w-40 opacity-40 md:block" aria-hidden="true" />
 
       <div class="relative mx-auto max-w-7xl">
         <div class="max-w-2xl">

@@ -186,11 +186,12 @@ table a,
   @apply border-danger/30 bg-danger/10 text-danger dark:text-red-400;
 }
 
-/* Marketplace hero decoration: soft gradient rounded squares at the band edges
- * (JetBrains marketplace home), static and clipped. */
+/* Marketplace hero decoration: soft gradient honeycomb cells drifting at the
+ * band edges, static and clipped — the same hexagon language as the user
+ * center's identity cell. */
 .hero-shape {
   position: absolute;
-  border-radius: 22%;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
   background: var(--hero-gradient);
   pointer-events: none;
 }
