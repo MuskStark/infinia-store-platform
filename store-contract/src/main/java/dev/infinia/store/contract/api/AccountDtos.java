@@ -19,6 +19,7 @@ public final class AccountDtos {
             String displayName,
             List<String> roles,
             int beeLevel,
+            int effectiveBeeLevel,
             String createdAt) {
     }
 
@@ -30,6 +31,8 @@ public final class AccountDtos {
             List<String> roles,
             String status,
             int beeLevel,
+            int effectiveBeeLevel,
+            String membershipExpiresAt,
             boolean mfaEnabled,
             String createdAt,
             String lastLoginAt) {

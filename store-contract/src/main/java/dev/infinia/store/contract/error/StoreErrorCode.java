@@ -33,6 +33,15 @@ public enum StoreErrorCode {
     UPSTREAM_DRIFTED("upstream_drifted"),
     REPORT_NOT_FOUND("report_not_found"),
     BEE_LEVEL_REQUIRED("bee_level_required"),
+    MEMBERSHIP_PLAN_NOT_FOUND("membership_plan_not_found"),
+    MEMBERSHIP_PLAN_INACTIVE("membership_plan_inactive"),
+    MEMBERSHIP_ORDER_NOT_FOUND("membership_order_not_found"),
+    MEMBERSHIP_ORDER_EXPIRED("membership_order_expired"),
+    MEMBERSHIP_PURCHASE_LEVEL_TOO_LOW("membership_purchase_level_too_low"),
+    PAYMENT_NOT_CONFIGURED("payment_not_configured"),
+    PAYMENT_GATEWAY_ERROR("payment_gateway_error"),
+    PAYMENT_NOTIFY_INVALID("payment_notify_invalid"),
+    PAYMENT_AMOUNT_MISMATCH("payment_amount_mismatch"),
     INTERNAL_ERROR("internal_error");
 
     public final String code;
