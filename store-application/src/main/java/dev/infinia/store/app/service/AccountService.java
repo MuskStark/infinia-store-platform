@@ -6,6 +6,7 @@ import dev.infinia.store.contract.type.UserRole;
 import dev.infinia.store.domain.DomainException;
 import dev.infinia.store.domain.model.Credential;
 import dev.infinia.store.domain.model.StoreUser;
+import dev.infinia.store.domain.port.BillingRepositories;
 import dev.infinia.store.domain.port.IdentityRepositories;
 import dev.infinia.store.domain.port.PasswordHasher;
 import dev.infinia.store.domain.service.UuidV7;
@@ -30,6 +31,7 @@ public class AccountService {
     private final IdentityRepositories.SessionRepository sessions;
     private final IdentityRepositories.DeviceRepository devices;
     private final IdentityRepositories.RefreshTokenRepository refreshTokens;
+    private final BillingRepositories.UserMembershipRepository userMemberships;
     private final PasswordHasher hasher;
 
     public AccountService(IdentityRepositories.UserRepository users,
@@ -37,12 +39,14 @@ public class AccountService {
             IdentityRepositories.SessionRepository sessions,
             IdentityRepositories.DeviceRepository devices,
             IdentityRepositories.RefreshTokenRepository refreshTokens,
+            BillingRepositories.UserMembershipRepository userMemberships,
             PasswordHasher hasher) {
         this.users = users;
         this.credentials = credentials;
         this.sessions = sessions;
         this.devices = devices;
         this.refreshTokens = refreshTokens;
+        this.userMemberships = userMemberships;
         this.hasher = hasher;
     }
 
@@ -195,8 +199,10 @@ public class AccountService {
     }
 
     public AccountDtos.PublicUserDto toDto(StoreUser user) {
+        int effective = MembershipService.effectiveLevel(user.beeLevel,
+                userMemberships.findByUserId(user.id).orElse(null), Instant.now());
         return new AccountDtos.PublicUserDto(user.id.toString(), user.email, user.displayName,
-                user.roles.stream().map(Enum::name).toList(), user.beeLevel,
+                user.roles.stream().map(Enum::name).toList(), user.beeLevel, effective,
                 user.createdAt.toString());
     }
 }

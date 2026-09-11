@@ -69,6 +69,25 @@ store:
       key-prefix: ${STORE_STORAGE_S3_KEY_PREFIX:}
   ticket-secret: ${STORE_TICKET_SECRET:dev-only-ticket-secret-change-me}
   rollout-secret: ${STORE_ROLLOUT_SECRET:dev-only-rollout-secret-change-me}
+  # Infinia Level purchase (会员等级购买): orders close after their payment
+  # window; the closing job's interval is property-driven so tests can pin it
+  # far in the future and drive closeExpiredOrders() by hand. Gateway
+  # credentials live under store.pay.xunhu.* — unset means the purchase flow
+  # reports payment_not_configured and nothing else changes.
+  pay:
+    order-expire-minutes: ${STORE_PAY_ORDER_EXPIRE_MINUTES:30}
+    order-close-interval-ms: ${STORE_PAY_ORDER_CLOSE_INTERVAL_MS:60000}
+    # Local-only simulated cashier (MockPaymentConfig also requires the local
+    # profile; production can never enable it).
+    mock-enabled: ${STORE_PAY_MOCK_ENABLED:false}
+    # XunHuPay (虎皮椒) — personal-developer WeChat/Alipay channel. WeChat and
+    # Alipay are separate apps on the platform; configure the pairs you own.
+    xunhu:
+      api-base: ${STORE_PAY_XUNHU_API_BASE:https://api.xunhupay.com}
+      wechat-appid: ${STORE_PAY_XUNHU_WECHAT_APPID:}
+      wechat-appsecret: ${STORE_PAY_XUNHU_WECHAT_APPSECRET:}
+      alipay-appid: ${STORE_PAY_XUNHU_ALIPAY_APPID:}
+      alipay-appsecret: ${STORE_PAY_XUNHU_ALIPAY_APPSECRET:}
   max-upload-bytes: 1073741824
   download-ticket-ttl-seconds: 300
   upload-ticket-ttl-seconds: 900

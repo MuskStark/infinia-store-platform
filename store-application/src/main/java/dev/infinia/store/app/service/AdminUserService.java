@@ -27,17 +27,22 @@ public class AdminUserService {
 
     private final IdentityRepositories.UserRepository users;
     private final IdentityRepositories.SessionRepository sessions;
+    private final dev.infinia.store.domain.port.BillingRepositories.UserMembershipRepository memberships;
     private final AuditService audit;
 
     public AdminUserService(IdentityRepositories.UserRepository users,
-            IdentityRepositories.SessionRepository sessions, AuditService audit) {
+            IdentityRepositories.SessionRepository sessions,
+            dev.infinia.store.domain.port.BillingRepositories.UserMembershipRepository memberships,
+            AuditService audit) {
         this.users = users;
         this.sessions = sessions;
+        this.memberships = memberships;
         this.audit = audit;
     }
 
     public List<AccountDtos.AdminUserDto> listUsers() {
-        return users.findAll().stream().map(AdminUserService::toDto).toList();
+        return users.findAll().stream()
+                .map(u -> toDto(u, memberships.findByUserId(u.id).orElse(null))).toList();
     }
 
     /**
@@ -107,7 +112,7 @@ public class AdminUserService {
         }
         user.lastLoginAt = user.lastLoginAt == null ? null : user.lastLoginAt;
         users.save(user);
-        return toDto(user);
+        return toDto(user, memberships.findByUserId(userId).orElse(null));
     }
 
     private static Set<UserRole> parseRoles(List<String> requested) {
@@ -135,6 +140,13 @@ public class AdminUserService {
     }
 
     public static AccountDtos.AdminUserDto toDto(StoreUser user) {
+        return toDto(user, null);
+    }
+
+    public static AccountDtos.AdminUserDto toDto(StoreUser user,
+            dev.infinia.store.domain.model.UserMembership membership) {
+        java.time.Instant now = java.time.Instant.now();
+        boolean active = membership != null && membership.active(now);
         return new AccountDtos.AdminUserDto(
                 user.id.toString(),
                 user.email,
@@ -142,6 +154,8 @@ public class AdminUserService {
                 user.roles.stream().map(Enum::name).sorted().toList(),
                 user.status,
                 user.beeLevel,
+                MembershipService.effectiveLevel(user.beeLevel, membership, now),
+                active ? membership.expiresAt.toString() : null,
                 user.mfaEnabled,
                 user.createdAt.toString(),
                 user.lastLoginAt == null ? null : user.lastLoginAt.toString());

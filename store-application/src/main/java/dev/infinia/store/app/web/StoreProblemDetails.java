@@ -58,6 +58,15 @@ public class StoreProblemDetails {
             Map.entry(StoreErrorCode.UPSTREAM_DRIFTED, HttpStatus.CONFLICT),
             Map.entry(StoreErrorCode.SCAN_FAILED, HttpStatus.UNPROCESSABLE_ENTITY),
             Map.entry(StoreErrorCode.SIGNATURE_INVALID, HttpStatus.UNPROCESSABLE_ENTITY),
+            Map.entry(StoreErrorCode.MEMBERSHIP_PLAN_NOT_FOUND, HttpStatus.NOT_FOUND),
+            Map.entry(StoreErrorCode.MEMBERSHIP_PLAN_INACTIVE, HttpStatus.CONFLICT),
+            Map.entry(StoreErrorCode.MEMBERSHIP_ORDER_NOT_FOUND, HttpStatus.NOT_FOUND),
+            Map.entry(StoreErrorCode.MEMBERSHIP_ORDER_EXPIRED, HttpStatus.GONE),
+            Map.entry(StoreErrorCode.MEMBERSHIP_PURCHASE_LEVEL_TOO_LOW, HttpStatus.CONFLICT),
+            Map.entry(StoreErrorCode.PAYMENT_NOT_CONFIGURED, HttpStatus.SERVICE_UNAVAILABLE),
+            Map.entry(StoreErrorCode.PAYMENT_GATEWAY_ERROR, HttpStatus.BAD_GATEWAY),
+            Map.entry(StoreErrorCode.PAYMENT_NOTIFY_INVALID, HttpStatus.BAD_REQUEST),
+            Map.entry(StoreErrorCode.PAYMENT_AMOUNT_MISMATCH, HttpStatus.BAD_REQUEST),
             Map.entry(StoreErrorCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR));
 
     private final MessageSource messages;

@@ -45,7 +45,7 @@ class StatusMonitorLinkTest {
         dev.infinia.store.app.config.StoreProperties properties =
                 new dev.infinia.store.app.config.StoreProperties(
                         null, "   ", null, null, null, null, 0, 0, 0, null, null, null,
-                        null, null, null, null, null);
+                        null, null, null, null, null, null);
         assertNull(properties.monitorPublicUrl());
     }
 }

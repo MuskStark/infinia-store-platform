@@ -22,7 +22,8 @@ public record StoreProperties(
         String cliClientSecret,
         String appCoordinate,
         String remoteDatasourceFile,
-        Monitoring monitoring) {
+        Monitoring monitoring,
+        Pay pay) {
 
     public StoreProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8080" : baseUrl;
@@ -73,6 +74,22 @@ public record StoreProperties(
         monitoring = monitoring == null
                 ? new Monitoring(null, null, null, null, null, null, null, null, null, null)
                 : monitoring;
+        pay = pay == null ? new Pay(null, null) : pay;
+    }
+
+    /**
+     * Infinia Level purchase settings. {@code orderExpireMinutes} is how long a
+     * buyer has to pay before the order closes; {@code mockEnabled} switches the
+     * wired payment gateway to the local-only simulated cashier (never outside
+     * the local profile — MockPaymentConfig guards that).
+     */
+    public record Pay(Integer orderExpireMinutes, Boolean mockEnabled) {
+
+        public Pay {
+            orderExpireMinutes = orderExpireMinutes == null || orderExpireMinutes <= 0
+                    ? 30 : orderExpireMinutes;
+            mockEnabled = mockEnabled == null ? false : mockEnabled;
+        }
     }
 
     /** Product sign-in page derived from the configured Store Web callback origin. */
