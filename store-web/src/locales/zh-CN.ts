@@ -308,6 +308,7 @@ export default {
     roles: '角色',
     sessions: '活跃会话',
     devices: '设备',
+    artifactsCount: '制品',
     revoke: '撤销',
     noSessions: '没有活跃会话',
     noDevices: '没有已注册设备',

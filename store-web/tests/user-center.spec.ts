@@ -37,6 +37,16 @@ vi.mock('../src/api/client', () => ({
             effectiveBeeLevel: 2,
             createdAt: '2026-08-01T00:00:00Z',
           };
+        case '/api/v1/me/library':
+          return {
+            favorites: [],
+            entitlements: [
+              { listingCoordinate: 'a', free: true, acquiredAt: 'x' },
+              { listingCoordinate: 'b', free: true, acquiredAt: 'y' },
+              { listingCoordinate: 'c', free: true, acquiredAt: 'z' },
+            ],
+            installHistory: [],
+          };
         case '/api/v1/me/sessions':
           return [{ sessionId: 's1', clientId: 'store-web', kind: 'PASSWORD', createdAt: 't' }];
         case '/api/v1/me/devices':
@@ -107,6 +117,11 @@ describe('User Center (用户中心)', () => {
     expect(line.text()).toContain('Next up: Guard');
     // No ladder, no duplicated membership statement.
     expect(wrapper.find('ol').exists()).toBe(false);
+    // Holdings at a glance: artifacts owned and signed-in devices.
+    expect(wrapper.find('[data-testid="account-artifact-count"]').text())
+      .toMatch(/Artifacts\s*3/);
+    expect(wrapper.find('[data-testid="account-device-count"]').text())
+      .toMatch(/Devices\s*1/);
   });
 
   it('offers the upgrade action inline for a buyer without a membership', async () => {
@@ -138,8 +153,7 @@ describe('User Center (用户中心)', () => {
     const { api } = await import('../src/api/client');
     expect(wrapper.text()).not.toContain('My library');
     expect(wrapper.text()).not.toContain('My organizations');
-    // The view never even asks for them.
-    expect(vi.mocked(api.get)).not.toHaveBeenCalledWith('/api/v1/me/library');
+    // The view never even asks for organizations.
     expect(vi.mocked(api.get)).not.toHaveBeenCalledWith('/api/v1/organizations');
   });
 

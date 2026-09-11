@@ -311,6 +311,7 @@ export default {
     roles: 'Roles',
     sessions: 'Active sessions',
     devices: 'Devices',
+    artifactsCount: 'Artifacts',
     revoke: 'Revoke',
     noSessions: 'No active sessions',
     noDevices: 'No registered devices',

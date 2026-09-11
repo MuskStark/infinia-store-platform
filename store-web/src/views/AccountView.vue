@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type MembershipStatus, type PublicUser } from '../api/client';
+import { api, type Library, type MembershipStatus, type PublicUser } from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeCrest from '../components/BeeCrest.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -30,6 +30,8 @@ const auth = useAuthStore();
 
 const user = ref<PublicUser | null>(null);
 const membership = ref<MembershipStatus | null>(null);
+/** Artifacts the account holds entitlements for (我的库 · 已获取). */
+const artifactCount = ref(0);
 const sessions = ref<{ sessionId: string; clientId: string; kind: string; createdAt: string }[]>([]);
 const devices = ref<
   { deviceId: string; name: string; platform: string; revoked: boolean }[]
@@ -91,8 +93,9 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
-    const [me, activeSessions, activeDevices, membershipStatus] = await Promise.all([
+    const [me, lib, activeSessions, activeDevices, membershipStatus] = await Promise.all([
       api.get<PublicUser>('/api/v1/me'),
+      api.get<Library>('/api/v1/me/library'),
       api.get<{ sessionId: string; clientId: string; kind: string; createdAt: string }[]>(
         '/api/v1/me/sessions',
       ),
@@ -103,6 +106,7 @@ async function load() {
     ]);
     user.value = me;
     displayNameDraft.value = me.displayName;
+    artifactCount.value = lib.entitlements?.length ?? 0;
     sessions.value = activeSessions;
     devices.value = activeDevices;
     membership.value = membershipStatus;
@@ -251,6 +255,22 @@ async function changePassword() {
               >
                 {{ hasMembership ? t('membership.renew') : t('account.membershipCta') }}
               </RouterLink>
+            </div>
+
+            <!-- Holdings at a glance: artifacts owned, signed-in devices. -->
+            <div class="mt-2.5 flex items-center gap-4 text-sm text-muted">
+              <span data-testid="account-artifact-count">
+                {{ t('account.artifactsCount') }}
+                <span class="font-semibold tabular-nums text-ink dark:text-slate-100">
+                  {{ artifactCount }}
+                </span>
+              </span>
+              <span data-testid="account-device-count">
+                {{ t('account.devices') }}
+                <span class="font-semibold tabular-nums text-ink dark:text-slate-100">
+                  {{ devices.length }}
+                </span>
+              </span>
             </div>
           </div>
         </div>
