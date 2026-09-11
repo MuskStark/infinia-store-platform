@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { api, type Library, type PublicUser } from '../api/client';
+import {
+  api,
+  type Library,
+  type MembershipStatus,
+  type PublicUser,
+} from '../api/client';
 import { Badge, MagicCard } from '@infinia/magic-ui-vue';
 import BeeLevelBadge from '../components/BeeLevelBadge.vue';
-import { BEE_LEVELS } from '../bee-levels';
-import BeeCrest from '../components/BeeCrest.vue';
 import EmptyState from '../components/EmptyState.vue';
 import ErrorState from '../components/ErrorState.vue';
 import LoadingGrid from '../components/LoadingGrid.vue';
@@ -15,14 +18,17 @@ import { useAuthStore } from '../stores/auth';
 
 /**
  * User Center (用户中心): one signed-in landing page aggregating identity,
- * Infinia Level ladder, profile editing, library/organization summaries,
- * role-aware quick links and account security (password, sessions, devices).
+ * the current Infinia Level with the purchased-membership status and its
+ * upgrade entry, profile editing, library/organization summaries, role-aware
+ * quick links and account security (password, sessions, devices). The full
+ * ladder lives on /membership — here only the viewer's own position shows.
  */
 const { t } = useI18n();
 const auth = useAuthStore();
 
 const user = ref<PublicUser | null>(null);
 const library = ref<Library | null>(null);
+const membership = ref<MembershipStatus | null>(null);
 const organizations = ref<{ organizationId?: string; slug?: string; name?: string }[]>([]);
 const sessions = ref<{ sessionId: string; clientId: string; kind: string; createdAt: string }[]>([]);
 const devices = ref<
@@ -44,11 +50,22 @@ const passwordMessage = ref<string | null>(null);
 const passwordError = ref<string | null>(null);
 
 const beeLevel = computed(() => user.value?.beeLevel ?? 0);
-const nextLevel = computed(() => (beeLevel.value < 4 ? beeLevel.value + 1 : null));
+/**
+ * What the store enforces: max(base, active purchased membership). The
+ * membership-status payload is the live source (freshly computed per request);
+ * /me's effectiveBeeLevel is the fallback for the moment it is still loading.
+ */
+const effectiveLevel = computed(() =>
+  membership.value?.effectiveBeeLevel ?? user.value?.effectiveBeeLevel ?? beeLevel.value);
+const nextLevel = computed(() => (effectiveLevel.value < 4 ? effectiveLevel.value + 1 : null));
+const hasMembership = computed(() => membership.value?.membershipLevel != null);
+/** An upgrade makes sense while the ladder has room or a renewal is possible. */
+const canUpgrade = computed(() => effectiveLevel.value < 4 || hasMembership.value);
 
 const quickLinks = computed(() => {
   const links: { to: string; label: string }[] = [
     { to: '/library', label: t('nav.library') },
+    { to: '/membership', label: t('account.membershipEntry') },
     { to: '/organizations', label: t('nav.organizations') },
   ];
   if (auth.roles.some((r) => ['PUBLISHER', 'ORG_ADMIN', 'REVIEWER', 'PLATFORM_ADMIN'].includes(r))) {
@@ -64,7 +81,7 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
-    const [me, lib, activeSessions, activeDevices] = await Promise.all([
+    const [me, lib, activeSessions, activeDevices, membershipStatus] = await Promise.all([
       api.get<PublicUser>('/api/v1/me'),
       api.get<Library>('/api/v1/me/library'),
       api.get<{ sessionId: string; clientId: string; kind: string; createdAt: string }[]>(
@@ -73,12 +90,14 @@ async function load() {
       api.get<{ deviceId: string; name: string; platform: string; revoked: boolean }[]>(
         '/api/v1/me/devices',
       ),
+      api.getMembershipStatus(),
     ]);
     user.value = me;
     displayNameDraft.value = me.displayName;
     library.value = lib;
     sessions.value = activeSessions;
     devices.value = activeDevices;
+    membership.value = membershipStatus;
     try {
       organizations.value = await api.get('/api/v1/organizations');
     } catch {
@@ -166,32 +185,37 @@ function listingRoute(coordinate: string) {
           <div class="min-w-0 flex-1">
             <h2 class="text-xl font-bold">{{ user.displayName }}</h2>
             <p class="text-sm text-muted">{{ user.email }}</p>
-            <div class="mt-3 flex flex-wrap items-center gap-2">
-              <BeeLevelBadge :level="beeLevel" />
-              <span class="text-xs text-muted">
+            <!-- Only the viewer's own position: effective level, then the
+                 purchased membership riding on it (details on /membership). -->
+            <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <BeeLevelBadge :level="effectiveLevel" />
+              <span v-if="hasMembership" class="text-xs text-muted" data-testid="account-membership-active">
+                {{ t('membership.activeMembership', { level: membership?.membershipLevel }) }}
+                · {{ t('account.memberUntil', { date: formatDate(membership?.membershipExpiresAt ?? '') }) }}
+              </span>
+              <span v-else-if="effectiveLevel > beeLevel" class="text-xs text-muted">
+                {{ t('membership.permanentLevel') }}
+              </span>
+              <span v-else class="text-xs text-muted">
                 {{ nextLevel !== null
                   ? t('account.levelNext', { next: t(`beeLevel.${nextLevel}`) })
                   : t('account.levelTop') }}
               </span>
             </div>
-            <!-- The ladder: each level keeps its own mark; the current one is highlighted -->
-            <ol class="mt-4 flex flex-wrap gap-2">
-              <li
-                v-for="level in BEE_LEVELS"
-                :key="level"
-                class="flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs"
-                :class="level === beeLevel
-                  ? 'border-accent bg-accent/10 font-semibold'
-                  : level < beeLevel
-                    ? 'border-line text-muted dark:border-slate-800'
-                    : 'border-line opacity-50 dark:border-slate-800'"
-                :aria-current="level === beeLevel ? 'step' : undefined"
-              >
-                <BeeCrest :level="level" :size="14" />
-                <span>{{ t(`beeLevel.${level}`) }}</span>
-                <span class="text-muted">Lv{{ level }}</span>
-              </li>
-            </ol>
+            <!-- Membership entry: status plus the purchase/upgrade CTA. -->
+            <div
+              v-if="canUpgrade"
+              class="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3"
+              data-testid="account-membership-card"
+            >
+              <div class="min-w-0 flex-1 text-sm">
+                <p class="font-medium">{{ t('account.membershipCardTitle') }}</p>
+                <p class="text-xs text-muted">{{ t('account.membershipCardHint') }}</p>
+              </div>
+              <RouterLink to="/membership" class="btn btn-primary btn-sm shrink-0" data-testid="account-membership-cta">
+                {{ hasMembership ? t('membership.renew') : t('account.membershipCta') }}
+              </RouterLink>
+            </div>
           </div>
           <div class="flex w-full flex-col gap-2 sm:w-48">
             <dt class="text-xs text-muted">{{ t('account.roles') }}</dt>

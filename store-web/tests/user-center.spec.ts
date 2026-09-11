@@ -8,6 +8,14 @@ import en from '../src/locales/en';
 
 const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } });
 
+const MEMBERSHIP_STATUS = {
+  baseBeeLevel: 2,
+  effectiveBeeLevel: 2,
+  membershipLevel: null,
+  membershipExpiresAt: null,
+  channels: ['BMAC'],
+};
+
 vi.mock('../src/api/client', () => ({
   api: {
     get: vi.fn(async (path: string) => {
@@ -19,6 +27,7 @@ vi.mock('../src/api/client', () => ({
             displayName: 'Busy Bee',
             roles: ['USER', 'PUBLISHER'],
             beeLevel: 2,
+            effectiveBeeLevel: 2,
             createdAt: '2026-08-01T00:00:00Z',
           };
         case '/api/v1/me/library':
@@ -45,6 +54,7 @@ vi.mock('../src/api/client', () => ({
           return [];
       }
     }),
+    getMembershipStatus: vi.fn(async () => MEMBERSHIP_STATUS),
     put: vi.fn(async () => undefined),
     delete: vi.fn(async () => undefined),
   },
@@ -96,12 +106,41 @@ describe('User Center (用户中心)', () => {
 
   it('highlights the current Infinia Level step in the ladder', async () => {
     const wrapper = await mountCenter();
-    const steps = wrapper.findAll('ol li');
-    expect(steps.length).toBe(5);
-    const current = steps[2];
-    expect(current.attributes('aria-current')).toBe('step');
-    expect(current.classes()).toContain('border-accent');
-    expect(steps[4].classes()).toContain('opacity-50');
+    // Only the viewer's own level shows — never the whole ladder.
+    expect(wrapper.text()).not.toContain('Queen');
+    expect(wrapper.text()).toContain('Next up: Guard');
+    // The identity is the designed hex mark now, not an emoji.
+    expect(wrapper.findAll('.bee-crest').length).toBeGreaterThan(0);
+  });
+
+  it('shows the membership upgrade entry for a buyer without a membership', async () => {
+    const wrapper = await mountCenter();
+    const card = wrapper.find('[data-testid="account-membership-card"]');
+    expect(card.exists()).toBe(true);
+    const cta = wrapper.find('[data-testid="account-membership-cta"]');
+    expect(cta.attributes('href')).toBe('/membership');
+    expect(cta.text()).toBe(en.account.membershipCta);
+    // Quick links carry the membership entry too.
+    const links = wrapper.findAll('a').map((a) => a.attributes('href'));
+    expect(links).toContain('/membership');
+  });
+
+  it('shows the active membership deadline and a renew CTA', async () => {
+    const { api } = await import('../src/api/client');
+    vi.mocked(api.getMembershipStatus).mockResolvedValueOnce({
+      ...MEMBERSHIP_STATUS,
+      effectiveBeeLevel: 3,
+      membershipLevel: 3,
+      membershipExpiresAt: '2026-12-11T00:00:00Z',
+      channels: ['BMAC'] as const,
+    });
+    const wrapper = await mountCenter();
+    expect(wrapper.find('[data-testid="account-membership-active"]').text())
+      .toContain('member until');
+    expect(wrapper.text()).toContain('Guard');
+    expect(wrapper.text()).not.toContain('Queen');
+    const cta = wrapper.find('[data-testid="account-membership-cta"]');
+    expect(cta.text()).toBe(en.membership.renew);
   });
 
   it('summarizes the library and organizations', async () => {
