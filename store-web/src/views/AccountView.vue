@@ -246,7 +246,7 @@ async function changePassword() {
               <RouterLink
                 v-if="canUpgrade"
                 to="/membership"
-                class="btn btn-primary btn-sm shrink-0 hive-cta"
+                class="btn btn-primary shrink-0 hive-cta"
                 data-testid="account-membership-cta"
               >
                 {{ hasMembership ? t('membership.renew') : t('account.membershipCta') }}
@@ -405,9 +405,13 @@ async function changePassword() {
   flex: none;
 }
 
-/* The level line's action is a capsule — it must out-rank .btn's unlayered
-   rounded-lg, hence a scoped rule instead of a rounded-full utility. */
+/* The level line's action is a slim capsule in the role-badge's proportions
+   (long, low-crowned) — it must out-rank .btn's unlayered styles, hence a
+   scoped rule instead of utilities. */
 .hive-cta {
+  min-height: 0;
+  padding: 0.3rem 1.4rem;
+  font-size: 0.8125rem;
   border-radius: 999px;
 }
 </style>
