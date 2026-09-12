@@ -1,0 +1,27 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import SelectMenu from '../src/components/SelectMenu';
+afterEach(() => vi.restoreAllMocks());
+it('anchors a body portal to the trigger, outside transformed ancestors', () => {
+  const change = vi.fn();
+  const { container } = render(<div style={{ transform: 'translateY(10px)' }}><SelectMenu value={0} options={[{ value: 0, label: 'Zero' }, { value: 1, label: 'One' }]} onValueChange={change} /></div>);
+  const trigger = screen.getByRole('button');
+  vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({ left: 120, top: 80, bottom: 124, width: 100, height: 44, right: 220, x: 120, y: 80, toJSON() {} });
+  fireEvent.click(trigger);
+  const menu = screen.getByRole('listbox');
+  expect(menu.parentElement).toBe(document.body);
+  expect(container.contains(menu)).toBe(false);
+  expect(menu.style.left).toBe('120px');
+  expect(menu.style.top).toBe('128px');
+  fireEvent.scroll(menu);
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('option', { name: 'One' }));
+  expect(change).toHaveBeenCalledWith(1);
+  expect(screen.queryByRole('listbox')).toBeNull();
+  fireEvent.click(trigger);
+  fireEvent.keyDown(trigger, { key: 'Escape' });
+  expect(screen.queryByRole('listbox')).toBeNull();
+  fireEvent.click(trigger);
+  fireEvent.scroll(window);
+  expect(screen.queryByRole('listbox')).toBeNull();
+});

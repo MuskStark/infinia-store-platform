@@ -24,9 +24,7 @@ RUN corepack enable
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY store-web/package.json store-web/package.json
 COPY monitor-web/package.json monitor-web/package.json
-COPY ui/magic-ui-vue/package.json ui/magic-ui-vue/package.json
 RUN yarn install --immutable
-COPY ui/ ui/
 COPY monitor-web/ monitor-web/
 RUN yarn workspace @infinia/monitor-web build \
  && test -f monitor-web/dist/index.html

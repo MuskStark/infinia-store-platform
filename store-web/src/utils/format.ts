@@ -8,7 +8,7 @@ import { i18n } from '../i18n';
  */
 
 function appLocale(): string {
-  return i18n.global.locale.value;
+  return i18n.language;
 }
 
 function parse(iso?: string | null): Date | null {

@@ -13,12 +13,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import java.time.Duration;
 
 /**
- * Serving the embedded Store Web SPA (single-jar deployment). The Vite build output
- * ships under {@code classpath:/static} and Boot's default static handling already
- * serves {@code /}; this adds immutable caching for hashed assets and keeps the
- * FengYu-advertised /web link working. History-mode deep-link fallback lives in
- * {@link dev.infinia.store.app.web.StoreProblemDetails} — it must intercept the
- * NoResourceFoundException before the generic handler turns it into a 500.
+ * Serves one Vite SPA for the store (/store) and project introduction (/).
+ * Both routes use the same shell and hashed assets. History fallback lives in
+ * {@link dev.infinia.store.app.web.StoreProblemDetails}.
  */
 @Configuration
 public class SpaWebConfig implements WebMvcConfigurer {
@@ -32,18 +29,23 @@ public class SpaWebConfig implements WebMvcConfigurer {
         registry.addResourceHandler("/assets/**")
                 .addResourceLocations("classpath:/static/assets/")
                 .setCacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePublic());
+
     }
 
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
         // The FengYu compat layer advertises {base-url}/web as a listing's web page;
-        // the SPA now lives at the root.
-        registry.addRedirectViewController("/web", "/");
+        // the marketplace now lives under /store.
+        registry.addRedirectViewController("/web", "/store");
         // Explicit "/" → forward:/index.html instead of Boot's welcome-page magic:
         // the forward goes through the normal filter chain, so the shell leaves
         // with the DefaultNoCacheFilter's revalidate-always Cache-Control (the
         // welcome page handler serves it outside any header policy).
         registry.addViewController("/").setViewName("forward:/index.html");
+        registry.addViewController("/store").setViewName("forward:/index.html");
+        registry.addViewController("/store/").setViewName("forward:/index.html");
+        registry.addRedirectViewController("/site", "/");
+        registry.addRedirectViewController("/site/", "/");
     }
 
     @Bean

@@ -1,6 +1,6 @@
 # ADR-007: Vue-only frontend; Magic UI as a controlled MIT port
 
-Status: Accepted (design §12, §18.7)
+Status: Superseded by [ADR-013](ADR-013-react-original-magic-ui.md) — the SPA now runs React and consumes original Magic UI registry components; the Vue port was removed.
 
 Vue 3.5 is the only frontend runtime. Magic UI's upstream implementation is React + Tailwind +
 Motion and cannot be consumed directly; after MIT license verification the needed components

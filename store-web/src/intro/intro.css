@@ -1,0 +1,94 @@
+ .introduction-page {
+  --animate-spotlight: spotlight 2s ease 0.75s 1 forwards;
+  --animate-scroll: scroll var(--animation-duration, 40s) var(--animation-direction, forwards) linear infinite;
+  --animate-meteor-effect: meteor 5s linear infinite;
+}
+  @keyframes spotlight {
+    0% {
+      opacity: 0;
+      transform: translate(-72%, -62%) scale(0.5);
+    }
+    100% {
+      opacity: 1;
+      transform: translate(-50%, -40%) scale(1);
+    }
+  }
+  @keyframes scroll {
+    to {
+      transform: translate(calc(-50% - 0.5rem));
+    }
+  }
+  @keyframes meteor {
+    0% {
+      transform: rotate(215deg) translateX(0);
+      opacity: 1;
+    }
+    70% {
+      opacity: 1;
+    }
+    100% {
+      transform: rotate(215deg) translateX(-500px);
+      opacity: 0;
+    }
+  }
+
+/* Background pattern utilities from the Aceternity hero sections. */
+.introduction-page .bg-grid-white {
+  background-image: linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0.06) 1px,
+      transparent 1px
+    ),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 100px 100px;
+}
+
+.introduction-page .bg-grid-small-white {
+  background-image: linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0.05) 1px,
+      transparent 1px
+    ),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.introduction-page .bg-dot-white {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.14) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Fade the hero grid out, as in the Aceternity hero demos. */
+.introduction-page .bg-grid-mask {
+  mask-image: linear-gradient(to bottom, transparent, black 90%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 90%);
+}
+
+.introduction-page .bg-grid-mask-centered {
+  mask-image: radial-gradient(ellipse at center, black 40%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 75%);
+}
+
+.introduction-page {
+  --color-accent: #0b70f5;
+  --color-background: #000;
+  --color-foreground: #fff;
+  --color-jb-green: #21d789;
+  --color-cyan-glow: #22d3ee;
+  color-scheme: dark;
+}
+.introduction-page section[id] { scroll-margin-top: 5rem; }
+@media (prefers-reduced-motion: reduce) {
+  .introduction-page *, .introduction-page *::before, .introduction-page *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+.introduction-page .animate-spotlight { animation: var(--animate-spotlight); }
+.introduction-page .animate-scroll { animation: var(--animate-scroll); }
+.introduction-page .animate-meteor-effect { animation: var(--animate-meteor-effect); }
+
+/* The step region still scrolls with wheel, touch and keyboard. */
+.intro-step-scroll { scrollbar-width: none; }
+.intro-step-scroll::-webkit-scrollbar { display: none; }

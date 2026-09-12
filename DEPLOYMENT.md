@@ -14,7 +14,7 @@ still supported: add `--profile monitor` to the store-host commands.
 
 ```
 Internet ──HTTPS── SafeLine WAF (TLS termination, WAF/CC protection)
-                       │ http://<store-host>:8080   → store   (infinia-store)
+                       │ http://<store-host>:8080   → InfiniaWebService (/store + / introduction)
                        │ http://<monitor-host>:8090 → monitor (public status page)
 
 Store host: docker compose --profile app          Monitor host: -f docker-compose.monitor.yml
@@ -342,9 +342,9 @@ Never archive or distribute the server's private `.b64` file.
 ### Notes
 
 - **Rollback**: `scripts/upgrade.sh` snapshots the running image as
-  `infinia-store:rollback` and restores it automatically when the new version
+  `infinia-webservice:rollback` and restores it automatically when the new version
   fails its health check. Manual rollback: `git checkout <previous-rev>`,
-  `docker tag infinia-store:rollback infinia-store:latest`,
+  `docker tag infinia-webservice:rollback infinia-webservice:latest`,
   `docker compose --profile app up -d --no-build`.
 - The upgrade pins an exact commit with `git checkout -f`: server-side edits
   to tracked files are silently reverted. Keep host-specific settings in
@@ -377,3 +377,12 @@ Never archive or distribute the server's private `.b64` file.
   shipper on `/var/lib/docker/containers` if you need central aggregation.
 - Alerting: `MONITOR_ALERT_WEBHOOK` (opt-in) receives state-change alerts from
   the monitor.
+
+### Unified frontend
+
+The store (`/store`) and introduction (`/`) are one React/Vite project in `store-web`.
+`yarn web:build` produces the only frontend bundle consumed by InfiniaWebService.
+There is no separate Next.js export, port 3100, or `NEXT_PUBLIC_*` configuration.
+The independent monitor remains a separate application.
+
+Store pages live under `/store/*`. Legacy store links and `/callback` forward through the SPA, preserving query parameters; `/site` redirects to `/`. The registered OAuth callback URI remains unchanged. The introduction is now client-rendered, rather than a separate Next.js static export.

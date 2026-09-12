@@ -2,6 +2,71 @@
 
 ## Unreleased
 
+### One service, both faces: the store service is now **InfiniaWebService**
+
+- The deployable store service is formally renamed **InfiniaWebService** — the name
+  now says what it does: one origin serving every web surface of the platform.
+  `spring.application.name` is `InfiniaWebService`, the executable jar builds as
+  `InfiniaWebService-<version>.jar` (module `store-application` keeps its Maven
+  coordinates), and the production Docker image / rollback tags become
+  `infinia-webservice` (`docker-compose.yml`, `scripts/upgrade.sh`, DEPLOYMENT.md).
+- The official website is now served by InfiniaWebService itself: `build-jar.sh`
+  builds the site's Next.js static export (`yarn workspace @infinia/website
+  build:export` with `NEXT_PUBLIC_BASE_PATH=/site`) and embeds it under
+  `classpath:/static/site`, next to the store SPA. One jar, one port:
+  `/` → store SPA, `/site` → official website, `/api/v1` + OAuth — the build
+  script verifies both shells are actually inside the archive before calling it
+  a release.
+- Serving details: `/site` redirects to `/site/`, the website shell is forwarded
+  like the SPA shell (same revalidate-always `Cache-Control` via the
+  no-cache filter), and content-hashed `/site/_next/static/**` assets cache for
+  a year — mirroring the SPA's `/assets/**` contract. The embedded export builds
+  with `NEXT_PUBLIC_STORE_URL=/`, so the site's store entrance stays same-origin.
+- The standalone website workflow is unchanged (`yarn website` on :3100); the
+  Dockerfile web stage builds both frontends, and the Jenkins gate gained
+  `yarn website:build`.
+
+### Official Infinia website merged into the repository as the `website` workspace
+
+- The official website of Infinia (蜂语 / FengYu) now lives in this repository as a
+  standalone Next.js 15 workspace (`website/`, port 3100, root scripts `yarn website` /
+  `yarn website:build`) — one checkout, one `yarn install`, no more cross-repo drift
+  between the site and the store platform. It still builds and runs fully independently
+  of the Maven host build and the store SPA (no shared code).
+- The site is built strictly from Aceternity UI registry components (`ui.aceternity.com`),
+  copied verbatim with per-file provenance comments into `website/src/components/ui/`;
+  registry keyframes are ported to Tailwind CSS 4 `@theme` tokens. The only documented
+  adaptations are a configurable CTA prop on the floating navbar and React 19
+  type-compat fixes.
+- Copy is English-first with a 简体中文 switch, mirroring the store SPA; all product
+  facts (surfaces, plugins, loopback security, download variants) describe the FengYu
+  host distributed through this store.
+- The homepage now opens onto the store: navbar pill, hero CTA and footer link all
+  point at the store application (`NEXT_PUBLIC_STORE_URL`, default
+  `http://localhost:8080`).
+
+### Store SPA rewritten on React with original Magic UI components (ADR-013)
+
+- The store-web frontend now runs React 19 + TypeScript + Vite 7 + Tailwind
+  CSS 4 and consumes Magic UI components copied verbatim from the official
+  registry (`magicui.design/r/*.json`) — MagicCard, BorderBeam,
+  AnimatedGridPattern, Marquee, ShimmerButton, BlurFade, NumberTicker,
+  AnimatedList, plus the shadcn/ui base badge and progress Magic UI builds on.
+  The hand-maintained `@infinia/magic-ui-vue` port is deleted (supersedes
+  ADR-007): no more per-release porting drift, upstream refresh = re-copy.
+- The store's design language is unchanged: marketplace tokens, the
+  JetBrains-brand hero gradient, the honeycomb brand wall and bee level
+  crests all carry over, with the shadcn base tokens (`--color-background`,
+  `--color-border`, …) mapped onto the store palette so original components
+  render with the marketplace look.
+- Ecosystem swaps with identical behavior: Pinia → Zustand (same store
+  shapes), vue-router → React Router (same routes and role guards),
+  vue-i18n → react-i18next (same dictionaries; `{x}` placeholders and pipe
+  plurals render byte-identically), theme toggle via next-themes on the same
+  `infinia.store.theme` storage key. The 15-file test suite is ported to
+  React Testing Library (63 tests) and the Jenkins gate runs
+  `yarn web:test` / `yarn web:build` as before.
+
 ### Public platform trust anchors: `GET /api/v1/platform-keys`
 
 - The ACTIVE platform signing keys are now served anonymously as

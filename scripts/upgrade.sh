@@ -67,10 +67,10 @@ log "compose profiles: ${PROFILES[*]}"
 
 # The rebuild below retags :latest, so snapshot the currently running image
 # first; a failed deploy then rolls back with one retag + compose up.
-if docker image inspect infinia-store:latest >/dev/null 2>&1; then
-  docker tag infinia-store:latest infinia-store:rollback
+if docker image inspect infinia-webservice:latest >/dev/null 2>&1; then
+  docker tag infinia-webservice:latest infinia-webservice:rollback
 else
-  warn "no existing infinia-store image — nothing to roll back to on failure"
+  warn "no existing infinia-webservice image — nothing to roll back to on failure"
 fi
 if [[ $WITH_MONITOR -eq 1 ]] && docker image inspect infinia-monitor:latest >/dev/null 2>&1; then
   docker tag infinia-monitor:latest infinia-monitor:rollback
@@ -79,8 +79,8 @@ fi
 rollback() {
   warn "deploy failed — restoring the previous version (${OLD_REF:0:12})"
   git checkout -f --detach "$OLD_REF" >/dev/null 2>&1 || true
-  if docker image inspect infinia-store:rollback >/dev/null 2>&1; then
-    docker tag infinia-store:rollback infinia-store:latest
+  if docker image inspect infinia-webservice:rollback >/dev/null 2>&1; then
+    docker tag infinia-webservice:rollback infinia-webservice:latest
   fi
   if [[ $WITH_MONITOR -eq 1 ]] && docker image inspect infinia-monitor:rollback >/dev/null 2>&1; then
     docker tag infinia-monitor:rollback infinia-monitor:latest
@@ -141,4 +141,4 @@ fi
 # creep the disk (tagged images — including :rollback — are kept).
 docker image prune -f >/dev/null
 
-log "deployed ${NEW_REF:0:12} (was ${OLD_REF:0:12}); rollback image kept as infinia-store:rollback"
+log "deployed ${NEW_REF:0:12} (was ${OLD_REF:0:12}); rollback image kept as infinia-webservice:rollback"

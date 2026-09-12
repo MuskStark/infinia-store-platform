@@ -1,47 +1,68 @@
-import { defineStore } from 'pinia';
+import { create } from 'zustand';
 import { api, getAccessToken, setAccessToken, type PublicUser } from '../api/client';
 
 /** Auth state — OAuth 2.1 authorization code + PKCE against the store API (design §7.2). */
-export const useAuthStore = defineStore('auth', {
-  state: () => ({
-    user: null as PublicUser | null,
-    ready: false,
-  }),
-  getters: {
-    isAuthenticated: (state) => state.user !== null,
-    roles: (state): string[] => state.user?.roles ?? [],
-  },
-  actions: {
-    /**
-     * Adopts the user object carried by the login/register response so the UI
-     * can navigate immediately; the /me round-trip would leave the sign-in
-     * button idle for as long as that request takes.
-     */
-    adoptUser(user: PublicUser) {
-      this.user = user;
-      this.ready = true;
-    },
-    async load() {
-      if (!getAccessToken()) {
-        this.user = null;
-        this.ready = true;
-        return;
-      }
-      try {
-        this.user = await api.get<PublicUser>('/api/v1/me');
-      } catch {
-        setAccessToken(null);
-        this.user = null;
-      } finally {
-        this.ready = true;
-      }
-    },
-    signOut() {
+interface AuthState {
+  user: PublicUser | null;
+  ready: boolean;
+  /** Adopts the user object carried by the login/register response so the UI
+   * can navigate immediately; the /me round-trip would leave the sign-in
+   * button idle for as long as that request takes. */
+  adoptUser: (user: PublicUser) => void;
+  load: () => Promise<void>;
+  signOut: () => void;
+}
+
+export const useAuthStore = create<AuthState>((set) => ({
+  user: null,
+  ready: false,
+  adoptUser: (user) => set({ user, ready: true }),
+  async load() {
+    if (!getAccessToken()) {
+      set({ user: null, ready: true });
+      return;
+    }
+    try {
+      const user = await api.get<PublicUser>('/api/v1/me');
+      set({ user });
+    } catch {
       setAccessToken(null);
-      this.user = null;
-    },
+      set({ user: null });
+    } finally {
+      set({ ready: true });
+    }
   },
-});
+  signOut() {
+    setAccessToken(null);
+    set({ user: null });
+  },
+}));
+
+/** Setters outside React components (tests, inter-store sync). */
+export function patchUser(patch: Partial<PublicUser>) {
+  const { user } = useAuthStore.getState();
+  if (user) {
+    useAuthStore.setState({ user: { ...user, ...patch } });
+  }
+}
+
+/**
+ * Component-facing selector with the derived fields the pinia version exposed
+ * as getters (isAuthenticated / roles), so views read one shape.
+ */
+export function useAuth() {
+  const user = useAuthStore((s) => s.user);
+  const ready = useAuthStore((s) => s.ready);
+  return {
+    user,
+    ready,
+    isAuthenticated: user !== null,
+    roles: user?.roles ?? [],
+    adoptUser: useAuthStore((s) => s.adoptUser),
+    load: useAuthStore((s) => s.load),
+    signOut: useAuthStore((s) => s.signOut),
+  };
+}
 
 /** PKCE helpers for the SPA login flow. */
 function base64Url(bytes: Uint8Array): string {

@@ -1,10 +1,12 @@
+/// <reference types="vitest/config" />
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
+import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [
-    vue(),
+    react(),
     tailwindcss(),
     // Vite rebuilds the entry <script> tag and drops data-cfasync from
     // index.html, so re-add it here: without it Cloudflare Rocket Loader
@@ -19,6 +21,13 @@ export default defineConfig({
       },
     },
   ],
+  resolve: {
+    // Magic UI / shadcn registry sources import from "@/lib/utils" — keep the
+    // alias so vendored components stay byte-identical to upstream.
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   server: {
     // 8089 keeps the store SPA clear of the FengYu frontend's default 5173,
     // so both apps can run side by side during integration work.
@@ -33,5 +42,8 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Globals so @testing-library/react auto-cleans the DOM between tests.
+    globals: true,
+    setupFiles: ['./tests/setup.ts'],
   },
-} as ReturnType<typeof defineConfig>);
+});

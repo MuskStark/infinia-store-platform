@@ -85,11 +85,9 @@
     </dependencies>
 
     <build>
-        <!-- Store Web's Vite build output ships inside the Boot jar as static
-             resources, so one executable jar serves the SPA and the API from the
-             same origin (dist/ is gitignored; build it first with `yarn web:build`).
-             Maven silently skips the resource when dist/ is absent, keeping plain
-             backend builds working without a Node toolchain. -->
+        <!-- One Vite frontend embeds both / (store) and /site (introduction).
+             Build with yarn web:build; backend-only builds may omit the output. -->
+        <finalName>InfiniaWebService-${project.version}</finalName>
         <resources>
             <resource>
                 <directory>src/main/resources</directory>

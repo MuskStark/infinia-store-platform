@@ -21,7 +21,7 @@
 2. **先做模块化单体，不先拆微服务。** 商店后端采用独立版本线的 Spring Boot 4.1.x 模块化单体；使用领域事件与 Outbox 保留未来拆分能力。
 3. **“Spring 4.1.x”解释为 Spring Boot 4.1.x。** 当前仓库已使用 Spring Boot 4.1.0、Spring Framework 7.0.8 和 Spring AI 2.0.0。Spring 官方当前展示的 Boot 版本为 4.1.1；不得误用已停止维护的 Spring Framework 4.1.x。
 4. **Vue 保持唯一前端运行时。** 商店 Web 和主程序商店界面采用当前稳定 Vue 3.5.41，并锁定 `3.5.x` 小版本；Vite、TypeScript、Pinia、Vue Router 与测试工具通过 Yarn 4 锁文件管理。
-5. **Magic UI 采用受控 Vue 端口。** Magic UI 官方实现基于 React、TypeScript、Tailwind CSS 与 Motion，不能直接作为 Vue 组件依赖。经 MIT 许可证核验后，在项目内维护 `@infinia/magic-ui-vue` 端口，保留来源、许可证和视觉行为测试，不在同一页面引入 React 运行时。
+5. **Magic UI 采用官方原版组件（ADR-013，取代 ADR-007）。** 商店 SPA 运行于 React 19 + Tailwind CSS 4；Magic UI 组件从官方 registry（https://magicui.design/r/*.json）原样复制进 `store-web/src/components/magicui/`，与上游逐字节一致，应用层只通过 className 组合定制。所需 shadcn/ui 基础组件（badge、progress）同样原样引入；设计 token 在 `main.css` 中映射到商店调色板。
 6. **统一目录，不统一执行器。** APP、PLUGIN、SKILL、MCP、FLOW 共用商品、版本、签名、审核和检索模型，但安装必须路由到各自已有或专用执行器。
 7. **账号不是本地后端的入站认证。** Electron/浏览器到 loopback 后端仍使用现有 `X-FengYu-Token`；云账号令牌只用于本地主程序主动访问商店，避免把本地服务暴露为公网资源服务器。
 
@@ -39,7 +39,7 @@
 | Flow | 本地草稿、发布版本、不可变 revision、恢复与运行 | 增加可移植包、依赖锁、商店 release；本地发布与公开发布分开 |
 | 统一商店 | `PluginStoreController` 聚合 FengYu/Claude/Codex/Grok | 保留兼容层，升级为五类制品统一 Catalog API |
 | 用户 | `SysUserEntity` / `SysSessionEntity` 基础结构、Noop 身份、虚拟用户 1 | 新增云端账号域和本地绑定；不直接复用虚拟用户作为云端主体 |
-| 前端 | Vue 3.5.39、Vite 7、Pinia 4、Vuetify 3、Yarn 4 | 新商店区域升级到 Vue 3.5.41；Magic UI Vue 端口渐进接入 |
+| 前端 | React 19、Vite 7、Zustand 5、Tailwind CSS 4、Yarn 4 | 商店 SPA 使用 React + Magic UI 官方原版组件；FengYu 宿主前端的 Vuetify 页面不受影响 |
 
 仓库事实来源：[`pom.xml`](pom.xml)、[`frontend/package.json`](frontend/package.json)、[`PluginStoreController.java`](FengYu/src/main/java/fan/summer/fengyu/web/controller/PluginStoreController.java)、[`McpRuntimeManager.java`](FengYu/src/main/java/fan/summer/fengyu/ai/mcp/McpRuntimeManager.java)、[`WorkflowService.java`](FengYu/src/main/java/fan/summer/fengyu/ai/workflow/WorkflowService.java)。
 
@@ -648,10 +648,10 @@ GET  /api/account/devices
 ```text
 store-platform/store-web/            # 公共商店、发布者、管理员
 frontend/                            # 主程序内嵌商店、账号、我的库
-ui/magic-ui-vue/                     # Vue 3 + Tailwind + Motion 的受控端口
+store-web/src/components/magicui/    # Magic UI 官方 registry 原版组件（逐字节一致）
 ```
 
-共享包仅提供展示组件、设计 token 和无业务状态的组合组件；API client、Pinia store、路由和权限判断留在各应用。`ui/magic-ui-vue` 必须包含 Magic UI MIT 许可证、上游 commit、端口差异记录和视觉回归用例。
+Magic UI 组件保持与官方 registry 逐字节一致；应用层定制（状态色徽章、不定进度条）通过 className 与应用级 CSS 在调用点组合。API client、store、路由和权限判断留在 store-web。上游刷新 = 从 registry 重新复制对应文件。
 
 ### 12.2 技术栈
 
@@ -662,7 +662,7 @@ ui/magic-ui-vue/                     # Vue 3 + Tailwind + Motion 的受控端口
 | 状态 | Pinia 4：`auth`、`catalog`、`library`、`publisher`、`installTransaction` |
 | 路由 | Vue Router 4，路由级代码分割和基于角色的守卫 |
 | 数据 | 生成的 OpenAPI client + 小型 query cache；禁止手写重复 DTO |
-| 样式 | Tailwind CSS + CSS variables + `@infinia/magic-ui-vue` |
+| 样式 | Tailwind CSS 4 + CSS variables + Magic UI 官方组件 |
 | 动效 | Motion 的 Vue 等价实现；所有动效支持 `prefers-reduced-motion` |
 | 测试 | Vitest、Vue Test Utils、Playwright、axe、截图回归 |
 | 国际化 | vue-i18n 11，至少 `zh-CN` / `en` 结构对齐 |
@@ -671,7 +671,7 @@ ui/magic-ui-vue/                     # Vue 3 + Tailwind + Motion 的受控端口
 
 不进行全站重写。迁移规则：
 
-1. `/plugins` 演进为 `/store`，新页面使用 Magic UI Vue 端口；旧设置页继续使用 Vuetify；
+1. `/plugins` 演进为 `/store`，商店 SPA 使用 React + Magic UI 官方组件；旧设置页继续使用 Vuetify；
 2. 单个路由页面只选择一个主要组件体系，避免同一表单同时使用 Vuetify 与 Tailwind reset；
 3. Tailwind 使用 CSS layer、类名前缀和局部入口，设计 token 映射到现有主题变量；
 4. 对话框、Toast、键盘焦点、表单校验先建设统一无障碍 primitives；
@@ -790,7 +790,7 @@ ui/magic-ui-vue/                     # Vue 3 + Tailwind + Motion 的受控端口
 ### 15.2 前端
 
 - 组件单测和 Storybook/Histoire 等价隔离场景；
-- Magic UI Vue 端口与上游示例做截图回归；
+- Magic UI 官方组件从 registry 复制后跑 store-web RTL 套件与页面截图回归；
 - Playwright 覆盖注册登录、浏览、安装确认、发布、审核和回滚提示；
 - axe + 键盘导航 + reduced-motion；
 - 浅色/深色、中英文、窄屏/桌面、Electron/浏览器截图矩阵；
@@ -811,7 +811,7 @@ ui/magic-ui-vue/                     # Vue 3 + Tailwind + Motion 的受控端口
 - 固化统一 coordinate、release envelope、五类 Schema 和签名规范；
 - 为现有 Catalog/更新接口建立 contract tests；
 - 确定 Store 独立版本线、域名、对象存储和 KMS；
-- 建立 `@infinia/magic-ui-vue` 最小包、许可证和三类基础组件；
+- 引入 Magic UI 官方 registry 组件（MIT）与 shadcn 基础组件；
 - 验收：规范评审通过，示例包可被 CLI 和 Host 同时验证。
 
 ### Phase 1：只读商店与主程序更新（4–6 周）
@@ -860,7 +860,7 @@ ui/magic-ui-vue/                     # Vue 3 + Tailwind + Motion 的受控端口
 - Plugin 更新失败能恢复旧 Worker；MCP 安装不携带机密且默认禁用；Flow 安装不自动执行；
 - APP 更新按 Electron/portable 模式正确路由，可灰度、暂停并回滚 Feed；
 - OAuth token 不进入主数据库明文、日志、URL query 或 renderer 的持久存储；
-- Vue 是唯一前端运行时，Magic UI Vue 端口具有许可证、可访问性和视觉回归覆盖；
+- 商店 SPA 为 React 运行时，Magic UI 官方组件保持逐字节一致并有可访问性与视觉回归覆盖（ADR-013）；
 - 中英文结构一致，桌面/浏览器、浅色/深色和 reduced-motion 均通过验收；
 - 审核、发布、撤回、密钥和管理员动作可按 traceId 完整追溯；
 - 版本线明确分离：主程序、插件工具链、商店平台分别独立发布。
@@ -873,7 +873,7 @@ ui/magic-ui-vue/                     # Vue 3 + Tailwind + Motion 的受控端口
 4. **ADR-004：** MCP 仅发布模板，安装默认禁用且机密只存本地；
 5. **ADR-005：** Flow 更新采用来源 revision + 本地副本，不做自动三方合并；
 6. **ADR-006：** Ed25519 双签、KMS 和客户端根密钥轮换；
-7. **ADR-007：** Vue-only + Magic UI MIT 受控端口，不嵌入 React runtime；
+7. **ADR-007 → ADR-013：** 前端从 Vue + 受控端口迁移到 React + Magic UI 官方原版组件；
 8. **ADR-008：** PostgreSQL FTS 起步，指标触发后再引入 OpenSearch；
 9. **ADR-009：** 安装遥测默认最小化、可关闭、不可成为本地状态真相源；
 10. **ADR-010：** 主程序更新 Feed 迁移期保留 GitHub fallback。

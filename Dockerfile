@@ -1,24 +1,25 @@
 # syntax=docker/dockerfile:1
 #
-# Production image for the Infinia Store Platform (single deployable: REST API +
-# OAuth authorization server + embedded Store Web SPA on one origin, port 8080).
+# Production image for InfiniaWebService — the unified web service of the Infinia
+# Store Platform (REST API + OAuth authorization server + embedded Store Web SPA
+# + embedded official website on one origin, port 8080).
 #
-#   docker build -t infinia-store .
-#   docker run -d --name store -p 8080:8080 \
+#   docker build -t infinia-webservice .
+#   docker run -d --name webservice -p 8080:8080 \
 #     -e STORE_BASE_URL=https://store.example.com \
 #     -e STORE_TICKET_SECRET=... -e STORE_ROLLOUT_SECRET=... \
 #     -e STORE_CLI_CLIENT_SECRET=... \
 #     [-e STORE_STORAGE_TYPE=s3 -e STORE_STORAGE_S3_ENDPOINT=... \
 #      -e STORE_STORAGE_S3_BUCKET=... -e STORE_STORAGE_S3_ACCESS_KEY=... \
 #      -e STORE_STORAGE_S3_SECRET_KEY=...] \
-#     -v store-data:/var/lib/infinia-store infinia-store
+#     -v store-data:/var/lib/infinia-store infinia-webservice
 #
 # `docker compose --profile app up` wires this against the stack's PostgreSQL
 # and MinIO (bucket store-blobs); the three STORE_*_SECRET variables come from
 # .env (see .env.example). Redis ships with the stack per the platform design
 # but is not yet wired into the application.
 
-# ---- Stage 1: Store Web SPA (Vue 3 + Vite) ----------------------------------
+# ---- Stage 1: unified frontend (store + introduction) ------------------
 FROM node:22-alpine AS web
 WORKDIR /workspace
 RUN corepack enable
@@ -26,9 +27,7 @@ RUN corepack enable
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY store-web/package.json store-web/package.json
 COPY monitor-web/package.json monitor-web/package.json
-COPY ui/magic-ui-vue/package.json ui/magic-ui-vue/package.json
 RUN yarn install --immutable
-COPY ui/ ui/
 COPY store-web/ store-web/
 RUN yarn workspace @infinia/store-web build \
  && test -f store-web/dist/index.html
@@ -53,19 +52,19 @@ COPY store-infrastructure store-infrastructure
 COPY store-scanner store-scanner
 COPY store-application store-application
 COPY store-monitor store-monitor
-# The Vite output ships as static resources inside the jar (build-jar.sh parity).
+# One frontend output contains both the store and introduction routes.
 COPY --from=web /workspace/store-web/dist store-web/dist
 RUN ./mvnw -B -pl store-application -am package -DskipTests \
- && JAR=$(ls store-application/target/store-application-*.jar | grep -v '\.original$' | head -1) \
+ && JAR=$(ls store-application/target/InfiniaWebService-*.jar | grep -v '\.original$' | head -1) \
  && test -n "$JAR" \
  && jar tf "$JAR" | grep -q 'BOOT-INF/classes/static/index.html' \
- && cp "$JAR" /store-application.jar
+ && cp "$JAR" /InfiniaWebService.jar
 
 # ---- Stage 3: runtime -------------------------------------------------------
 FROM eclipse-temurin:21-jre-noble AS runtime
 # OCI labels belong to a build stage — a LABEL before the first FROM is invalid.
-LABEL org.opencontainers.image.title="Infinia Store Platform"
-LABEL org.opencontainers.image.description="Cloud control plane for the Infinia / FengYu ecosystem: catalog, publishing pipeline, review workflow, signed delivery and accounts."
+LABEL org.opencontainers.image.title="InfiniaWebService"
+LABEL org.opencontainers.image.description="The unified web service of the Infinia / FengYu ecosystem: official website, store catalog, publishing pipeline, review workflow, signed delivery and accounts on one origin."
 LABEL org.opencontainers.image.source="https://github.com/MuskStark/infinia-store-platform"
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"
 RUN apt-get update \
@@ -82,10 +81,10 @@ ENV TZ=UTC \
     STORE_BLOB_DIR=/var/lib/infinia-store/blobs \
     STORE_KEY_DIR=/var/lib/infinia-store/keys
 WORKDIR /app
-COPY --from=jar --chown=infinia:infinia /store-application.jar store-application.jar
+COPY --from=jar --chown=infinia:infinia /InfiniaWebService.jar InfiniaWebService.jar
 USER infinia
 EXPOSE 8080
 VOLUME /var/lib/infinia-store
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
     CMD curl -fsS http://127.0.0.1:8080/actuator/health | grep -qs UP || exit 1
-ENTRYPOINT ["/bin/sh", "-c", "exec java $JAVA_OPTS -jar /app/store-application.jar"]
+ENTRYPOINT ["/bin/sh", "-c", "exec java $JAVA_OPTS -jar /app/InfiniaWebService.jar"]

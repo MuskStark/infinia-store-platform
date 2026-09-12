@@ -3,7 +3,9 @@
 The cloud control plane of the [Infinia / FengYu](https://github.com/MuskStark) ecosystem: a
 unified catalog, publishing pipeline, review workflow, signed delivery and account system for
 **five artifact classes — APP, PLUGIN, SKILL, MCP, FLOW** — built on the local-first
-principles of the FengYu host.
+principles of the FengYu host. The deployable service is **InfiniaWebService** — one origin
+serving the store SPA at `/store`, the official website at `/`, the REST API and the OAuth
+authorization server.
 
 > The store extends *distribution, identity and the trust chain*. It never turns the local
 > runtime into a cloud-dependent SaaS client: the host keeps running everything already
@@ -26,12 +28,14 @@ store-platform/
 │                           #   (local FS or any S3-compatible bucket), outbox relay, cache
 ├── store-scanner/          # Safe unpacking, manifest validation for all 5 classes,
 │                           #   secret/malicious-content scanning, SBOM, Ed25519
-├── store-application/      # The store Spring Boot app (API + auth server + embedded SPA)
+├── store-application/      # InfiniaWebService: the Spring Boot app (API + auth server +
+│                           #   embedded store SPA at /store and official website at /)
 ├── store-monitor/          # Standalone status monitor (ADR-011): probes + mirrors the
 │                           #   store, serves the status page when the store is down
-├── store-web/              # Vue 3 store / publisher / review SPA
+├── store-web/              # React + Vite frontend: store / publisher / review + project introduction
 ├── monitor-web/            # Vue 3 status-page SPA (embedded in the monitor jar)
-└── ui/magic-ui-vue/        # @infinia/magic-ui-vue — controlled Magic UI port (MIT)
+│   └── src/intro/          # Official Infinia introduction page (same SPA, /)
+└── store-web/src/components/magicui/  # Magic UI original components (MIT, verbatim from the registry)
 ```
 
 Key decisions are frozen in [docs/adr](docs/adr/ADR-001-modular-monolith.md); the full design
@@ -39,20 +43,21 @@ lives in [docs/design/STORE_PLATFORM_DESIGN.md](docs/design/STORE_PLATFORM_DESIG
 
 ## Quickstart (single jar)
 
-Build the SPA once, then package it with the backend into one executable Boot jar
-(the Vite output is embedded under `classpath:/static`, so API, OAuth server and
-web UI share a single origin and port):
+Build the unified frontend once, then package it with the backend into one executable
+Boot jar. The Vite output under `classpath:/static` serves both the store and
+project introduction through one router; API and OAuth share the same origin:
 
 ```bash
 yarn install
-./build-jar.sh    # builds the SPA, embeds it, runs tests, verifies the jar
-# faster iteration: ./build-jar.sh --skip-tests, or --skip-web to reuse dist/
+./build-jar.sh    # builds the unified frontend, embeds it, runs tests, verifies the jar
+# faster iteration: ./build-jar.sh --skip-tests, or --skip-web to reuse dist/ and out/
 
-java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar \
+java -jar store-application/target/InfiniaWebService-0.1.0-SNAPSHOT.jar \
   --spring.profiles.active=local
 ```
 
-Open http://localhost:8080. The `local` profile runs on embedded H2 stored in a
+Open http://localhost:8080/store — the store SPA; the official website lives at
+http://localhost:8080/. The `local` profile runs on embedded H2 stored in a
 temporary folder under the project root (`tmp/database/`, git-ignored) — no Docker
 needed. Blobs, signing keys and git exports live under the same `tmp/` folder, so
 nothing store-generated lands in your home directory. Seeded demo accounts
@@ -157,7 +162,7 @@ sha256sum-compatible manifest at `GET /api/v1/releases/{releaseId}/checksums.txt
 cp .env.example .env             # fill in the three STORE_*_SECRET values — compose enforces them
 docker compose up -d             # PostgreSQL 17, Redis 7, MinIO (+ store-blobs bucket)
 ./build-jar.sh
-java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar
+java -jar store-application/target/InfiniaWebService-0.1.0-SNAPSHOT.jar
 ```
 
 Secrets come from the environment (`STORE_TICKET_SECRET`, `STORE_ROLLOUT_SECRET`,
@@ -178,7 +183,7 @@ STORE_STORAGE_S3_ENDPOINT=http://localhost:9000 \   # MinIO; omit for AWS S3
 STORE_STORAGE_S3_BUCKET=store-blobs \
 STORE_STORAGE_S3_ACCESS_KEY=store \
 STORE_STORAGE_S3_SECRET_KEY=store-secret \
-java -jar store-application/target/store-application-0.1.0-SNAPSHOT.jar
+java -jar store-application/target/InfiniaWebService-0.1.0-SNAPSHOT.jar
 ```
 
 All knobs live under `store.storage.s3.*` (`region`, `path-style-access`,
@@ -196,12 +201,12 @@ executable Boot jar, then a non-root JRE runtime with a healthcheck on
 `/actuator/health`):
 
 ```bash
-docker build -t infinia-store .
+docker build -t infinia-webservice .
 docker run -d --name store -p 8080:8080 \
   -e STORE_BASE_URL=https://store.example.com \
   -e STORE_TICKET_SECRET=… -e STORE_ROLLOUT_SECRET=… -e STORE_CLI_CLIENT_SECRET=… \
   -v store-data:/var/lib/infinia-store \
-  infinia-store
+  infinia-webservice
 ```
 
 Local blob/key state lives under `/var/lib/infinia-store` (mount it as a
@@ -296,8 +301,9 @@ yarn workspace @infinia/store-web gen:api
 
 ```bash
 ./mvnw verify                        # backend: 303 tests
-yarn ui:test                         # magic-ui-vue port: visual/behavior tests
 yarn web:test && yarn web:build      # SPA: i18n parity, client, component tests + typecheck
+yarn web                            # one dev server: :8089/store store, :8089/ introduction
+# yarn website / yarn website:build remain aliases of web / web:build
 ```
 
 - Database changes go through Flyway only (`store-infrastructure/src/main/resources/db/migration`)
@@ -308,6 +314,7 @@ yarn web:test && yarn web:build      # SPA: i18n parity, client, component tests
 
 ## License
 
-GPL-3.0 (see [LICENSE](LICENSE)). The `ui/magic-ui-vue` package vendors MIT-licensed
-components from [Magic UI](https://magicui.design) with attribution preserved
-(see [ui/magic-ui-vue/PORT_NOTES.md](ui/magic-ui-vue/PORT_NOTES.md)).
+GPL-3.0 (see [LICENSE](LICENSE)). `store-web/src/components/magicui/` (and the
+shadcn/ui base parts in `store-web/src/components/ui/`) are the MIT-licensed
+originals copied verbatim from the [Magic UI](https://magicui.design) registry
+(provenance and refresh instructions: `store-web/src/components/magicui/README.md`).

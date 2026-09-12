@@ -1,37 +1,50 @@
-import { defineStore } from 'pinia';
+import { create } from 'zustand';
 import { api, type CatalogItem, type PublisherRelease } from '../api/client';
 
 /** Publisher center state (design §8). */
-export const usePublisherStore = defineStore('publisher', {
-  state: () => ({
-    listings: [] as CatalogItem[],
-    /** Polling cache keyed by releaseId (status refresh). */
-    releases: {} as Record<string, PublisherRelease>,
-    /** All releases of a listing (incl. DRAFTs) keyed by listingId — the resume path. */
-    releasesByListing: {} as Record<string, PublisherRelease[]>,
-    error: null as string | null,
-  }),
-  actions: {
-    async load() {
-      this.error = null;
-      try {
-        this.listings = await api.get<CatalogItem[]>('/api/v1/publisher/listings');
-      } catch (e) {
-        this.error = e instanceof Error ? e.message : 'error';
-      }
-    },
-    async refreshRelease(releaseId: string) {
-      this.releases[releaseId] = await api.get<PublisherRelease>(
-        `/api/v1/publisher/releases/${releaseId}`,
-      );
-    },
-    async loadReleases(listingId: string) {
-      this.releasesByListing[listingId] = await api.get<PublisherRelease[]>(
-        `/api/v1/publisher/listings/${listingId}/releases`,
-      );
-      for (const release of this.releasesByListing[listingId]) {
-        this.releases[release.releaseId] = release;
-      }
-    },
+interface PublisherState {
+  listings: CatalogItem[];
+  /** Polling cache keyed by releaseId (status refresh). */
+  releases: Record<string, PublisherRelease>;
+  /** All releases of a listing (incl. DRAFTs) keyed by listingId — the resume path. */
+  releasesByListing: Record<string, PublisherRelease[]>;
+  error: string | null;
+  load: () => Promise<void>;
+  refreshRelease: (releaseId: string) => Promise<void>;
+  loadReleases: (listingId: string) => Promise<void>;
+}
+
+export const usePublisherStore = create<PublisherState>((set, get) => ({
+  listings: [],
+  releases: {},
+  releasesByListing: {},
+  error: null,
+  async load() {
+    set({ error: null });
+    try {
+      const listings = await api.get<CatalogItem[]>('/api/v1/publisher/listings');
+      set({ listings });
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : 'error' });
+    }
   },
-});
+  async refreshRelease(releaseId) {
+    const release = await api.get<PublisherRelease>(
+      `/api/v1/publisher/releases/${releaseId}`,
+    );
+    set({ releases: { ...get().releases, [releaseId]: release } });
+  },
+  async loadReleases(listingId) {
+    const releases = await api.get<PublisherRelease[]>(
+      `/api/v1/publisher/listings/${listingId}/releases`,
+    );
+    const nextReleases = { ...get().releases };
+    for (const release of releases) {
+      nextReleases[release.releaseId] = release;
+    }
+    set({
+      releasesByListing: { ...get().releasesByListing, [listingId]: releases },
+      releases: nextReleases,
+    });
+  },
+}));

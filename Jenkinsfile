@@ -95,7 +95,6 @@ pipeline {
           yarn workspace @infinia/store-web gen:api
           git -c safe.directory="$WORKSPACE" diff --exit-code -- store-web/src/api/schema.d.ts
         '''
-        sh 'yarn ui:test'
         sh 'yarn web:test'
         sh 'yarn monitor:test'
         sh 'yarn web:build'

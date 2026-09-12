@@ -121,7 +121,7 @@ services:
   # `docker compose up -d` dependency-stack behaviour is unchanged.
   store:
     build: .
-    image: infinia-store
+    image: infinia-webservice
     profiles: ["app"]
     depends_on:
       postgres:

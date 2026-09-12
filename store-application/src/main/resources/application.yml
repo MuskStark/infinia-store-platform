@@ -1,6 +1,6 @@
 spring:
   application:
-    name: infinia-store
+    name: InfiniaWebService
   datasource:
     url: jdbc:postgresql://localhost:5432/store
     username: store

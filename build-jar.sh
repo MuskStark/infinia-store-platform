@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 #
-# Build the single deployable jar: Store Web's Vite output is embedded as static
-# resources inside the executable Spring Boot jar, so one archive serves the SPA,
-# the REST API and the OAuth authorization server from a single origin.
+# Build InfiniaWebService with one Vite frontend: store at /, introduction at
+# /site, REST API and OAuth on the same origin.
 #
 # Usage:
 #   ./build-jar.sh [--skip-tests] [--skip-web]
 #
 #   --skip-tests   package without running backend tests
-#   --skip-web     reuse the existing store-web/dist instead of rebuilding it
+#   --skip-web     reuse the existing store-web/dist instead of rebuilding
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -35,21 +34,23 @@ if [ "$SKIP_WEB" -eq 0 ]; then
     yarn install
     echo "==> Building Store Web (Vite)"
     yarn web:build
+
 fi
 
-# The pom silently skips the embedded SPA when dist/ is absent (so plain backend
-# builds work without Node) — a release jar must not ship that way, so verify.
+# The pom silently skips an embedded frontend dir when it is absent (so plain
+# backend builds work without Node) — a release jar must not ship that way, so
+# verify the unified shell.
 [ -f store-web/dist/index.html ] \
     || fail "store-web/dist/index.html not found; rebuild without --skip-web"
 
-echo "==> Packaging store-application"
-MAVEN_ARGS=(-pl store-application -am package)
+echo "==> Packaging InfiniaWebService (store-application)"
+MAVEN_ARGS=(-pl store-application -am clean package)
 if [ "$SKIP_TESTS" -eq 1 ]; then
     MAVEN_ARGS+=(-DskipTests)
 fi
 ./mvnw "${MAVEN_ARGS[@]}"
 
-JAR=$( { ls store-application/target/store-application-*.jar; } 2>/dev/null | grep -v '\.original$' | head -1 || true)
+JAR=$( { ls store-application/target/InfiniaWebService-*.jar; } 2>/dev/null | grep -v '\.original$' | head -1 || true)
 [ -n "$JAR" ] || fail "no jar produced in store-application/target"
 # Buffer the listing first: `unzip -l | grep -q` breaks under pipefail because
 # grep -q exits on the first match and SIGPIPEs the archiver.
@@ -63,3 +64,4 @@ grep -q 'BOOT-INF/classes/static/index.html' <<<"$ENTRIES" \
 
 echo "==> OK: $JAR ($(du -h "$JAR" | cut -f1))"
 echo "    Run: java -jar $JAR --spring.profiles.active=local"
+echo "    Store: http://localhost:8080/   Website: http://localhost:8080/site/"
