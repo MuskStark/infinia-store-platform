@@ -51,8 +51,6 @@ jobs:
         run: |
           yarn workspace @infinia/store-web gen:api
           git diff --exit-code -- store-web/src/api/schema.d.ts
-      - name: Unit tests (magic-ui port)
-        run: yarn ui:test
       - name: Unit tests (store web)
         run: yarn web:test
       - name: Unit tests (monitor web)

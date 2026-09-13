@@ -1,3 +1,4 @@
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   useCallback,
   useEffect,
@@ -52,6 +53,7 @@ export default function SelectMenu({
   /** Extra classes for the root wrapper (width constraints, layout). */
   className?: string;
 }) {
+  const reducedMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [listStyle, setListStyle] = useState<Record<string, string>>({});
@@ -82,12 +84,20 @@ export default function SelectMenu({
 
   // Measured in the same tick the popover mounts, so positioning lands before paint.
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) {
+      listRef.current?.setAttribute('aria-hidden', 'true');
+      listRef.current?.setAttribute('inert', '');
+      return;
+    }
     const list = listRef.current;
     const anchor = root.current?.querySelector('button');
     if (!list || !anchor) return;
+    list.removeAttribute('inert');
+    list.removeAttribute('aria-hidden');
     const anchorRect = anchor.getBoundingClientRect();
-    const { height: listHeight, width: listWidth } = list.getBoundingClientRect();
+    // Measure layout size, unaffected by the entrance transform.
+    const listHeight = list.offsetHeight;
+    const listWidth = list.offsetWidth;
     const spaceBelow = window.innerHeight - anchorRect.bottom;
     const spaceAbove = anchorRect.top;
     const dropUp = spaceBelow < listHeight + 8 && spaceAbove > spaceBelow;
@@ -97,6 +107,7 @@ export default function SelectMenu({
         ? `${anchorRect.top - listHeight - 4}px`
         : `${anchorRect.bottom + 4}px`,
       minWidth: `${anchorRect.width}px`,
+      transformOrigin: dropUp ? 'bottom left' : 'top left',
     });
   }, [open]);
 
@@ -210,15 +221,25 @@ export default function SelectMenu({
           </svg>
         </button>
       )}
-      {open && createPortal(
-        <ul
+      {createPortal(
+        <AnimatePresence>
+        {open && <motion.ul
+          initial={reducedMotion ? false : { opacity: 0, scale: 0.92, clipPath: 'inset(0 0 100% 0 round 12px)' }}
+          animate={{ opacity: 1, scale: 1, clipPath: 'inset(0 0 0% 0 round 12px)' }}
+          exit={{ opacity: 0, scale: reducedMotion ? 1 : 0.96, transition: { duration: reducedMotion ? 0 : 0.14 } }}
+          transition={{ duration: reducedMotion ? 0 : 0.32, ease: [0.22, 1, 0.36, 1] }}
+          inert={!open}
+          aria-hidden={!open}
           ref={listRef}
           className="fixed z-50 max-h-64 w-max overflow-y-auto rounded-xl border border-line bg-surface py-1 shadow-xl shadow-slate-900/10 ring-1 ring-black/5 dark:shadow-black/40 dark:ring-white/5"
           style={listStyle}
           role="listbox"
         >
           {options.map((option, index) => (
-            <li key={option.value}>
+            <motion.li key={option.value}
+              initial={reducedMotion ? false : { opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: reducedMotion ? 0 : 0.22, delay: reducedMotion ? 0 : 0.05 + index * 0.035 }}>
               <button
                 type="button"
                 role="option"
@@ -239,7 +260,7 @@ export default function SelectMenu({
                 </span>
                 <span>{option.label}</span>
               </button>
-            </li>
+            </motion.li>
           ))}
           {!options.length && (
             <li>
@@ -248,7 +269,8 @@ export default function SelectMenu({
               )}
             </li>
           )}
-        </ul>, document.body
+        </motion.ul>}
+        </AnimatePresence>, document.body
       )}
     </div>
   );

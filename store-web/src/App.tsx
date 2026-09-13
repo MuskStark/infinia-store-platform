@@ -1,3 +1,5 @@
+import AccountNotch from './components/AccountNotch';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import { useTheme } from 'next-themes';
@@ -22,8 +24,6 @@ export default function App({ children }: { children: React.ReactNode }) {
 
   const isDark = resolvedTheme === 'dark';
   const [searchQuery, setSearchQuery] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRoot = useRef<HTMLDivElement | null>(null);
 
   // Load the session once at boot; guards hold their route until auth.ready.
   useEffect(() => {
@@ -33,39 +33,24 @@ export default function App({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const reducedMotion = useReducedMotion();
+  const themeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (themeTimer.current) clearTimeout(themeTimer.current);
+    document.documentElement.classList.remove('store-theme-transition');
+  }, []);
   function toggleTheme() {
+    if (themeTimer.current) clearTimeout(themeTimer.current);
+    if (!reducedMotion) document.documentElement.classList.add('store-theme-transition');
     setTheme(isDark ? 'light' : 'dark');
+    themeTimer.current = setTimeout(() => {
+      document.documentElement.classList.remove('store-theme-transition');
+    }, 350);
   }
 
   function switchLocale() {
     setLocale(i18n.language === 'en' ? 'zh-CN' : 'en');
   }
-
-  /** Close on outside click / Escape so the menu behaves like a proper popover. */
-  function onDocumentClick(event: MouseEvent) {
-    if (menuOpen && menuRoot.current && !menuRoot.current.contains(event.target as Node)) {
-      setMenuOpen(false);
-    }
-  }
-
-  function onKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      setMenuOpen(false);
-    }
-  }
-
-  useEffect(() => {
-    document.addEventListener('click', onDocumentClick);
-    document.addEventListener('keydown', onKeydown);
-    return () => {
-      document.removeEventListener('click', onDocumentClick);
-      document.removeEventListener('keydown', onKeydown);
-    };
-  });
-
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [location.pathname, location.search, location.hash]);
 
   function submitSearch(event: React.FormEvent) {
     event.preventDefault();
@@ -73,7 +58,6 @@ export default function App({ children }: { children: React.ReactNode }) {
   }
 
   function goSignOut() {
-    setMenuOpen(false);
     auth.signOut();
     navigate('/store');
   }
@@ -237,6 +221,13 @@ export default function App({ children }: { children: React.ReactNode }) {
                 title={t('common.theme')}
                 onClick={toggleTheme}
               >
+                <span className="relative block size-[17px] overflow-hidden" aria-hidden="true">
+                <AnimatePresence initial={false} mode="sync">
+                  <motion.span key={isDark ? 'sun' : 'moon'} className="absolute inset-0"
+                    initial={reducedMotion ? false : { opacity: 0, rotate: -90, scale: 0.5 }}
+                    animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                    exit={{ opacity: 0, rotate: reducedMotion ? 0 : 90, scale: reducedMotion ? 1 : 0.5 }}
+                    transition={{ duration: reducedMotion ? 0 : 0.25, ease: 'easeOut' }}>
                 {isDark ? (
                   <svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                     <circle cx="10" cy="10" r="3.5" stroke="currentColor" strokeWidth="1.5" />
@@ -258,6 +249,9 @@ export default function App({ children }: { children: React.ReactNode }) {
                     />
                   </svg>
                 )}
+                  </motion.span>
+                </AnimatePresence>
+                </span>
               </button>
 
               <span className="mx-1.5 hidden h-6 w-px bg-line sm:block" aria-hidden="true" />
@@ -277,104 +271,19 @@ export default function App({ children }: { children: React.ReactNode }) {
                   {t('nav.signIn')}
                 </button>
               ) : (
-                <div ref={menuRoot} className="relative">
-                  <button
-                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink transition-colors hover:bg-surface-muted"
-                    aria-haspopup="menu"
-                    aria-expanded={menuOpen}
-                    onClick={() => setMenuOpen(!menuOpen)}
-                  >
-                    <span
-                      className="grid h-7 w-7 place-items-center rounded-lg text-xs font-bold text-white"
-                      style={{ background: 'var(--hero-gradient)' }}
-                    >
-                      {initial}
-                    </span>
-                    <span className="hidden max-w-36 truncate md:inline">{auth.user?.displayName}</span>
-                    <BeeLevelBadge level={auth.user?.effectiveBeeLevel ?? auth.user?.beeLevel ?? 0} compact />
-                    <svg
-                      className={`text-muted transition-transform ${menuOpen ? 'rotate-180' : ''}`}
-                      width="12"
-                      height="12"
-                      viewBox="0 0 12 12"
-                      fill="none"
-                      aria-hidden="true"
-                    >
-                      <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-                  {menuOpen && (
-                    <div
-                      className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-line bg-surface-raised text-ink shadow-xl shadow-black/10"
-                      role="menu"
-                    >
-                      <div className="border-b border-line px-4 py-3">
-                        <p className="truncate text-sm font-semibold">{auth.user?.displayName}</p>
-                        <p className="truncate text-xs text-muted">{auth.user?.email}</p>
-                        <p className="mt-1.5">
-                          <BeeLevelBadge level={auth.user?.effectiveBeeLevel ?? auth.user?.beeLevel ?? 0} />
-                        </p>
-                      </div>
-                      <div className="p-1.5">
-                        <button
-                          className="block w-full rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-muted"
-                          role="menuitem"
-                          onClick={() => {
-                            setMenuOpen(false);
-                            navigate('/store/account');
-                          }}
-                        >
-                          {t('nav.account')}
-                        </button>
-                        <Link
-                          className="block rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-muted"
-                          to="/store/library"
-                          role="menuitem"
-                          onClick={() => setMenuOpen(false)}
-                        >
-                          {t('nav.library')}
-                        </Link>
-                        <Link
-                          className="block rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-muted"
-                          to="/store/organizations"
-                          role="menuitem"
-                          onClick={() => setMenuOpen(false)}
-                        >
-                          {t('nav.organizations')}
-                        </Link>
-                        {isPublisher && (
-                          <Link
-                            className="block rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-muted"
-                            to="/store/publisher"
-                            role="menuitem"
-                            onClick={() => setMenuOpen(false)}
-                          >
-                            {t('nav.publisher')}
-                          </Link>
-                        )}
-                        {isAdmin && (
-                          <Link
-                            className="block rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-muted"
-                            to="/store/admin"
-                            role="menuitem"
-                            onClick={() => setMenuOpen(false)}
-                          >
-                            {t('nav.admin')}
-                          </Link>
-                        )}
-                      </div>
-                      <div className="border-t border-line p-1.5">
-                        <button
-                          className="block w-full rounded-lg px-2.5 py-2 text-left text-sm text-danger hover:bg-danger/10"
-                          role="menuitem"
-                          onClick={goSignOut}
-                        >
-                          {t('nav.signOut')}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <AccountNotch key={location.pathname} label={t('nav.account')}
+                  trigger={<><span className="grid size-7 shrink-0 place-items-center rounded-lg border border-accent/20 bg-accent/10 text-xs font-bold text-accent">{initial}</span>
+                    <span className="hidden min-w-0 flex-1 truncate text-left md:block">{auth.user?.displayName}</span>
+                    <BeeLevelBadge level={auth.user?.effectiveBeeLevel ?? auth.user?.beeLevel ?? 0} compact /></>}
+                  options={[
+                    { id: '/store/account', label: t('nav.account') },
+                    { id: '/store/library', label: t('nav.library') },
+                    { id: '/store/organizations', label: t('nav.organizations') },
+                    ...(isPublisher ? [{ id: '/store/publisher', label: t('nav.publisher') }] : []),
+                    ...(isAdmin ? [{ id: '/store/admin', label: t('nav.admin') }] : []),
+                    { id: 'signout', label: t('nav.signOut'), danger: true },
+                  ]}
+                  onSelect={id => id === 'signout' ? goSignOut() : navigate(id)} />
               )}
             </div>
           </div>

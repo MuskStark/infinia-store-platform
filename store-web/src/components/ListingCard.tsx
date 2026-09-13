@@ -5,6 +5,7 @@ import BeeLevelBadge from './BeeLevelBadge';
 import { formatNumber } from '../utils/format';
 import { badgeToneClass, badgeBaseClass } from '../utils/badgeTone';
 import type { CatalogItem } from '../api/client';
+import ArtifactTypeIcon from './ArtifactTypeIcon';
 import { cn } from '@/lib/utils';
 
 /**
@@ -24,15 +25,8 @@ export default function ListingCard({
   return (
     <Link
       to={`/store/listing/${item.namespace}/${item.slug}`}
-      className="card group flex h-full flex-col gap-3 p-4 transition-colors hover:border-ink/40 dark:hover:border-slate-500"
+      className={cn("card group relative flex h-full min-w-0 flex-col gap-4 p-5 transition-colors hover:border-accent/40 hover:bg-surface-raised", featured && "border-accent/20")}
     >
-      {featured && (
-        <div
-          className="-mt-4 -mx-4 mb-0 h-1 rounded-t-lg"
-          style={{ background: 'var(--hero-gradient)' }}
-          aria-hidden="true"
-        />
-      )}
       <div className="flex items-start gap-3">
         {item.iconUrl ? (
           <img
@@ -41,17 +35,13 @@ export default function ListingCard({
             className="h-11 w-11 shrink-0 rounded-lg object-cover"
           />
         ) : (
-          <div
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-lg font-bold text-white"
-            style={{ background: 'var(--hero-gradient)' }}
-            aria-hidden="true"
-          >
-            {item.name.charAt(0)}
+          <div className="shrink-0 text-accent">
+            <ArtifactTypeIcon type={item.type} className="size-11" />
           </div>
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="font-semibold leading-snug">{item.name}</h3>
+            <h3 className="line-clamp-2 font-semibold leading-snug">{item.name}</h3>
             <div className="flex shrink-0 items-center gap-1">
               {item.channel && item.channel !== 'stable' && (
                 <Badge
@@ -63,36 +53,31 @@ export default function ListingCard({
               )}
             </div>
           </div>
-          <p className="truncate text-xs text-muted">{item.namespace}</p>
+          <p className="mt-1 truncate text-xs text-muted">{item.namespace}</p>
         </div>
       </div>
 
-      <p className="line-clamp-2 text-sm leading-6 text-muted">
+      <p className="line-clamp-2 min-h-12 text-sm leading-6 text-muted">
         {item.summary}
       </p>
 
-      <div className="mt-auto space-y-1.5">
+      <div className="mt-auto space-y-3">
         {(item.category || (item.minBeeLevel && item.minBeeLevel > 0)) && (
           <div className="flex flex-wrap gap-1">
             {item.category && (
-              <Badge
-                variant="outline"
-                className={cn(badgeBaseClass, badgeToneClass.muted)}
-              >
-                {item.category}
-              </Badge>
+              <span className="text-xs text-muted">{item.category}</span>
             )}
             {item.minBeeLevel != null && item.minBeeLevel > 0 && (
               <BeeLevelBadge level={item.minBeeLevel} demands />
             )}
           </div>
         )}
-        <div className="flex items-center justify-between text-xs text-muted">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-line/70 pt-3 text-xs text-muted">
           <span>
             {item.downloads != null ? formatNumber(item.downloads) : '—'}{' '}
             {t('discover.statsDownloads')}
           </span>
-          <span className="flex items-center gap-2">
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
             {item.latestVersion && <span>v{item.latestVersion}</span>}
             <span className="font-medium text-ink/70">
               {t(`type.${item.type}`)}

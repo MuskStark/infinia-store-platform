@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build InfiniaWebService with one Vite frontend: store at /, introduction at
-# /site, REST API and OAuth on the same origin.
+# Build InfiniaWebService with one Vite frontend: introduction at /, store at
+# /store, REST API and OAuth on the same origin.
 #
 # Usage:
 #   ./build-jar.sh [--skip-tests] [--skip-web]
@@ -64,4 +64,4 @@ grep -q 'BOOT-INF/classes/static/index.html' <<<"$ENTRIES" \
 
 echo "==> OK: $JAR ($(du -h "$JAR" | cut -f1))"
 echo "    Run: java -jar $JAR --spring.profiles.active=local"
-echo "    Store: http://localhost:8080/   Website: http://localhost:8080/site/"
+echo "    Store: http://localhost:8080/store   Website: http://localhost:8080/"

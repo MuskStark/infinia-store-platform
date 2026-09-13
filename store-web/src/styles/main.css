@@ -477,3 +477,55 @@ html.dark, html.introduction-scrollbar { --page-scroll-thumb: #3f3f46; --page-sc
 .table-card .admin-listings-table td:nth-child(2),
 .table-card .admin-listings-table td:nth-child(3) { white-space: normal; overflow-wrap: anywhere; }
 .table-card .admin-listings-table .btn { padding-left: 0.625rem; padding-right: 0.625rem; }
+
+/* Account lists use the same surface and borders as the rest of the store. */
+.account-session-list { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; }
+.account-session-list::-webkit-scrollbar { width: 4px; }
+.account-session-list::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 4px; }
+
+/* Animate palette changes only after an explicit theme-button click. */
+@media (prefers-reduced-motion: no-preference) {
+  html.store-theme-transition, html.store-theme-transition body,
+  html.store-theme-transition body * {
+    transition-property: background-color, border-color, color, fill, stroke, box-shadow !important;
+    transition-duration: 280ms !important;
+    transition-timing-function: ease-out !important;
+  }
+}
+
+/* Avoid stacking the global focus outline over the search field border. */
+.store-hero-search input:focus,
+.store-hero-search input:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border-color: var(--color-accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .role-dialog-overlay[data-state='open'] { animation: role-overlay-in 160ms ease-out; }
+  .role-dialog-overlay[data-state='closed'] { animation: role-overlay-in 120ms ease-in reverse; }
+  .role-dialog-content[data-state='open'] { animation: role-dialog-in 220ms cubic-bezier(.22, 1, .36, 1); }
+  .role-dialog-content[data-state='closed'] { animation: role-dialog-in 120ms ease-in reverse; }
+}
+@keyframes role-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes role-dialog-in {
+  from { opacity: 0; scale: .96; }
+  to { opacity: 1; scale: 1; }
+}
+
+/* Keep modal keyboard focus subtle and consistent with store controls. */
+.role-dialog-content:focus { outline: none; }
+.role-dialog-content button:focus-visible,
+.role-dialog-content .role-option:has(input:focus-visible) {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 3px;
+}
+.role-dialog-content button:focus:not(:focus-visible) { outline: none; }
+
+.role-edit-trigger {
+  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-transparent bg-transparent text-muted/70 transition-colors hover:border-line hover:bg-surface-muted hover:text-accent;
+}
+.role-edit-trigger:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
+}

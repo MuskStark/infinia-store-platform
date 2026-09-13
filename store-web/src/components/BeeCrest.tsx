@@ -13,9 +13,11 @@ import { beeMark } from '../bee-levels';
 export default function BeeCrest({
   level,
   size = 18,
+  monochrome = false,
 }: {
   level: number;
   size?: number;
+  monochrome?: boolean;
 }) {
   const mark = beeMark(level);
 
@@ -91,11 +93,11 @@ export default function BeeCrest({
           </defs>
           <path
             d="M4.6 6.8 8.6 9.6 12 4.2l3.4 5.4 4-2.8-1.4 7.4H6L4.6 6.8Z"
-            fill="url(#bee-royal-grad)"
+            fill={monochrome ? "currentColor" : "url(#bee-royal-grad)"}
           />
           <path
             d="M6.2 16.2h11.6l-.8 4.2H7l-.8-4.2Z"
-            fill="url(#bee-royal-grad)"
+            fill={monochrome ? "currentColor" : "url(#bee-royal-grad)"}
             opacity=".85"
           />
         </svg>

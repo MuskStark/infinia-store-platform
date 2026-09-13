@@ -1,9 +1,9 @@
+import ArtifactTypeIcon from '../components/ArtifactTypeIcon';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import HexWash from '../components/HexWash';
 import { AuroraText } from '../components/magicui/aurora-text';
-import MagicCard from '../components/MagicCard';
 import { api, type CatalogItem, type CatalogPage } from '../api/client';
 import { BlurFade } from '../components/magicui/blur-fade';
 import { NumberTicker } from '../components/magicui/number-ticker';
@@ -94,10 +94,10 @@ export default function DiscoverView() {
               </p>
             </BlurFade>
 
-            {/* Composite search bar: blue submit segment + input, marketplace style. */}
+            {/* Composite search bar with one shared, thin focus border. */}
             <BlurFade delay={0.1}>
               <form
-                className="mt-8 flex max-w-2xl"
+                className="store-hero-search mt-8 flex max-w-2xl"
                 role="search"
                 onSubmit={submitSearch}
               >
@@ -156,16 +156,17 @@ export default function DiscoverView() {
           <h2 id="types-heading" className="mb-4 text-lg font-bold">
             {t('discover.categories')}
           </h2>
-          <div className="flex flex-wrap gap-2.5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {types.map((type) => (
               <Link
                 key={type}
                 to={`/store/browse?type=${type}`}
-                className="rounded-lg"
+                className="group flex min-h-20 items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-medium transition-colors hover:border-accent/40 hover:bg-surface-muted"
               >
-                <MagicCard className="rounded-lg px-5 py-3 text-sm font-medium">
+                <ArtifactTypeIcon type={type} className="size-9 shrink-0 text-accent" />
+                <span>
                   {t(`type.${type}`)}
-                </MagicCard>
+                </span>
               </Link>
             ))}
           </div>
