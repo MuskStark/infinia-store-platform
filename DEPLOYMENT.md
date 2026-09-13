@@ -335,7 +335,7 @@ the runtime overlay's revocation list.
 Provision the public artifact as `<runtime-root>/trusted-store-keys.json` on an
 existing FengYu host, merging any operator keys/revocations, then restart its
 backend. New host builds bundle the production key. Keep
-`fengyu.store.require-signature=true` and use `https://store.summer.fan` as the
+`fengyu.store.require-signature=true` and use `https://www.infinia.fyi` as the
 store API base. This is artifact signing trust, separate from HTTPS certificates.
 Never archive or distribute the server's private `.b64` file.
 
