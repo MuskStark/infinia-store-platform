@@ -33,6 +33,13 @@ RUN yarn workspace @infinia/monitor-web build \
 # Tests run in CI (`./mvnw verify`); the image build stays fast and reproducible.
 FROM maven:3.9-eclipse-temurin-21 AS jar
 WORKDIR /build
+# Optional Maven mirror for slow links to Maven Central (docker-compose passes
+# MAVEN_MIRROR from .env, e.g. https://maven.aliyun.com/repository/public);
+# empty keeps the default Maven Central — overseas deployments change nothing.
+ARG MAVEN_MIRROR=""
+COPY docker/maven-settings.xml /tmp/maven-settings.xml
+RUN if [ -n "$MAVEN_MIRROR" ]; then mkdir -p /root/.m2 \
+ && sed "s|__MAVEN_MIRROR__|$MAVEN_MIRROR|g" /tmp/maven-settings.xml > /root/.m2/settings.xml; fi
 COPY mvnw pom.xml ./
 COPY .mvn .mvn
 COPY store-contract/pom.xml store-contract/pom.xml

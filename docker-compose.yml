@@ -120,7 +120,12 @@ services:
   # `docker compose --profile app up -d store` so the plain
   # `docker compose up -d` dependency-stack behaviour is unchanged.
   store:
-    build: .
+    build:
+      context: .
+      args:
+        # Mirror for the image build's Maven downloads (slow links to Maven
+        # Central); empty keeps Maven Central. See .env.example MAVEN_MIRROR.
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
     image: infinia-webservice
     profiles: ["app"]
     depends_on:
@@ -189,6 +194,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.monitor
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
     image: infinia-monitor
     profiles: ["monitor"]
     depends_on:

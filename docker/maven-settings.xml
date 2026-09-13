@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Template installed into the build image only when the MAVEN_MIRROR build
+  arg is set (see Dockerfile / Dockerfile.monitor); the __MAVEN_MIRROR__
+  placeholder is substituted with the mirror's base URL, e.g.
+  https://maven.aliyun.com/repository/public. Only `central` is mirrored so
+  repository-specific pins (none today) would still reach their origin.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+  <mirrors>
+    <mirror>
+      <id>build-mirror</id>
+      <mirrorOf>central</mirrorOf>
+      <url>__MAVEN_MIRROR__</url>
+    </mirror>
+  </mirrors>
+</settings>
