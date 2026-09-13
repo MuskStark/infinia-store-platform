@@ -67,6 +67,10 @@ public class StoreProblemDetails {
             Map.entry(StoreErrorCode.PAYMENT_GATEWAY_ERROR, HttpStatus.BAD_GATEWAY),
             Map.entry(StoreErrorCode.PAYMENT_NOTIFY_INVALID, HttpStatus.BAD_REQUEST),
             Map.entry(StoreErrorCode.PAYMENT_AMOUNT_MISMATCH, HttpStatus.BAD_REQUEST),
+            Map.entry(StoreErrorCode.INVITATION_REQUIRED, HttpStatus.BAD_REQUEST),
+            Map.entry(StoreErrorCode.INVITATION_INVALID, HttpStatus.BAD_REQUEST),
+            Map.entry(StoreErrorCode.INVITATION_LEVEL_REQUIRED, HttpStatus.FORBIDDEN),
+            Map.entry(StoreErrorCode.INVITATION_QUOTA_EXCEEDED, HttpStatus.TOO_MANY_REQUESTS),
             Map.entry(StoreErrorCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR));
 
     private final MessageSource messages;

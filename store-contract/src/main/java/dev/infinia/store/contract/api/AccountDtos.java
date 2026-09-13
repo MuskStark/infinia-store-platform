@@ -7,7 +7,8 @@ public final class AccountDtos {
 
     private AccountDtos() {}
 
-    public record RegisterRequest(String email, String password, String displayName) {}
+    public record RegisterRequest(String email, String password, String displayName,
+            String invitationCode) {}
 
     public record LoginRequest(String email, String password) {}
 

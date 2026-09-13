@@ -508,6 +508,59 @@ paths:
               schema: { $ref: '#/components/schemas/LoginResponse' }
         '401': { $ref: '#/components/responses/ProblemUnauthorized' }
 
+  /auth/registration-policy:
+    get:
+      operationId: getRegistrationPolicy
+      tags: [Account]
+      summary: Public registration policy — the sign-up form shows an invitation field when required
+      security:
+        - {}
+      responses:
+        '200':
+          description: Whether registration currently requires an invitation code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistrationPolicy' }
+
+  /invitations:
+    post:
+      operationId: createInvitation
+      tags: [Account]
+      summary: Mint one invitation code against the caller's monthly quota
+      description: >-
+        Requires effective Infinia Level 2+ (FORAGER); Level 2 shares 2 codes
+        per calendar month, Level 3 five, Level 4 ten. Platform admins share
+        without limit.
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Minted code (single-use)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationCode' }
+        '403': { $ref: '#/components/responses/ProblemForbidden' }
+        '429':
+          description: Monthly invitation quota exhausted (problem+json, code invitation_quota_exceeded)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /invitations/mine:
+    get:
+      operationId: getMyInvitations
+      tags: [Account]
+      summary: The caller's monthly quota, usage and issued codes
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Share surface with every code the caller issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyInvitations' }
+
+
   /me:
     get:
       operationId: getCurrentUser
@@ -1463,6 +1516,65 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/AdminMembershipOrder' }
 
+  /admin/invitations:
+    get:
+      operationId: listAdminInvitations
+      tags: [Admin]
+      summary: Recent invitation codes across all issuers — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Codes, newest first (capped at 200), with account emails
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InvitationCode' }
+    post:
+      operationId: createAdminInvitation
+      tags: [Admin]
+      summary: Issue an invitation code without level gate or monthly limit — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Issued code (single-use)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationCode' }
+
+  /admin/invitations/settings:
+    get:
+      operationId: getAdminRegistrationPolicy
+      tags: [Admin]
+      summary: Current invitation-only registration switch — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Whether registration requires an invitation code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistrationPolicy' }
+    put:
+      operationId: setAdminRegistrationPolicy
+      tags: [Admin]
+      summary: Flip the invitation-only registration switch — PLATFORM_ADMIN
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateRegistrationPolicyRequest' }
+      responses:
+        '200':
+          description: The switch's new value
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistrationPolicy' }
+
   /admin/listings/{listingId}/min-bee-level:
     post:
       operationId: setListingMinBeeLevel
@@ -2106,6 +2218,7 @@ components:
         email: { type: string, format: email, maxLength: 254 }
         password: { type: string, minLength: 8, maxLength: 128 }
         displayName: { type: string, minLength: 1, maxLength: 64 }
+        invitationCode: { type: string, maxLength: 64, description: Required while invitation-only registration is switched on }
 
     LoginRequest:
       type: object
@@ -2298,6 +2411,45 @@ components:
         createdAt: { type: string, format: date-time }
         paidAt: { type: string, format: date-time, nullable: true }
         expiresAt: { type: string, format: date-time }
+
+    RegistrationPolicy:
+      type: object
+      description: Whether the store currently requires invitation codes to register (邀请注册开关).
+      required: [invitationRequired]
+      properties:
+        invitationRequired: { type: boolean }
+
+    UpdateRegistrationPolicyRequest:
+      type: object
+      required: [invitationRequired]
+      properties:
+        invitationRequired: { type: boolean }
+
+    InvitationCode:
+      type: object
+      description: A single-use registration invitation code (邀请码).
+      required: [codeId, code, createdBy, createdAt]
+      properties:
+        codeId: { type: string }
+        code: { type: string }
+        createdBy: { type: string }
+        createdByEmail: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        usedBy: { type: string, nullable: true, description: The account that registered with this code, null while unused }
+        usedByEmail: { type: string, nullable: true }
+        usedAt: { type: string, format: date-time, nullable: true }
+
+    MyInvitations:
+      type: object
+      description: The caller's invitation share surface — quota, usage and issued codes.
+      required: [unlimited, monthlyLimit, issuedThisMonth, invitations]
+      properties:
+        unlimited: { type: boolean, description: True for platform admins (no monthly limit) }
+        monthlyLimit: { type: integer, description: "Codes shareable this calendar month (L2: 2, L3: 5, L4: 10; 0 below L2)" }
+        issuedThisMonth: { type: integer }
+        invitations:
+          type: array
+          items: { $ref: '#/components/schemas/InvitationCode' }
 
     Session:
       type: object

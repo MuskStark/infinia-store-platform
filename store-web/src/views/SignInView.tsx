@@ -1,3 +1,5 @@
+import { motion, useReducedMotion } from 'motion/react';
+import ControlledFlipWords from '../components/ControlledFlipWords';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useTheme } from 'next-themes';
@@ -49,6 +51,7 @@ export default function SignInView() {
   const auth = useAuth();
   const { resolvedTheme } = useTheme();
 
+  const reducedMotion = useReducedMotion();
   const [mode, setMode] = useState<'signin' | 'register'>('signin');
   const [busy, setBusy] = useState(false);
 
@@ -56,7 +59,26 @@ export default function SignInView() {
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [invitationCode, setInvitationCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Invitation-only registration (邀请注册): the public policy decides whether
+  // the register form shows a mandatory invitation field. When the policy
+  // request itself fails we assume open registration — the server still
+  // enforces the switch, so a wrong guess surfaces as a form error.
+  const [invitationRequired, setInvitationRequired] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getRegistrationPolicy()
+      .then((policy) => {
+        if (!cancelled) setInvitationRequired(policy.invitationRequired);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const oauthMode = searchParams.get('oauth') === '1';
   const [error, setError] = useState<string | null>(
@@ -143,7 +165,11 @@ export default function SignInView() {
   const formInvalid = (() => {
     if (emailInvalid || !email || !password) return true;
     if (mode === 'register') {
-      return passwordShort || passwordMismatch;
+      return (
+        passwordShort ||
+        passwordMismatch ||
+        (invitationRequired && invitationCode.trim().length === 0)
+      );
     }
     return false;
   })();
@@ -236,6 +262,10 @@ export default function SignInView() {
         email,
         password,
         displayName: displayName || undefined,
+        invitationCode:
+          invitationRequired && invitationCode.trim()
+            ? invitationCode.trim()
+            : undefined,
       });
       if (oauthMode) {
         await submitOAuthSessionLogin(email, password);
@@ -260,7 +290,7 @@ export default function SignInView() {
   return (
     // Full-bleed hive wall: the comb texture covers the whole page and fades
     // toward the right (strongest on the left), the form floats on top of it.
-    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-surface-muted px-4 py-8">
+    <div className="relative flex min-h-screen flex-col items-center justify-start overflow-x-clip bg-surface-muted px-4 pb-10 pt-[clamp(3rem,10svh,7rem)] sm:pb-12">
       {/* The wall fades left → right via a mask, matching the reference wash. */}
       <div
         className="pointer-events-none absolute inset-0"
@@ -326,13 +356,11 @@ export default function SignInView() {
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted">
             Infinia Store
           </p>
-          <h2 className="mt-1.5 text-4xl font-bold tracking-tight text-ink">
-            {t('auth.brandTitle')}
+          <h2 className="mt-1.5 text-4xl font-bold tracking-tight text-ink" aria-label={t(mode === 'register' ? 'auth.joinTitle' : 'auth.brandTitle')}>
+            <ControlledFlipWords word={t(mode === 'register' ? 'auth.joinWord' : 'auth.backWord')} /><span aria-hidden="true">{t('auth.hiveWord')}</span>
           </h2>
         </div>
-        <p className="max-w-xl text-sm leading-6 text-muted">
-          {t('discover.heroSubtitle')}
-        </p>
+
       </div>
 
       <div className="relative w-full max-w-md">
@@ -349,16 +377,18 @@ export default function SignInView() {
                 role="tab"
                 aria-selected={mode === key}
                 className={cn(
-                  'flex-1 rounded-lg px-4 py-2 text-sm font-medium',
-                  mode === key ? 'bg-surface shadow-sm' : 'text-muted',
+                  'relative isolate flex-1 rounded-lg px-4 py-2 text-sm font-medium',
+                  mode === key ? 'text-ink' : 'text-muted',
                 )}
                 onClick={() => switchMode(key)}
               >
+                {mode === key && <motion.span layoutId="auth-tab-highlight" className="absolute inset-0 -z-10 rounded-lg bg-surface shadow-sm" transition={{ type: 'spring', bounce: 0.15, duration: reducedMotion ? 0 : 0.4 }} />}
                 {key === 'signin' ? t('nav.signIn') : t('auth.register')}
               </button>
             ))}
           </nav>
 
+          {/* Keep shared inputs mounted; only the extra fields expand and collapse. */}
           <form
             className="space-y-4"
             noValidate
@@ -417,8 +447,12 @@ export default function SignInView() {
               )}
             </label>
 
-            {mode === 'register' && (
-              <>
+              <motion.div initial={false}
+                animate={{ height: mode === 'register' ? 'auto' : 0, opacity: mode === 'register' ? 1 : 0 }}
+                transition={{ duration: reducedMotion ? 0 : 0.25, ease: [0.22, 1, 0.36, 1] }}
+                className="!my-0 overflow-hidden"
+                inert={mode !== 'register'} aria-hidden={mode !== 'register'}>
+                <fieldset disabled={mode !== 'register'} className="space-y-4 py-4">
                 <label className="block text-sm">
                   {t('auth.passwordConfirm')}
                   <input
@@ -447,8 +481,26 @@ export default function SignInView() {
                     className="input mt-1"
                   />
                 </label>
-              </>
-            )}
+
+                {invitationRequired && (
+                  <label className="block text-sm">
+                    {t('auth.invitationCode')}
+                    <input
+                      value={invitationCode}
+                      onChange={(e) => setInvitationCode(e.target.value)}
+                      required
+                      autoComplete="off"
+                      data-testid="invitation-code-input"
+                      placeholder="XXXXXXXXXXXX"
+                      className="input mt-1 font-mono uppercase tracking-wider"
+                    />
+                    <span className="mt-1 block text-xs text-muted">
+                      {t('auth.invitationCodeHint')}
+                    </span>
+                  </label>
+                )}
+                </fieldset>
+              </motion.div>
 
             <button
               type="submit"
@@ -474,7 +526,8 @@ export default function SignInView() {
             </p>
           )}
 
-          {mode === 'signin' && showDemoAccounts && (
+          {showDemoAccounts && (
+            <motion.div initial={false} animate={{ height: mode === 'signin' ? 'auto' : 0, opacity: mode === 'signin' ? 1 : 0 }} transition={{ duration: reducedMotion ? 0 : 0.25 }} className="overflow-hidden" inert={mode !== 'signin'} aria-hidden={mode !== 'signin'}>
             <details className="mt-5 text-sm">
               <summary className="cursor-pointer select-none text-muted hover:text-accent">
                 {t('auth.demoAccounts')}
@@ -495,6 +548,7 @@ export default function SignInView() {
               </ul>
               <p className="mt-2 text-xs text-muted">{t('auth.demoHint')}</p>
             </details>
+            </motion.div>
           )}
 
           <p className="mt-4 text-center text-sm">

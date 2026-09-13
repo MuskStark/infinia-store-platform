@@ -348,6 +348,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/registration-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Public registration policy — the sign-up form shows an invitation field when required */
+        get: operations["getRegistrationPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint one invitation code against the caller's monthly quota
+         * @description Requires effective Infinia Level 2+ (FORAGER); Level 2 shares 2 codes per calendar month, Level 3 five, Level 4 ten. Platform admins share without limit.
+         */
+        post: operations["createInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invitations/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's monthly quota, usage and issued codes */
+        get: operations["getMyInvitations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me": {
         parameters: {
             query?: never;
@@ -1179,6 +1233,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent invitation codes across all issuers — PLATFORM_ADMIN */
+        get: operations["listAdminInvitations"];
+        put?: never;
+        /** Issue an invitation code without level gate or monthly limit — PLATFORM_ADMIN */
+        post: operations["createAdminInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/invitations/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current invitation-only registration switch — PLATFORM_ADMIN */
+        get: operations["getAdminRegistrationPolicy"];
+        /** Flip the invitation-only registration switch — PLATFORM_ADMIN */
+        put: operations["setAdminRegistrationPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/listings/{listingId}/min-bee-level": {
         parameters: {
             query?: never;
@@ -1691,6 +1781,8 @@ export interface components {
             email: string;
             password: string;
             displayName?: string;
+            /** @description Required while invitation-only registration is switched on */
+            invitationCode?: string;
         };
         LoginRequest: {
             /** Format: email */
@@ -1903,6 +1995,36 @@ export interface components {
             paidAt?: string | null;
             /** Format: date-time */
             expiresAt: string;
+        };
+        /** @description Whether the store currently requires invitation codes to register (邀请注册开关). */
+        RegistrationPolicy: {
+            invitationRequired: boolean;
+        };
+        UpdateRegistrationPolicyRequest: {
+            invitationRequired: boolean;
+        };
+        /** @description A single-use registration invitation code (邀请码). */
+        InvitationCode: {
+            codeId: string;
+            code: string;
+            createdBy: string;
+            createdByEmail?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description The account that registered with this code */
+            usedBy?: string | null;
+            usedByEmail?: string | null;
+            /** Format: date-time */
+            usedAt?: string | null;
+        };
+        /** @description The caller's invitation share surface — quota, usage and issued codes. */
+        MyInvitations: {
+            /** @description True for platform admins (no monthly limit) */
+            unlimited: boolean;
+            /** @description Codes shareable this calendar month (L2: 2, L3: 5, L4: 10; 0 below L2) */
+            monthlyLimit: number;
+            issuedThisMonth: number;
+            invitations: components["schemas"]["InvitationCode"][];
         };
         Session: {
             sessionId?: string;
@@ -2958,6 +3080,76 @@ export interface operations {
                 };
             };
             401: components["responses"]["ProblemUnauthorized"];
+        };
+    };
+    getRegistrationPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether registration currently requires an invitation code */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationPolicy"];
+                };
+            };
+        };
+    };
+    createInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Minted code (single-use) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationCode"];
+                };
+            };
+            403: components["responses"]["ProblemForbidden"];
+            /** @description Monthly invitation quota exhausted (problem+json, code invitation_quota_exceeded) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getMyInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Share surface with every code the caller issued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyInvitations"];
+                };
+            };
         };
     };
     getCurrentUser: {
@@ -4251,6 +4443,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminMembershipOrder"][];
+                };
+            };
+        };
+    };
+    listAdminInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Codes, newest first (capped at 200), with account emails */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationCode"][];
+                };
+            };
+        };
+    };
+    createAdminInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Issued code (single-use) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationCode"];
+                };
+            };
+        };
+    };
+    getAdminRegistrationPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether registration requires an invitation code */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationPolicy"];
+                };
+            };
+        };
+    };
+    setAdminRegistrationPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRegistrationPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description The switch's new value */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationPolicy"];
                 };
             };
         };

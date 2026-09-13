@@ -33,6 +33,7 @@ public class AccountService {
     private final IdentityRepositories.RefreshTokenRepository refreshTokens;
     private final BillingRepositories.UserMembershipRepository userMemberships;
     private final PasswordHasher hasher;
+    private final InvitationService invitations;
 
     public AccountService(IdentityRepositories.UserRepository users,
             IdentityRepositories.CredentialRepository credentials,
@@ -40,7 +41,7 @@ public class AccountService {
             IdentityRepositories.DeviceRepository devices,
             IdentityRepositories.RefreshTokenRepository refreshTokens,
             BillingRepositories.UserMembershipRepository userMemberships,
-            PasswordHasher hasher) {
+            PasswordHasher hasher, InvitationService invitations) {
         this.users = users;
         this.credentials = credentials;
         this.sessions = sessions;
@@ -48,6 +49,7 @@ public class AccountService {
         this.refreshTokens = refreshTokens;
         this.userMemberships = userMemberships;
         this.hasher = hasher;
+        this.invitations = invitations;
     }
 
     /**
@@ -57,9 +59,14 @@ public class AccountService {
      * so this is the admin bootstrap: register right after first boot and you
      * own the instance. Everyone after the first gets the plain USER role; the
      * admin then assigns roles from the user console (AdminUserService).
+     *
+     * <p>While invitation-only registration is switched on (InvitationService),
+     * every later sign-up must present an unused invitation code; the bootstrap
+     * account itself never needs one.</p>
      */
     @Transactional
-    public StoreUser register(String email, String password, String displayName) {
+    public StoreUser register(String email, String password, String displayName,
+            String invitationCode) {
         String normalized = normalizeEmail(email);
         if (!EMAIL.matcher(normalized).matches()) {
             throw new DomainException(StoreErrorCode.VALIDATION_FAILED, "Invalid email address");
@@ -72,7 +79,14 @@ public class AccountService {
             throw new DomainException(StoreErrorCode.EMAIL_TAKEN,
                     "An account with this email already exists");
         }
-        Set<UserRole> roles = users.count() == 0
+        boolean firstAccount = users.count() == 0;
+        boolean codeRequired = invitations.invitationRequired() && !firstAccount;
+        boolean codePresented = invitationCode != null && !invitationCode.isBlank();
+        if (codeRequired && !codePresented) {
+            throw new DomainException(StoreErrorCode.INVITATION_REQUIRED,
+                    "An invitation code is required to register");
+        }
+        Set<UserRole> roles = firstAccount
                 ? Set.of(UserRole.USER, UserRole.PLATFORM_ADMIN)
                 : Set.of(UserRole.USER);
         UUID id = UuidV7.generate();
@@ -83,6 +97,11 @@ public class AccountService {
         users.save(user);
         credentials.save(new Credential(UuidV7.generate(), id, Credential.CredentialType.PASSWORD,
                 hasher.hash(password), Instant.now()));
+        // An optional code is still validated and consumed when presented, so a
+        // typo never registers silently; a failed claim rolls the account back.
+        if (codePresented) {
+            invitations.claimForRegistration(invitationCode, id);
+        }
         return user;
     }
 

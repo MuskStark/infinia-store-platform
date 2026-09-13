@@ -55,6 +55,24 @@ vi.mock('../src/api/client', () => ({
       }
     }),
     getMembershipStatus: vi.fn(async () => MEMBERSHIP_STATUS),
+    getMyInvitations: vi.fn(async () => ({
+      unlimited: false,
+      monthlyLimit: 2,
+      issuedThisMonth: 1,
+      invitations: [
+        {
+          codeId: 'c1',
+          code: '7QK2WBXNM4HT',
+          createdBy: 'u1',
+          createdByEmail: 'bee@example.com',
+          createdAt: '2026-09-01T00:00:00Z',
+          usedBy: null,
+          usedByEmail: null,
+          usedAt: null,
+        },
+      ],
+    })),
+    createInvitation: vi.fn(async () => undefined),
     put: vi.fn(async () => undefined),
     delete: vi.fn(async () => undefined),
   },
@@ -99,9 +117,9 @@ describe('User Center (用户中心)', () => {
     expect(document.querySelector('ol')).toBeNull();
     // Holdings at a glance: artifacts owned and signed-in devices.
     expect(document.querySelector('[data-testid="account-artifact-count"]')!.textContent!)
-      .toMatch(/Artifacts\s*3/);
+      .toMatch(/3\s*Artifacts/);
     expect(document.querySelector('[data-testid="account-device-count"]')!.textContent!)
-      .toMatch(/Devices\s*1/);
+      .toMatch(/1\s*Devices/);
   });
 
   it('offers the upgrade action inline for a buyer without a membership', async () => {
@@ -175,12 +193,16 @@ describe('User Center (用户中心)', () => {
     const api = await mockedApi();
     await mountedCenter();
     expect(bodyText()).toContain(en.account.signinDevices);
-    expect(bodyText()).toContain('Active sessions (1)');
-    expect(bodyText()).toContain('Devices (1)');
+    expect(bodyText()).toContain('Active sessions · 1');
+    expect(bodyText()).toContain('Devices · 1');
     const deviceButton = allButtons().find((b) => b.textContent === en.account.revoke);
     deviceButton!.click();
     await vi.waitFor(() => {
       expect(api.delete).toHaveBeenCalledWith('/api/v1/me/sessions/s1');
     });
+    fireEvent.click(allButtons().find(b => b.getAttribute('role') === 'tab' && b.textContent?.includes('Devices'))!);
+    expect(bodyText()).toContain('Laptop');
+    fireEvent.click(allButtons().find(b => b.textContent === en.account.revoke)!);
+    await vi.waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/v1/me/devices/d1'));
   });
 });

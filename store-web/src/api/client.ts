@@ -269,6 +269,39 @@ export const api = {
   getAdminMembershipOrders: () =>
     request<AdminMembershipOrder[]>('/api/v1/admin/membership/orders'),
 
+  // ── Invitation-only registration (邀请注册) ──
+
+  /** Public — the sign-up form shows an invitation field when required. */
+  getRegistrationPolicy: () =>
+    request<RegistrationPolicy>('/api/v1/auth/registration-policy'),
+
+  /** The caller's share surface: quota, usage this month, issued codes. */
+  getMyInvitations: () =>
+    request<MyInvitations>('/api/v1/invitations/mine'),
+
+  /** Mints one code against the caller's monthly quota (admins unlimited). */
+  createInvitation: () =>
+    request<InvitationCode>('/api/v1/invitations', { method: 'POST' }),
+
+  // ── Admin invitation console (管理 · 邀请码) ──
+
+  getAdminInvitations: () =>
+    request<InvitationCode[]>('/api/v1/admin/invitations'),
+
+  /** Issues a code with no level gate and no monthly limit. */
+  createAdminInvitation: () =>
+    request<InvitationCode>('/api/v1/admin/invitations', { method: 'POST' }),
+
+  /** Current value of the invitation-only registration switch. */
+  getAdminRegistrationPolicy: () =>
+    request<RegistrationPolicy>('/api/v1/admin/invitations/settings'),
+
+  setAdminRegistrationPolicy: (invitationRequired: boolean) =>
+    request<RegistrationPolicy>('/api/v1/admin/invitations/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ invitationRequired }),
+    }),
+
   // ── Public service status (服务监控页) ──
 
   getServiceStatus: () => request<ServiceStatus>('/api/v1/status'),
@@ -317,6 +350,11 @@ export type MembershipOrder = components['schemas']['MembershipOrder'];
 export type AdminMembershipPlan = components['schemas']['AdminMembershipPlan'];
 export type AdminMembershipOrder = components['schemas']['AdminMembershipOrder'];
 export type AdminPlanRequest = components['schemas']['AdminPlanRequest'];
+
+// ---- invitation-only registration (邀请注册) ----
+export type RegistrationPolicy = components['schemas']['RegistrationPolicy'];
+export type InvitationCode = components['schemas']['InvitationCode'];
+export type MyInvitations = components['schemas']['MyInvitations'];
 
 /** ¥ display for integer fen prices. */
 export function formatFen(fen: number): string {

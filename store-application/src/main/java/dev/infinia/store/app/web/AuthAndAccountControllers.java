@@ -20,21 +20,31 @@ class AuthController {
     private final AccountService accounts;
     private final dev.infinia.store.app.security.LocalTokenService tokens;
     private final dev.infinia.store.app.service.AuditService audit;
+    private final dev.infinia.store.app.service.InvitationService invitations;
 
     AuthController(AccountService accounts,
             dev.infinia.store.app.security.LocalTokenService tokens,
-            dev.infinia.store.app.service.AuditService audit) {
+            dev.infinia.store.app.service.AuditService audit,
+            dev.infinia.store.app.service.InvitationService invitations) {
         this.accounts = accounts;
         this.tokens = tokens;
         this.audit = audit;
+        this.invitations = invitations;
     }
 
     @PostMapping("/register")
     public ResponseEntity<AccountDtos.PublicUserDto> register(
             @RequestBody AccountDtos.RegisterRequest request) {
         StoreUser user = accounts.register(request.email(), request.password(),
-                request.displayName());
+                request.displayName(), request.invitationCode());
         return ResponseEntity.status(HttpStatus.CREATED).body(accounts.toDto(user));
+    }
+
+    /** Public registration policy — the SPA shows an invitation field when on. */
+    @GetMapping("/registration-policy")
+    public dev.infinia.store.contract.api.InvitationDtos.RegistrationPolicyDto
+            registrationPolicy() {
+        return invitations.policy();
     }
 
     /**

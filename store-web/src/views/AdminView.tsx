@@ -12,7 +12,9 @@ import {
   type AdminUser,
   type AuditEvent,
   type DataSourceStatus,
+  type InvitationCode,
   type PublisherRelease,
+  type RegistrationPolicy,
   type RemoteDatabase,
   type RemoteDatabaseTestResult,
   type Report,
@@ -28,6 +30,8 @@ import LoadingGrid from '../components/LoadingGrid';
 import ErrorState from '../components/ErrorState';
 import StateChip from '../components/StateChip';
 import SelectMenu from '../components/SelectMenu';
+import UserRolesEditor from '../components/UserRolesEditor';
+import { useAuth, patchUser } from '../stores/auth';
 import { formatDate, formatDateTime } from '../utils/format';
 import { badgeToneClass, badgeBaseClass } from '../utils/badgeTone';
 import { cn } from '@/lib/utils';
@@ -42,6 +46,7 @@ import { cn } from '@/lib/utils';
 type AdminTab =
   | 'users'
   | 'membership'
+  | 'invitations'
   | 'databases'
   | 'upstreams'
   | 'listings'
@@ -56,7 +61,7 @@ type AdminTab =
  * catalog supply, trust & safety, infrastructure.
  */
 const NAV_GROUPS: { labelKey: string; items: AdminTab[] }[] = [
-  { labelKey: 'admin.group.users', items: ['users', 'membership'] },
+  { labelKey: 'admin.group.users', items: ['users', 'membership', 'invitations'] },
   {
     labelKey: 'admin.group.content',
     items: ['listings', 'upstreams', 'appRelease'],
@@ -69,13 +74,8 @@ const BEE_LEVELS = [0, 1, 2, 3, 4];
 /** Editable draft for the create row; levels 1-4 only (LARVA is not for sale). */
 const PURCHASABLE_LEVELS = [1, 2, 3, 4];
 
-const TRIGGER_CARET = (
-  <span className="text-xs text-muted" aria-hidden="true">
-    ▾
-  </span>
-);
-
 export default function AdminView() {
+  const auth = useAuth();
   const { t } = useTranslation();
 
   const [tab, setTab] = useState<AdminTab>('users');
@@ -361,6 +361,71 @@ export default function AdminView() {
     return 'muted';
   }
 
+  // ---- invitation console (管理 · 邀请码): switch + unlimited issuance ----
+  const [adminInvitations, setAdminInvitations] = useState<InvitationCode[]>(
+    [],
+  );
+  const [registrationPolicy, setRegistrationPolicy] =
+    useState<RegistrationPolicy | null>(null);
+  const [invitationsLoading, setInvitationsLoading] = useState(false);
+  const [invitationsError, setInvitationsError] = useState<string | null>(null);
+  const [switchingPolicy, setSwitchingPolicy] = useState(false);
+  const [issuingAdminCode, setIssuingAdminCode] = useState(false);
+  const [lastIssuedCode, setLastIssuedCode] = useState<InvitationCode | null>(
+    null,
+  );
+
+  async function loadInvitations() {
+    setInvitationsLoading(true);
+    setInvitationsError(null);
+    try {
+      const [codes, policy] = await Promise.all([
+        api.getAdminInvitations(),
+        api.getAdminRegistrationPolicy(),
+      ]);
+      setAdminInvitations(codes);
+      setRegistrationPolicy(policy);
+    } catch (e) {
+      setInvitationsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setInvitationsLoading(false);
+    }
+  }
+
+  async function toggleRegistrationPolicy() {
+    if (!registrationPolicy || switchingPolicy) return;
+    setSwitchingPolicy(true);
+    setInvitationsError(null);
+    try {
+      setRegistrationPolicy(
+        await api.setAdminRegistrationPolicy(
+          !registrationPolicy.invitationRequired,
+        ),
+      );
+    } catch (e) {
+      setInvitationsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSwitchingPolicy(false);
+    }
+  }
+
+  /** No level gate, no monthly limit — the admin path exists precisely so
+   * operators can hand out codes beyond any member quota. */
+  async function issueAdminInvitation() {
+    if (issuingAdminCode) return;
+    setIssuingAdminCode(true);
+    setInvitationsError(null);
+    try {
+      const code = await api.createAdminInvitation();
+      setLastIssuedCode(code);
+      await loadInvitations();
+    } catch (e) {
+      setInvitationsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIssuingAdminCode(false);
+    }
+  }
+
   // ---- upstream aggregation (aggregation plan §3/§8) ----
   const [upstreams, setUpstreams] = useState<Upstream[]>([]);
   const [upstreamsLoading, setUpstreamsLoading] = useState(false);
@@ -570,6 +635,7 @@ export default function AdminView() {
     void loadUpstreams();
     void loadAppReleases();
     void loadMembership();
+    void loadInvitations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -871,7 +937,8 @@ export default function AdminView() {
                                 </code>
                               </td>
                               <td>
-                                <span className="flex flex-wrap gap-1">
+                                <div className="flex items-center gap-2">
+                                <span className="flex flex-wrap items-center gap-1">
                                   {row.roles.map((role) => (
                                     <Badge
                                       key={role}
@@ -885,6 +952,14 @@ export default function AdminView() {
                                     </Badge>
                                   ))}
                                 </span>
+                                <UserRolesEditor roles={row.roles} displayName={row.displayName ?? undefined} email={row.email}
+                                  isSelf={auth.user?.userId === row.userId}
+                                  onSave={async roles => {
+                                    const updated = await api.updateAdminUser(row.userId, { roles });
+                                    setUsers(current => current.map(user => user.userId === row.userId ? { ...user, ...updated } : user));
+                                    if (auth.user?.userId === row.userId) patchUser({ roles: updated.roles });
+                                  }} />
+                                </div>
                               </td>
                               <td>
                                 {/* The badge itself is the trigger: click to change the level
@@ -903,7 +978,6 @@ export default function AdminView() {
                                   trigger={
                                     <span className="inline-flex items-center gap-1 whitespace-nowrap">
                                       <BeeLevelBadge level={row.beeLevel} />
-                                      {TRIGGER_CARET}
                                     </span>
                                   }
                                 />
@@ -1003,7 +1077,6 @@ export default function AdminView() {
                                     trigger={
                                       <span className="inline-flex items-center gap-1 whitespace-nowrap">
                                         <BeeLevelBadge level={plan.beeLevel} />
-                                        {TRIGGER_CARET}
                                       </span>
                                     }
                                   />
@@ -1167,7 +1240,6 @@ export default function AdminView() {
                               trigger={
                                 <span className="inline-flex items-center gap-1 whitespace-nowrap">
                                   <BeeLevelBadge level={newPlan.beeLevel} />
-                                  {TRIGGER_CARET}
                                 </span>
                               }
                             />
@@ -1327,6 +1399,167 @@ export default function AdminView() {
                         </div>
                       )}
                     </>
+                  )}
+                </section>
+              )}
+
+              {tab === 'invitations' && (
+                <section className="space-y-5">
+                  <p className="text-sm text-muted">
+                    {t('admin.invitationsHint')}
+                  </p>
+                  {invitationsError && (
+                    <p className="alert alert-error" role="alert">
+                      {invitationsError}
+                    </p>
+                  )}
+
+                  {/* The registration switch (邀请注册开关). */}
+                  <div
+                    className="card flex flex-wrap items-center justify-between gap-3 rounded-xl p-4"
+                    data-testid="registration-policy-card"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">
+                        {t('admin.registrationSwitchTitle')}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-muted">
+                        {t('admin.registrationSwitchHint')}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          badgeBaseClass,
+                          registrationPolicy?.invitationRequired
+                            ? badgeToneClass.success
+                            : badgeToneClass.muted,
+                        )}
+                        data-testid="registration-policy-state"
+                      >
+                        {registrationPolicy?.invitationRequired
+                          ? t('admin.registrationOn')
+                          : t('admin.registrationOff')}
+                      </Badge>
+                      <button
+                        type="button"
+                        className={cn(
+                          'btn',
+                          registrationPolicy?.invitationRequired
+                            ? 'btn-danger-outline'
+                            : 'btn-success',
+                        )}
+                        data-testid="registration-policy-toggle"
+                        disabled={
+                          switchingPolicy || registrationPolicy === null
+                        }
+                        onClick={() => void toggleRegistrationPolicy()}
+                      >
+                        {switchingPolicy
+                          ? t('common.loading')
+                          : registrationPolicy?.invitationRequired
+                            ? t('admin.registrationTurnOff')
+                            : t('admin.registrationTurnOn')}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Unlimited issuance (管理员无限发放). */}
+                  <div className="card flex flex-wrap items-center justify-between gap-3 rounded-xl p-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">
+                        {t('admin.issueInvitationTitle')}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-muted">
+                        {t('admin.issueInvitationHint')}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {lastIssuedCode && (
+                        <code
+                          className="rounded-lg bg-surface-muted px-3 py-1.5 font-mono text-sm tracking-wider"
+                          data-testid="last-issued-code"
+                        >
+                          {lastIssuedCode.code}
+                        </code>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        data-testid="admin-issue-invitation"
+                        disabled={issuingAdminCode}
+                        onClick={() => void issueAdminInvitation()}
+                      >
+                        {issuingAdminCode
+                          ? t('common.loading')
+                          : t('admin.issueInvitation')}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* The store-wide code ledger. */}
+                  {invitationsLoading && !adminInvitations.length ? (
+                    <LoadingGrid />
+                  ) : !adminInvitations.length ? (
+                    <EmptyState title={t('admin.noInvitations')} />
+                  ) : (
+                    <div className="table-card">
+                      <table data-testid="admin-invitations-table">
+                        <thead>
+                          <tr>
+                            <th>{t('admin.invitationCode')}</th>
+                            <th>{t('admin.invitationCreator')}</th>
+                            <th>{t('admin.invitationCreatedAt')}</th>
+                            <th>{t('admin.invitationStatus')}</th>
+                            <th>{t('admin.invitationUsedAt')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {adminInvitations.map((code) => (
+                            <tr
+                              key={code.codeId}
+                              className="border-t border-line"
+                            >
+                              <td>
+                                <code className="font-mono tracking-wider">
+                                  {code.code}
+                                </code>
+                              </td>
+                              <td className="text-xs text-muted">
+                                {code.createdByEmail ?? code.createdBy}
+                              </td>
+                              <td className="text-xs text-muted">
+                                {formatDateTime(code.createdAt)}
+                              </td>
+                              <td>
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    badgeBaseClass,
+                                    code.usedBy
+                                      ? badgeToneClass.muted
+                                      : badgeToneClass.success,
+                                  )}
+                                >
+                                  {code.usedBy
+                                    ? t('account.invitationUsedBy', {
+                                        email:
+                                          code.usedByEmail ?? code.usedBy,
+                                      })
+                                    : t('account.invitationUnused')}
+                                </Badge>
+                              </td>
+                              <td className="text-xs text-muted">
+                                {code.usedAt
+                                  ? formatDateTime(code.usedAt)
+                                  : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </section>
               )}

@@ -60,6 +60,9 @@ public class SecurityConfig {
             "/api/v1/catalog", "/api/v1/listings/**", "/api/v1/resolutions",
             "/api/v1/updates/**", "/api/v1/auth/register", "/api/v1/auth/login",
             "/api/v1/auth/refresh", "/api/v1/auth/revoke",
+            // The sign-up form needs to know whether an invitation code field
+            // must be shown — public exactly like register itself.
+            "/api/v1/auth/registration-policy",
             "/api/v1/blobs/**", "/api/v1/compat/**",
             "/api/v1/releases/*/download-ticket", "/api/v1/releases/*/install-manifest",
             "/api/v1/releases/*/install-package", "/api/v1/releases/*/checksums.txt",
