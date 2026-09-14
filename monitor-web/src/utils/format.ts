@@ -3,7 +3,7 @@ import { i18n } from '../i18n';
 /** Locale-aware display formatters (same shapes as the store SPA). */
 
 function appLocale(): string {
-  return i18n.global.locale.value;
+  return i18n.language;
 }
 
 function parse(iso?: string | null): Date | null {

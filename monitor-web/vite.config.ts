@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
+import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 // Absolute origin for the hashed /assets/** files (e.g.
@@ -14,7 +14,7 @@ const assetsBaseUrl = process.env.ASSETS_BASE_URL
 
 export default defineConfig({
   base: assetsBaseUrl,
-  plugins: [vue(), tailwindcss()],
+  plugins: [react(), tailwindcss()],
   server: {
     // 8091 sits next to the store SPA's 8089 and the monitor API's 8090.
     port: 8091,
@@ -26,5 +26,6 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    setupFiles: ['./tests/setup.ts'],
   },
 } as ReturnType<typeof defineConfig>);

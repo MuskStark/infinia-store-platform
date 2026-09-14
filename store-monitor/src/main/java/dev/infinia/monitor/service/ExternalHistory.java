@@ -43,7 +43,13 @@ public class ExternalHistory {
 
     /** Records one probe outcome into today's bucket (accumulating upsert). */
     public void record(String indicator, Instant at) {
+        if (!java.util.Set.of(Indicators.OPERATIONAL, Indicators.DEGRADED,
+                Indicators.PARTIAL_OUTAGE, Indicators.MAJOR_OUTAGE, Indicators.NO_DATA).contains(indicator)) {
+            throw new IllegalArgumentException("Unknown status indicator: " + indicator);
+        }
         liveIndicator.set(indicator);
+        // Missing observations are neither successful nor failed samples.
+        if (Indicators.NO_DATA.equals(indicator)) return;
         LocalDate day = LocalDate.ofInstant(at, ZoneOffset.UTC);
         ExternalDayEntity bucket = days
                 .findById(new ExternalDayEntity.Key(COMPONENT_KEY, day))
@@ -51,7 +57,8 @@ public class ExternalHistory {
         switch (indicator) {
             case Indicators.MAJOR_OUTAGE, Indicators.PARTIAL_OUTAGE -> bucket.add(0, 0, 1);
             case Indicators.DEGRADED -> bucket.add(0, 1, 0);
-            default -> bucket.add(1, 0, 0);
+            case Indicators.OPERATIONAL -> bucket.add(1, 0, 0);
+            default -> throw new IllegalArgumentException("Unknown status indicator: " + indicator);
         }
         days.save(bucket);
         days.flush();

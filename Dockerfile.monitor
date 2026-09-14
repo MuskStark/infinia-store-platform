@@ -15,7 +15,7 @@
 # reverse proxy / WAF — CC protection and rate limiting live there — and keep
 # the loopback binding below so it is never reachable directly.
 
-# ---- Stage 1: Monitor Web SPA (Vue 3 + Vite) --------------------------------
+# ---- Stage 1: Monitor Web SPA (React + Vite) --------------------------------
 FROM node:22-alpine AS web
 WORKDIR /workspace
 RUN corepack enable

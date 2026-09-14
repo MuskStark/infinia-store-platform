@@ -20,12 +20,14 @@ class TargetProberTest {
     private TargetProber prober;
     private final AtomicInteger healthStatus = new AtomicInteger(200);
 
+    private String failedPath;
+
     @BeforeEach
     void startFakeStore() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
             int status = exchange.getRequestURI().getPath().equals("/actuator/health")
-                    ? healthStatus.get() : 200;
+                    ? healthStatus.get() : exchange.getRequestURI().getPath().equals(failedPath) ? 503 : 200;
             byte[] body = "{\"status\":\"UP\"}".getBytes();
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(status, body.length);
@@ -54,6 +56,13 @@ class TargetProberTest {
     void healthEndpointDownIsMajorOutage() {
         healthStatus.set(503);
         assertEquals(Indicators.MAJOR_OUTAGE, prober.probe());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"/", "/api/v1/status", "/.well-known/openid-configuration"})
+    void nonHealthFailureIsPartialOutage(String path) {
+        failedPath = path;
+        assertEquals(Indicators.PARTIAL_OUTAGE, prober.probe());
     }
 
     @Test

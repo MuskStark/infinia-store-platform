@@ -149,7 +149,7 @@ store:
     demo-content: false
     # Demo monitoring history: sprinkle degraded/outage/no-data days into the
     # 90-day comb so the status page shows every state it can render.
-    status-history: true
+    status-history: false
 ---
 # H2 profile for local runs without Docker: `--spring.profiles.active=local`.
 # Database, blobs, keys and git exports all live under the project root's

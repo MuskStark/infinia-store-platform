@@ -15,6 +15,9 @@ public final class Indicators {
 
     /** Worst-of aggregation over the whole ladder. */
     public static String worst(Collection<String> indicators) {
+        if (indicators.isEmpty() || indicators.stream().allMatch(NO_DATA::equals)) {
+            return NO_DATA;
+        }
         int rank = 0;
         for (String indicator : indicators) {
             rank = Math.max(rank, rank(indicator));

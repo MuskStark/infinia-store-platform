@@ -16,7 +16,7 @@ import java.util.List;
  * Blackbox probes over the store's public base URL — the same path a user's
  * browser takes. All four targets answering: operational. The health endpoint
  * failing (it aggregates the store's database): major outage. Any other target
- * failing: degraded. The probe never throws; unreachable is an answer, not an
+ * failing: partial outage. The probe never throws; unreachable is an answer, not an
  * error.
  */
 @Component
@@ -55,7 +55,7 @@ public class TargetProber {
         if (healthFailure) {
             return Indicators.MAJOR_OUTAGE;
         }
-        return failures > 0 ? Indicators.DEGRADED : Indicators.OPERATIONAL;
+        return failures > 0 ? Indicators.PARTIAL_OUTAGE : Indicators.OPERATIONAL;
     }
 
     private boolean succeeds(URI uri) {

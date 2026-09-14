@@ -1,39 +1,19 @@
-import { createI18n } from 'vue-i18n';
+import { createInstance } from 'i18next';
+import { initReactI18next } from 'react-i18next';
 import en from '../locales/en';
 import zhCN from '../locales/zh-CN';
-
 export const SUPPORTED_LOCALES = ['en', 'zh-CN'] as const;
-export type Locale = (typeof SUPPORTED_LOCALES)[number];
-/** English is the primary language (same convention as the store SPA). */
-export const DEFAULT_LOCALE: Locale = 'en';
-const STORAGE_KEY = 'infinia.monitor.locale';
-
-function detectLocale(): Locale {
-  const stored =
-    typeof localStorage === 'undefined' ? null : localStorage.getItem(STORAGE_KEY);
-  if (stored && (SUPPORTED_LOCALES as readonly string[]).includes(stored)) {
-    return stored as Locale;
-  }
-  for (const candidate of navigator?.languages ?? []) {
-    if (candidate.toLowerCase().startsWith('zh')) {
-      return 'zh-CN';
-    }
-  }
-  return DEFAULT_LOCALE;
-}
-
-export const i18n = createI18n({
-  legacy: false,
-  locale: detectLocale(),
-  fallbackLocale: DEFAULT_LOCALE,
-  messages: {
-    en,
-    'zh-CN': zhCN,
-  },
+export type Locale = typeof SUPPORTED_LOCALES[number];
+let stored: string | null = null;
+try { stored = window.localStorage.getItem('infinia.monitor.locale'); } catch { /* Storage may be unavailable in private sessions. */ }
+export const i18n = createInstance();
+void i18n.use(initReactI18next).init({
+  lng: stored === 'en' || stored === 'zh-CN' ? stored : navigator.language.startsWith('zh') ? 'zh-CN' : 'en',
+  fallbackLng: 'en', resources: { en: { translation: en }, 'zh-CN': { translation: zhCN } },
+  interpolation: { escapeValue: false, prefix: '{', suffix: '}' },
 });
-
 export function setLocale(locale: Locale) {
-  i18n.global.locale.value = locale;
-  localStorage.setItem(STORAGE_KEY, locale);
+  void i18n.changeLanguage(locale);
+  try { window.localStorage.setItem('infinia.monitor.locale', locale); } catch { /* Locale still applies for this session. */ }
   document.documentElement.lang = locale;
 }
