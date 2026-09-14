@@ -480,7 +480,7 @@ else
   fi
 fi
 
-test -f "$DIST/index.html" || die "no dist/index.html under $DIST — build failed?"
+test -f "$DIST/$INDEX_HTML" || die "no $INDEX_HTML under $DIST — build failed?"
 publish_dist "$DIST"
 
 # ---- domain: attach via API, then wait until it actually serves ------------
