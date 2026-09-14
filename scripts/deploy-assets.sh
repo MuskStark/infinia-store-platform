@@ -249,11 +249,14 @@ wrangler_deploy() { # wrangler_deploy <dist-abs> — publish the directory
       --commit-dirty=true "$dist"
   else
     command -v docker >/dev/null || die "wrangler needs npx or docker on the host"
-    docker run --rm -v "$dist:/dist:ro" -w /dist \
+    # Writable mount: wrangler stages upload state under <dir>/.wrangler — a
+    # read-only bind failed with "Missing file or directory: /dist/.wrangler/tmp".
+    docker run --rm -v "$dist:/dist" -w /dist \
       -e CLOUDFLARE_API_TOKEN -e CLOUDFLARE_ACCOUNT_ID -e NPM_CONFIG_REGISTRY \
       "$NODE_IMAGE" npx --yes wrangler@4 pages deploy \
       --project-name="$PROJECT" --branch=main --commit-dirty=true /dist
   fi
+  rm -rf "$dist/.wrangler"
 }
 
 # Publish a built dist (dist layout at its root) to the Pages project.
