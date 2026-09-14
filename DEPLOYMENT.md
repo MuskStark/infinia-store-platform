@@ -223,6 +223,16 @@ offload is active (`ASSETS_BASE_URL` in `.env` + `deploy.conf` present),
 every `scripts/upgrade.sh` re-publishes the new jar's SPA to Pages right
 after a successful deploy, so hashed files stay in sync on their own.
 
+**Monitor host** (split deployment): the same offload exists for the monitor
+SPA — on the monitor host run `scripts/deploy-assets.sh --monitor --all`
+(defaults: Pages project `infinia-monitor-assets`, suggested domain
+`status-assets.example.com`; auto-detected on a monitor-only host, so the
+flag is optional there). One caveat: the CI-published GHCR image builds
+without the asset origin (same-origin), so an offloaded monitor builds its
+image locally — the script writes the build override itself, and
+`upgrade.sh --monitor` passes the origin to its build automatically, then
+re-publishes after every successful deploy (same contract as the store).
+
 The manual equivalent, step by step:
 
 1. **Pages project + domain** — the zone is already on Cloudflare. Publish the

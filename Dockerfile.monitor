@@ -26,7 +26,12 @@ COPY store-web/package.json store-web/package.json
 COPY monitor-web/package.json monitor-web/package.json
 RUN yarn install --immutable
 COPY monitor-web/ monitor-web/
-RUN yarn workspace @infinia/monitor-web build \
+# Absolute asset origin (Cloudflare Pages) — changes the bundle bytes/hashes,
+# so it must equal the ASSETS_BASE_URL the asset publish builds with. Empty
+# keeps assets same-origin. NB: the CI-published GHCR image builds without
+# this arg (same-origin); an offloaded monitor builds locally on its host.
+ARG ASSETS_BASE_URL=""
+RUN ASSETS_BASE_URL="$ASSETS_BASE_URL" yarn workspace @infinia/monitor-web build \
  && test -f monitor-web/dist/index.html
 
 # ---- Stage 2: executable Boot jar -------------------------------------------

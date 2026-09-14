@@ -132,8 +132,15 @@ if [[ $MONITOR -eq 1 ]]; then
   trap rollback ERR
   log "monitor: ${OLD_REF:0:12} -> ${NEW_REF:0:12}"
   git checkout --detach "$NEW_REF"
+  # Asset offload: bake the same origin the Pages publish uses (see below).
+  ASSETS_URL_VALUE=$(grep -E '^ASSETS_BASE_URL=' .env | head -1 | cut -d= -f2- || true)
+  ASSETS_BUILD_ARG=()
+  if [[ $ASSETS_URL_VALUE == http* ]]; then
+    ASSETS_BUILD_ARG=(--build-arg "ASSETS_BASE_URL=$ASSETS_URL_VALUE")
+  fi
   IMAGE="infinia-monitor:$NEW_REF"
-  docker build -f Dockerfile.monitor --label "org.opencontainers.image.revision=$NEW_REF" -t "$IMAGE" .
+  docker build -f Dockerfile.monitor "${ASSETS_BUILD_ARG[@]}" \
+    --label "org.opencontainers.image.revision=$NEW_REF" -t "$IMAGE" .
   printf 'services:\n  monitor:\n    image: "%s"\n' "$IMAGE" > "$OVERRIDE"
   docker compose -f "$COMPOSE_FILE" -f "$OVERRIDE" up -d --no-build --pull never --wait --wait-timeout 300
   CID=$(docker compose -f "$COMPOSE_FILE" -f "$OVERRIDE" ps -q monitor)
@@ -141,6 +148,16 @@ if [[ $MONITOR -eq 1 ]]; then
   [[ $(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$CID") == "$NEW_REF" ]]
   trap - ERR
   log "monitor deployed and healthy: ${NEW_REF:0:12}"
+
+  # Asset offload sync, same contract as the store flow: publish the new
+  # jar's SPA so the fresh shell finds its hashed files on Pages.
+  if [[ $ASSETS_URL_VALUE == http* ]] && [[ -f deploy.conf ]]; then
+    log "asset offload active — publishing the new monitor SPA to Cloudflare Pages"
+    if ! DEPLOY_ASSETS_HOOK=1 scripts/deploy-assets.sh --monitor --from-image; then
+      warn "asset publish failed — the running shell references the assets domain;"
+      warn "retry manually: scripts/deploy-assets.sh --monitor --from-image"
+    fi
+  fi
   exit 0
 fi
 

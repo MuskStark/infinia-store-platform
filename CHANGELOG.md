@@ -47,6 +47,16 @@
   switch the store container → health wait. Plain `--switch` (wait + cut
   over), `--dist <dir>` (publish-only) and `--configure` (questionnaire only)
   remain for step-by-step use.
+- The same offload covers the monitor SPA: `scripts/deploy-assets.sh
+  --monitor [--all]` (auto-detected on a monitor-only host; defaults: project
+  `infinia-monitor-assets`, suggested domain `status-assets.example.com`).
+  monitor-web gains the identical `ASSETS_BASE_URL` base support and a
+  `public/_headers`; `Dockerfile.monitor` takes the build arg;
+  `upgrade.sh --monitor` bakes the origin into its build and re-publishes
+  after every successful deploy. NB: the GHCR image stays same-origin — an
+  offloaded monitor builds locally (the script writes the build override).
+  Setting `base` explicitly rotates chunk filenames once (byte-identical
+  content), so every jar built after this change references new hashes.
 
 ### Interactive deploy scripts + `deploy.conf`
 

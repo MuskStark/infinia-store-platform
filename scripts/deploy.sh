@@ -484,6 +484,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.monitor
+      args:
+        # Interpolated from this host's .env at build time — the asset
+        # offload origin (empty keeps monitor assets same-origin).
+        ASSETS_BASE_URL: ${ASSETS_BASE_URL:-}
 OVERRIDE
     docker compose -f "$COMPOSE_FILE" -f docker-compose.monitor-build.override.yml up -d --build
     COMPOSE_ARGS=(-f "$COMPOSE_FILE" -f docker-compose.monitor-build.override.yml)

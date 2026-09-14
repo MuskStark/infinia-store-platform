@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 #
-# One-click Cloudflare Pages bootstrap/publish for the SPA's static assets
-# (DEPLOYMENT.md "Static assets on Cloudflare Pages" — the first-visit 522
-# fix). One script, three ways:
+# One-click Cloudflare Pages bootstrap/publish for the hashed static assets of
+# the store SPA and the monitor SPA (DEPLOYMENT.md "Static assets on
+# Cloudflare Pages" — the first-visit 522 fix). One script, two targets:
 #
-#   full run (auto-detects the host):
-#     store host (new or old) — repo checkout + .env + docker compose:
-#       sets ASSETS_BASE_URL in .env, builds the next image, extracts the SPA
-#       from that image's jar and publishes it — Pages receives byte-identical
-#       files to what the jar will serve. The running container is untouched
-#       until --switch (and only after the assets domain actually answers).
-#     any other host (laptop / fresh box, docker only):
-#       builds store-web inside a throwaway node container from the same
-#       lockfile with the same ASSETS_BASE_URL and publishes that. Hashes match
-#       the server build because the value and the lockfile are identical.
+#   store (default)     — store-web SPA, assets domain e.g. assets.example.com,
+#                         Pages project infinia-assets
+#   monitor (--monitor) — monitor-web SPA (split deployment's monitor host),
+#                         assets domain e.g. status-assets.example.com, Pages
+#                         project infinia-monitor-assets
 #
-#   publish-only:
-#     --dist <dir> — publish an already-built dist and exit.
+# The host is auto-detected (store host / monitor host by its compose project;
+# anything else builds in a throwaway node container). Full run per target,
+# in order: configure (questionnaire when values are missing — saved to
+# deploy.conf) → build & publish (on the target's host: extracted from the
+# freshly built image's jar, byte-identical to what it will serve) → attach
+# the custom domain via the Cloudflare API → wait until the domain serves the
+# files → switch the container (target host only) → health wait.
 #
 # Configuration — precedence: flags > environment variables > deploy.conf >
 # built-in defaults. deploy.conf (repo root, gitignored, mode 600) carries:
 #
-#   ASSETS_BASE_URL=https://assets.example.com   # required for full runs
-#   ASSETS_PAGES_PROJECT=infinia-assets
+#   ASSETS_BASE_URL=https://assets.example.com   # this host's assets origin
+#   ASSETS_PAGES_PROJECT=infinia-assets          # or infinia-monitor-assets
 #   CLOUDFLARE_ACCOUNT_ID=<id>                   # required
 #   CLOUDFLARE_API_TOKEN=<token>                 # required; Pages · Edit
 #   NPM_CONFIG_REGISTRY=https://registry.npmmirror.com   # optional
@@ -30,49 +30,39 @@
 #
 # Interactive: on a terminal, missing required values trigger a questionnaire
 # that can save the answers to deploy.conf. `--configure` runs ONLY that
-# questionnaire (and exits) — the way to pre-provision a host non-interactively
-# is piping answers into it.
+# questionnaire (answers can be piped for pre-provisioning). Unattended runs
+# never prompt — missing values fail fast with fix hints.
 #
 # Usage:
-#   scripts/deploy-assets.sh --all    # EVERYTHING, in order: configure
-#                                     # (questionnaire if values are missing),
-#                                     # build & publish, attach the custom
-#                                     # domain via the Cloudflare API, wait
-#                                     # for it to serve the files, switch the
-#                                     # store container and wait for health —
-#                                     # the one-command path
-#   scripts/deploy-assets.sh          # publish + attach the domain, then run
-#                                     # again with --switch to cut over
+#   scripts/deploy-assets.sh --all              # store target, everything
+#   scripts/deploy-assets.sh --monitor --all    # monitor target, everything
+#   scripts/deploy-assets.sh                    # publish + attach, then --switch
 #   scripts/deploy-assets.sh --dist store-web/dist     # publish-only
 #   scripts/deploy-assets.sh --configure               # interactive setup only
 #
 # Options:
-#   --all              do everything end-to-end (implies --switch on the store
-#                      host; on other hosts it publishes + attaches and tells
-#                      you the final command to run on the server)
-#   --base-url URL    assets origin (or ASSETS_BASE_URL env / deploy.conf /
-#                      the existing .env on the store host)
-#   --dist DIR        publish this already-built dist and exit (no build,
-#                     no .env changes, no --switch)
-#   --project NAME    Pages project (default infinia-assets)
-#   --switch          after publishing, recreate the store container with the
-#                     new image — only once the domain serves the files
-#                     (store host only; with --all the domain is attached and
-#                     waited for automatically)
-#   --configure       run the interactive questionnaire, save deploy.conf, exit
-#   --from-image      force the store-host path (extract from built image)
-#   --from-build      force the container-build path (any host)
-#   --keep-dir        keep the temporary publish directory (debugging)
-#
-# Environment:
-#   CLOUDFLARE_API_TOKEN   Pages:Edit token (or deploy.conf)
-#   CLOUDFLARE_ACCOUNT_ID  account id (or deploy.conf)
-#   PAGES_INIT             default 1 — create the project if absent (idempotent)
-#   NPM_CONFIG_REGISTRY    npm mirror for the wrangler download
-#   NODE_IMAGE             default node:22-alpine
+#   --all              do everything end-to-end (implies --switch on the
+#                      target's host; elsewhere it publishes + attaches and
+#                      prints the final command to run on the server)
+#   --monitor          target the monitor SPA / monitor host (also
+#                      auto-detected on a monitor-only host)
+#   --base-url URL     assets origin (or ASSETS_BASE_URL env / deploy.conf /
+#                      the existing .env on the target host)
+#   --dist DIR         publish this already-built dist and exit (no build,
+#                      no .env changes, no --switch)
+#   --project NAME     Pages project (default infinia-assets, or
+#                      infinia-monitor-assets with --monitor)
+#   --switch           after publishing, recreate the target's container with
+#                      the new image — only once the domain serves the files
+#   --configure        run the interactive questionnaire, save deploy.conf, exit
+#   --from-image       force the host path (extract from built image)
+#   --from-build       force the container-build path (any host)
+#   --keep-dir         keep the temporary publish directory (debugging)
 #
 # Idempotent: re-running rebuilds (layer-cached), re-extracts and re-publishes
 # additively — hashed files accumulate, so older shells keep resolving.
+# upgrade.sh re-publishes automatically after every successful deploy while
+# the offload is active (ASSETS_BASE_URL in .env + deploy.conf present).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -83,6 +73,7 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 BASE_URL=""
 PROJECT=""
 MODE=auto
+TARGET=auto
 DIST_ARG=""
 SWITCH=0
 KEEP_DIR=0
@@ -96,6 +87,7 @@ while [[ $# -gt 0 ]]; do
     --project)    PROJECT=${2:?}; shift 2 ;;
     --switch)     SWITCH=1; shift ;;
     --all)        ALL=1; SWITCH=1; shift ;;
+    --monitor)    TARGET=monitor; shift ;;
     --configure)  CONFIGURE=1; shift ;;
     --from-image) MODE=image; shift ;;
     --from-build) MODE=build; shift ;;
@@ -122,12 +114,41 @@ load_config() { # KEY=VALUE file; real environment variables keep precedence
 }
 load_config
 
+# ---- host/target detection (before the defaults: the project default and
+# questionnaire hints depend on the target). Laptop/CI hosts without .env
+# fall through to the container-build path. -----------------------------------
+STORE_HOST=0
+MON_HOST=0
+if command -v docker >/dev/null 2>&1 && [[ -f .env ]]; then
+  docker compose --profile app config --services 2>/dev/null | grep -qx store && STORE_HOST=1
+  docker compose -f docker-compose.monitor.yml config --services 2>/dev/null | grep -qx monitor && MON_HOST=1
+fi
+if [[ $TARGET == auto ]]; then
+  TARGET=store
+  if [[ $MON_HOST -eq 1 && $STORE_HOST -eq 0 ]]; then
+    TARGET=monitor
+    log "monitor host detected — targeting the monitor SPA"
+  fi
+fi
+MON_BASE=docker-compose.monitor.yml
+MON_BUILD_OV=docker-compose.monitor-build.override.yml
+if [[ $TARGET == monitor && $MON_HOST -eq 1 ]]; then
+  MON_COMPOSE=(-f "$MON_BASE")
+  [[ -f .monitor-release.yml ]] && MON_COMPOSE+=(-f .monitor-release.yml)
+fi
+
 # flag > environment > deploy.conf > built-in default
 BASE_URL=${BASE_URL:-${ASSETS_BASE_URL:-}}
-PROJECT=${PROJECT:-${ASSETS_PAGES_PROJECT:-infinia-assets}}
+if [[ -z $PROJECT ]]; then
+  if [[ $TARGET == monitor ]]; then
+    PROJECT=${ASSETS_PAGES_PROJECT:-infinia-monitor-assets}
+  else
+    PROJECT=${ASSETS_PAGES_PROJECT:-infinia-assets}
+  fi
+fi
 NODE_IMAGE=${NODE_IMAGE:-node:22-alpine}
 
-# Store-host last resort: the running deployment's .env already names the
+# Target-host last resort: the running deployment's .env already names the
 # origin (kept there by the image mode below / upgrade.sh's re-publish).
 if [[ -z ${ASSETS_BASE_URL:-} && -f .env ]]; then
   ASSETS_BASE_URL=$(grep -E '^ASSETS_BASE_URL=' .env | head -1 | cut -d= -f2- || true)
@@ -172,11 +193,12 @@ upsert_conf() { # upsert_conf <key> <value> — into deploy.conf
 }
 
 configure_assets() { # configure_assets <need-base-url 0|1> — fill + optionally save
-  local need_base=$1
+  local need_base=$1 def_sub
+  if [[ $TARGET == monitor ]]; then def_sub=status-assets; else def_sub=assets; fi
   log "configuration — missing values (answers can be saved to $CONFIG_FILE)"
   if [[ $need_base -eq 1 && -z ${ASSETS_BASE_URL:-} ]]; then
     while :; do
-      ask "Assets origin URL (absolute https://, e.g. https://assets.infinia.fyi)" "https://assets.infinia.fyi"
+      ask "Assets origin URL (absolute https://, e.g. https://$def_sub.example.com)" "https://$def_sub.example.com"
       if [[ $REPLY == https://* ]]; then export ASSETS_BASE_URL=$REPLY; break; fi
       warn "must start with https://"
     done
@@ -230,7 +252,7 @@ fi
 export PAGES_INIT=${PAGES_INIT:-1} ASSETS_PAGES_PROJECT=$PROJECT
 
 # wrangler without a host Node toolchain: prefer local npx, else run it in a
-# throwaway node container (the Docker-only store host).
+# throwaway node container (the Docker-only deploy hosts).
 wrangler_create() { # create the Pages project if absent
   if command -v npx >/dev/null; then
     npx --yes wrangler@4 pages project create "$PROJECT" --production-branch=main
@@ -262,7 +284,7 @@ wrangler_deploy() { # wrangler_deploy <dist-abs> — publish the directory
 # Publish a built dist (dist layout at its root) to the Pages project.
 publish_dist() { # publish_dist <dist-dir>
   local dist=$1
-  test -f "$dist/index.html" || { echo "error: $dist/index.html not found — run 'yarn web:build' first" >&2; return 1; }
+  test -f "$dist/index.html" || { echo "error: $dist/index.html not found — build 'yarn web:build' first" >&2; return 1; }
   local dist_abs
   dist_abs=$(cd "$dist" && pwd)
 
@@ -283,13 +305,13 @@ publish_dist() { # publish_dist <dist-dir>
   wrangler_deploy "$dist_abs"
 }
 
-# ---- publish-only mode (CI): --dist <dir> -----------------------------------
+# ---- publish-only mode: --dist <dir> ----------------------------------------
 if [[ -n $DIST_ARG ]]; then
   [[ -z $BASE_URL ]] || warn "--base-url ignored in --dist mode (dist is already built)"
   [[ $SWITCH -eq 0 ]] || die "--switch/--all do not combine with --dist"
   publish_dist "$DIST_ARG"
   log "done. One-time wiring if not yet done: bind the custom domain"
-  log "(e.g. assets.infinia.fyi) to $PROJECT in the Pages project settings."
+  log "for $PROJECT in the Pages project settings."
   exit 0
 fi
 
@@ -301,19 +323,19 @@ command -v docker >/dev/null || die "docker is required"
 
 # ---- pick the mode ----------------------------------------------------------
 if [[ $MODE == auto ]]; then
-  if [[ -f .env ]] && docker compose --profile app config --services 2>/dev/null | grep -qx store; then
-    MODE=image
+  if [[ $TARGET == monitor ]]; then
+    [[ $MON_HOST -eq 1 ]] && MODE=image || MODE=build
   else
-    MODE=build
+    [[ $STORE_HOST -eq 1 ]] && MODE=image || MODE=build
   fi
 fi
 if [[ $SWITCH -eq 1 && $MODE != image ]]; then
   if [[ $ALL -eq 1 ]]; then
-    warn "--all on a non-store host: publishing, domain attach and CI wiring only —"
-    warn "finish by running the same command on the store host"
+    warn "--all on a non-$TARGET host: publishing and domain attach only —"
+    warn "finish by running the same command on the $TARGET host"
     SWITCH=0
   else
-    die "--switch only applies on the store host (image mode)"
+    die "--switch only applies on the $TARGET host (image mode)"
   fi
 fi
 
@@ -321,7 +343,7 @@ TMPDIST=$(mktemp -d "${TMPDIR:-/tmp}/infinia-assets.XXXXXX")
 cleanup() { [[ $KEEP_DIR -eq 1 ]] && log "keeping $TMPDIST (--keep-dir)" || rm -rf "$TMPDIST"; }
 trap cleanup EXIT
 
-# Extract the SPA out of a built image's jar into $1 (dist layout at its root).
+# Extract the SPA out of a built image's jar into $2 (dist layout at its root).
 extract_jar_static() {
   local jar=$1 dest=$2
   if command -v unzip >/dev/null; then
@@ -345,8 +367,45 @@ PY
   fi
 }
 
-if [[ $MODE == image ]]; then
-  # ---- store host: publish exactly what the next jar embeds -----------------
+if [[ $MODE == image && $TARGET == monitor ]]; then
+  # ---- monitor host: publish exactly what the next jar embeds --------------
+  log "monitor host: upserting ASSETS_BASE_URL=$BASE_URL in .env"
+  if grep -q '^ASSETS_BASE_URL=' .env; then
+    sed -i.bak "s|^ASSETS_BASE_URL=.*|ASSETS_BASE_URL=$BASE_URL|" .env && rm -f .env.bak
+  else
+    printf '\nASSETS_BASE_URL=%s\n' "$BASE_URL" >> .env
+  fi
+  if [[ ${DEPLOY_ASSETS_HOOK:-} == 1 ]]; then
+    # upgrade.sh re-publish: the running image already carries the base.
+    CID=$(docker compose "${MON_COMPOSE[@]}" ps -q monitor)
+    [[ -n $CID ]] || die "no running monitor container to extract from"
+    IMG=$(docker inspect -f '{{.Image}}' "$CID")
+  else
+    log "building the next monitor image (the running container keeps serving)"
+    cat > "$MON_BUILD_OV" <<'OVERRIDE'
+services:
+  monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+      args:
+        # Interpolated from this host's .env — same origin the publish uses.
+        ASSETS_BASE_URL: ${ASSETS_BASE_URL:-}
+OVERRIDE
+    docker compose -f "$MON_BASE" -f "$MON_BUILD_OV" build monitor
+    MON_REG=$(grep -E '^MONITOR_IMAGE_REGISTRY=' .env | head -1 | cut -d= -f2- || true)
+    MON_TAG=$(grep -E '^MONITOR_IMAGE_TAG=' .env | head -1 | cut -d= -f2- || true)
+    IMG="${MON_REG:-ghcr.io}/muskstark/infinia-store-platform-monitor:${MON_TAG:-latest}"
+  fi
+  log "extracting the monitor SPA from the image's jar"
+  docker create --name mon-extract-$$ "$IMG" >/dev/null
+  trap 'docker rm -f mon-extract-$$ >/dev/null 2>&1 || true; cleanup' EXIT
+  docker cp mon-extract-$$:/app/store-monitor.jar "$TMPDIST/web.jar"
+  docker rm mon-extract-$$ >/dev/null
+  extract_jar_static "$TMPDIST/web.jar" "$TMPDIST" && rm -f "$TMPDIST/web.jar"
+  DIST=$TMPDIST
+elif [[ $MODE == image ]]; then
+  # ---- store host: publish exactly what the next jar embeds ----------------
   log "store host: upserting ASSETS_BASE_URL=$BASE_URL in .env"
   if grep -q '^ASSETS_BASE_URL=' .env; then
     sed -i.bak "s|^ASSETS_BASE_URL=.*|ASSETS_BASE_URL=$BASE_URL|" .env && rm -f .env.bak
@@ -365,16 +424,23 @@ if [[ $MODE == image ]]; then
   extract_jar_static "$TMPDIST/web.jar" "$TMPDIST" && rm -f "$TMPDIST/web.jar"
   DIST=$TMPDIST
 else
-  # ---- any host: build in a node container from the same lockfile -----------
-  log "building store-web in a $NODE_IMAGE container (same lockfile, same base URL)"
+  # ---- any host: build in a node container from the same lockfile ----------
+  if [[ $TARGET == monitor ]]; then
+    WORKSPACE=@infinia/monitor-web
+    DISTDIR=monitor-web/dist
+  else
+    WORKSPACE=@infinia/store-web
+    DISTDIR=store-web/dist
+  fi
+  log "building $WORKSPACE in a $NODE_IMAGE container (same lockfile, same base URL)"
   warn "this creates node_modules/ inside the repo checkout (gitignored)"
   docker run --rm \
     -v "$PWD":/ws -w /ws \
     -e ASSETS_BASE_URL="$BASE_URL" \
     -e NPM_CONFIG_REGISTRY -e COREPACK_NPM_REGISTRY \
     "$NODE_IMAGE" sh -c \
-      'corepack enable && yarn install --immutable && yarn workspace @infinia/store-web build'
-  DIST=$PWD/store-web/dist
+      "corepack enable && yarn install --immutable && yarn workspace $WORKSPACE build"
+  DIST=$PWD/$DISTDIR
 fi
 
 test -f "$DIST/index.html" || die "no dist/index.html under $DIST — build failed?"
@@ -427,16 +493,27 @@ NOTICE
     exit 1
   fi
   log "domain is serving the published assets"
-  log "switching the store to the new image"
-  docker compose --profile app up -d
-  log "waiting for the store to report healthy (best effort)"
+  if [[ $TARGET == monitor ]]; then
+    log "switching the monitor to the new image"
+    MC=(-f "$MON_BASE")
+    [[ -f $MON_BUILD_OV ]] && MC+=(-f "$MON_BUILD_OV")
+    docker compose "${MC[@]}" up -d
+    HEALTH_URL=http://127.0.0.1:8090/actuator/health
+    WHAT=monitor
+  else
+    log "switching the store to the new image"
+    docker compose --profile app up -d
+    HEALTH_URL=http://127.0.0.1:8080/actuator/health
+    WHAT=store
+  fi
+  log "waiting for $WHAT to report healthy (best effort)"
   ok=0
   for _ in $(seq 1 60); do
-    if curl -fsS --max-time 3 http://127.0.0.1:8080/actuator/health 2>/dev/null | grep -q '"UP"'; then ok=1; break; fi
+    if curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null | grep -q '"UP"'; then ok=1; break; fi
     sleep 5
   done
-  [[ $ok -eq 1 ]] && log "store is healthy — hard-refresh the site and verify assets load from $BASE_URL" \
-                   || warn "store did not report UP within 300s — check: docker compose ps && docker compose logs --tail 50 store"
+  [[ $ok -eq 1 ]] && log "$WHAT is healthy — hard-refresh and verify assets load from $BASE_URL" \
+                   || warn "$WHAT did not report UP within 300s — check: docker compose ps && docker compose logs --tail 50 $WHAT"
 else
   if curl -fsI --max-time 20 "$PROBE_URL" >/dev/null 2>&1; then
     log "domain is already serving the published assets"
@@ -448,7 +525,7 @@ else
   if [[ ${DEPLOY_ASSETS_HOOK:-} != 1 ]]; then
     cat <<NEXT
 
-Assets published to Pages. To cut the store over (store host):
+Assets published to Pages. To cut the $TARGET over (its host):
   scripts/deploy-assets.sh --switch        # waits for the domain, then switches
 NEXT
   fi
