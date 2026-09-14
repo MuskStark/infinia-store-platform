@@ -11,4 +11,9 @@
 
 .refresh-actions{display:flex;align-items:center;gap:12px;flex-shrink:0}
 .refresh-time{font-size:11px;color:var(--muted)}
+.connection{display:inline-flex;align-items:center;font-size:11px;color:var(--muted)}
+.connection i{transition:background .3s}
+.pending-flag{font-style:normal;font-size:9px;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);border-radius:5px;padding:1px 4px;margin-left:6px}
+.comb.pending .comb-outline{stroke:var(--warn);stroke-width:2.5;animation:pending-pulse 1.6s ease-in-out infinite}
+@keyframes pending-pulse{50%{stroke:color-mix(in srgb,var(--warn) 25%,var(--line))}}
 @media(max-width:520px){.refresh-actions{align-items:flex-end;flex-direction:column;gap:6px}}

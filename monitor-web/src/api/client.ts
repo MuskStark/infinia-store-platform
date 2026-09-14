@@ -1,7 +1,8 @@
 /**
  * Hand-written client for the monitor's public API. The store SPA generates
- * its client from the contract's OpenAPI; the monitor adds only two fields
- * (mirroredAt, stale) and one endpoint pair, so the shapes live here.
+ * its client from the contract's OpenAPI; the monitor adds a few fields
+ * (mirroredAt, stale, observation metadata) and the REST + SSE endpoint pair,
+ * so the shapes live here.
  */
 
 export type StatusIndicator =
@@ -15,6 +16,10 @@ export type StatusDayUptime = {
   date: string;
   indicator: StatusIndicator;
   uptimePercent?: number | null;
+  /** Share of the day covered by valid observations; interval-based days only. */
+  coveragePercent?: number | null;
+  /** True when the day comes from the legacy per-poll sampling statistics. */
+  sampled?: boolean | null;
 };
 
 export type StatusComponent = {
@@ -22,6 +27,14 @@ export type StatusComponent = {
   indicator: StatusIndicator;
   uptime90d?: number | null;
   history: StatusDayUptime[];
+  /** When the observation feeding the indicator was made. */
+  observedAt?: string | null;
+  /** When the component was last observed operational; null if never. */
+  lastSuccessAt?: string | null;
+  /** True while a conflicting observation awaits confirmation (确认中). */
+  pending?: boolean | null;
+  /** True when observedAt is older than the observation validity window. */
+  stale?: boolean | null;
 };
 
 export type ServiceStatus = {

@@ -47,6 +47,10 @@ public class PollCycle {
     private final StatusEventBus events;
     private final MonitorProperties properties;
     private LocalDate lastPruneDay = null;
+    /** Last mirror state published per component (indicator + staleness). */
+    private final Map<String, MirrorView> lastMirrorViews = new LinkedHashMap<>();
+    /** Mirror incidents already pushed, by id → updatedAt. */
+    private final Map<String, String> lastMirrorIncidents = new LinkedHashMap<>();
 
     public PollCycle(TargetProber prober, StatusMirror mirror, ExternalHistory history,
             MonitorIncidentService incidents, AlertService alerts, StatusEventBus events,
@@ -105,10 +109,10 @@ public class PollCycle {
             case CONFIRMED -> {
                 String confirmed = result.state().indicatorOrNoData();
                 history.record(confirmed, now);
+                publishComponent(now); // the cell flips before its incident appears
                 for (StatusDtos.IncidentDto incident : incidents.track(confirmed, now)) {
                     events.incidentUpdated(incident);
                 }
-                publishComponent(now);
             }
             case PENDING, PENDING_CLEARED -> publishComponent(now);
             case STEADY -> { /* observedAt refreshes silently with every read */ }
@@ -116,11 +120,35 @@ public class PollCycle {
     }
 
     private void mirrorOnce() {
+        Instant now = Instant.now();
         Optional<StatusMirror.Snapshot> fetched = mirror.fetch();
+        StatusMirror.Snapshot snapshot = mirror.current();
+        if (snapshot == null) {
+            return; // never reached the store; the cold-start page says so already
+        }
+        boolean stale = now.isAfter(snapshot.fetchedAt().plusMillis(properties.staleAfterMs()));
+        // Mirrored components publish on (indicator, stale) diffs — the store
+        // transitioned, or the frozen view crossed the staleness window.
+        Map<String, String> merged = mergedIndicators(history.liveIndicator());
+        String overall = Indicators.worst(merged.values());
+        for (StatusDtos.ComponentDto component : snapshot.page().components()) {
+            MirrorView view = new MirrorView(component.indicator(), stale);
+            if (!view.equals(lastMirrorViews.get(component.key()))) {
+                lastMirrorViews.put(component.key(), view);
+                events.componentUpdated(stale ? withStale(component) : component,
+                        overall, now.toString());
+            }
+        }
         if (fetched.isPresent()) {
             // The mirror's frozen internals never flap; a diff here means the
             // store itself transitioned — worth alerting on immediately.
-            alerts.onIndicators(mergedIndicators(history.liveIndicator()), Instant.now());
+            alerts.onIndicators(merged, now);
+            for (StatusDtos.IncidentDto incident : snapshot.incidents()) {
+                if (!incident.updatedAt().equals(lastMirrorIncidents.get(incident.incidentId()))) {
+                    lastMirrorIncidents.put(incident.incidentId(), incident.updatedAt());
+                    events.incidentUpdated(incident);
+                }
+            }
         }
     }
 
@@ -130,8 +158,21 @@ public class PollCycle {
         if (confirmed != null && !Indicators.NO_DATA.equals(confirmed)) {
             history.record(confirmed, now);
         }
+        // The per-minute history refresh: today's bar moved for everyone.
+        StatusDtos.ComponentDto external = history.component();
+        events.historyUpdated(external.key(), external.uptime90d(), external.history());
         pruneDaily(now);
     }
+
+    /** A frozen mirrored component must wear its staleness on the cell itself. */
+    private static StatusDtos.ComponentDto withStale(StatusDtos.ComponentDto component) {
+        return new StatusDtos.ComponentDto(component.key(), component.indicator(),
+                component.uptime90d(), component.history(), component.observedAt(),
+                component.lastSuccessAt(), component.pending(), true);
+    }
+
+    /** What the mirror last published per component — indicator and staleness. */
+    private record MirrorView(String indicator, boolean stale) {}
 
     private void publishComponent(Instant now) {
         Map<String, String> merged = mergedIndicators(history.liveIndicator());

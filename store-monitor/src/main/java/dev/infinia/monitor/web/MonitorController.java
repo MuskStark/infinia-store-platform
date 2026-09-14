@@ -7,10 +7,16 @@ import dev.infinia.monitor.service.MonitorIncidentService;
 import dev.infinia.monitor.service.StatusMirror;
 import dev.infinia.store.contract.api.StatusDtos.ComponentDto;
 import dev.infinia.store.contract.api.StatusDtos.IncidentDto;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -30,13 +36,16 @@ public class MonitorController {
     private final ExternalHistory history;
     private final MonitorIncidentService incidents;
     private final MonitorProperties properties;
+    private final SseStatusEventBus events;
 
     public MonitorController(StatusMirror mirror, ExternalHistory history,
-            MonitorIncidentService incidents, MonitorProperties properties) {
+            MonitorIncidentService incidents, MonitorProperties properties,
+            SseStatusEventBus events) {
         this.mirror = mirror;
         this.history = history;
         this.incidents = incidents;
         this.properties = properties;
+        this.events = events;
     }
 
     @GetMapping
@@ -73,10 +82,47 @@ public class MonitorController {
     }
 
     /** A frozen mirrored component must wear its staleness on the cell itself. */
-    private static ComponentDto withStale(ComponentDto component) {
+    static ComponentDto withStale(ComponentDto component) {
         return new ComponentDto(component.key(), component.indicator(), component.uptime90d(),
                 component.history(), component.observedAt(), component.lastSuccessAt(),
                 component.pending(), true);
+    }
+
+    /**
+     * The live event stream: {@code snapshot} on connect (or when the
+     * Last-Event-ID predates the replay buffer), then
+     * {@code component.updated} / {@code incident.updated} /
+     * {@code history.updated} as confirmed changes land. Comment-only
+     * heartbeats keep proxies from reaping the connection.
+     *
+     * <p>The resume point is accepted from the native {@code Last-Event-ID}
+     * header or a {@code lastEventId} query parameter — a browser EventSource
+     * only resends the header on its own automatic retry, so clients that
+     * manage reconnection themselves (our backoff wrapper) pass it as a query
+     * parameter on the fresh connection.</p>
+     */
+    @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter events(
+            @RequestHeader(value = "Last-Event-ID", required = false) String lastEventIdHeader,
+            @RequestParam(value = "lastEventId", required = false) String lastEventIdParam,
+            HttpServletResponse response) {
+        if (events.isFull()) {
+            // The page falls back to low-frequency polling when handed a 503.
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "event stream connection cap reached");
+        }
+        String lastEventId = lastEventIdHeader != null && !lastEventIdHeader.isBlank()
+                ? lastEventIdHeader : lastEventIdParam;
+        // nginx-family proxies (SafeLine) buffer upstream responses by default;
+        // opt out explicitly, and keep intermediaries from caching the stream.
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Cache-Control", "no-cache");
+        SseEmitter emitter = new SseEmitter(0L); // heartbeats detect dead clients
+        emitter.onCompletion(() -> events.remove(emitter));
+        emitter.onTimeout(() -> events.remove(emitter));
+        this.events.register(emitter, lastEventId, () -> new MonitorDtos.SnapshotEventDto(
+                status(), incidents(50), this.events.currentId()));
+        return emitter;
     }
 
     @GetMapping("/incidents")
