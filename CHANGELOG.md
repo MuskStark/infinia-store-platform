@@ -8,18 +8,66 @@
   first-visit `/assets/**` loads: the zone's cache rules bypass the cache for
   static files, so every hashed asset was a live edge→origin fetch across a
   flaky cross-border link. The opt-in fix offloads those files to a Cloudflare
-  Pages project (`scripts/publish-assets.sh`, CI "Publish SPA to Cloudflare
-  Pages") bound to a dedicated assets domain; Pages serves `/assets/*` with a
-  year of immutable caching and never touches the origin. Free plan, unlimited
-  static requests/bandwidth.
-- Mechanics: `ASSETS_BASE_URL` (repo variable + server `.env`, must be equal)
-  sets the Vite `base`, so the shell references e.g.
+  Pages project bound to a dedicated assets domain; Pages serves `/assets/*`
+  with a year of immutable caching and never touches the origin. Free plan,
+  unlimited static requests/bandwidth.
+- Mechanics: `ASSETS_BASE_URL` (server `.env`, set by the script itself) sets
+  the Vite `base`, so the shell references e.g.
   `https://assets.infinia.fyi/assets/index-x.js`; unset it keeps assets
-  same-origin and every existing deployment byte-identical. A `public/_headers`
+  same-origin and every existing deployment byte-identical. No CI involvement:
+  the store host is the single publishing source — `scripts/upgrade.sh`
+  re-publishes the new jar's SPA to Pages after every successful deploy while
+  the offload is active (`ASSETS_BASE_URL` in `.env` + `deploy.conf` present). A `public/_headers`
   file ships CORS (`Access-Control-Allow-Origin: *`) for module scripts,
   dynamic imports and font loads from the cross-origin shell. Publishes are
   additive — old hashed files stay, so rollbacks keep resolving.
-- Full runbook: DEPLOYMENT.md "Static assets on Cloudflare Pages".
+- Full runbook: DEPLOYMENT.md "Static assets on Cloudflare Pages";
+  `scripts/deploy-assets.sh --all` is the one-command end-to-end path:
+  interactive configure (saved to deploy.conf) → build & publish (store host:
+  extracted from the freshly built image's jar; elsewhere: container build
+  from the same lockfile) → attach the custom domain via the Cloudflare API
+  (no dashboard click needed) → wait until the domain serves the files →
+  switch the store container → health wait. Plain `--switch` (wait + cut
+  over), `--dist <dir>` (publish-only) and `--configure` (questionnaire only)
+  remain for step-by-step use.
+
+### Interactive deploy scripts + `deploy.conf`
+
+- `deploy.sh` / `deploy-assets.sh` read optional KEY=VALUE settings from a
+  gitignored `deploy.conf` at the repo root (documented in DEPLOYMENT.md).
+  Precedence: flags > environment variables > deploy.conf > defaults, so
+  scripted environments stay unaffected. Keys cover both hosts: STORE_BASE_URL,
+  MONITOR_TARGET_BASE_URL, MONITOR_ALERT_WEBHOOK, MONITOR_IMAGE_REGISTRY/TAG,
+  APT_MIRROR, REGISTRY_MIRRORS, and the Pages set (ASSETS_BASE_URL,
+  ASSETS_PAGES_PROJECT, CLOUDFLARE_ACCOUNT_ID/API_TOKEN, NPM_CONFIG_REGISTRY,
+  NODE_IMAGE).
+- Interactive on a terminal: `deploy.sh` asks store-vs-monitor-host whenever
+  the flags don't imply it (monitor-only flags such as `--target-url` select
+  the monitor host; a box already running the standalone monitor is
+  preselected; store/监控 answers accepted) and asks for required values;
+  `upgrade.sh` auto-detects monitor-only hosts the same way; `deploy-assets.sh` asks for missing Cloudflare/Pages values
+  and offers to save them to deploy.conf (mode 600). `--configure` runs only
+  the questionnaire — pipeable for scripted pre-provisioning. Unattended runs
+  fail fast with fix hints instead of prompting.
+- Fixed en route: `deploy.sh`'s sudo re-exec dropped all flags (the parse loop
+  had already consumed `$@`); it now replays ORIGINAL_ARGS.
+
+### scripts/ consolidated: one script per lifecycle concern
+
+- `scripts/deploy.sh` now bootstraps either host — the store stack by default,
+  the standalone monitor with `--monitor-host` (absorbs
+  `deploy-monitor.sh`; ~200 lines of duplicated host preparation collapsed).
+- `scripts/upgrade.sh` now upgrades either host — the store by default, the
+  monitor with `--monitor` (absorbs `upgrade-monitor.sh`; Jenkins' stdin
+  invocation `git show <sha>:scripts/upgrade.sh | sudo bash -s -- --monitor …`
+  keeps working via the `--path` option).
+- `scripts/deploy-assets.sh` absorbs `publish-assets.sh` (`--dist <dir>`
+  publish-only mode); asset publishing runs on the store host (bootstrap via
+  `--all`, then automatically from `scripts/upgrade.sh`), never in CI.
+- Unchanged on purpose: `backup-stack.sh` (cron-invoked),
+  `export-store-trust.py` (different runtime, Jenkins),
+  `publish-app-release.sh` (store API client tool). Call sites updated:
+  `ci.yml`, `Jenkinsfile`, `docker-compose.monitor.yml`, DEPLOYMENT.md.
 
 ### One service, both faces: the store service is now **InfiniaWebService**
 

@@ -7,7 +7,10 @@ server (ADR-011 — the status page must survive a store outage), and the WAF
 publishes both. Everything ships in this repo: `docker-compose.yml` (store +
 dependency planes), `docker-compose.monitor.yml` (monitor host),
 `Dockerfile` (store), `Dockerfile.monitor` (monitor), `scripts/deploy.sh`
-(store host bootstrap), `scripts/backup-stack.sh`. Single-host installs are
+(host bootstrap — store by default, `--monitor-host` for the monitor host),
+`scripts/upgrade.sh` (unattended upgrades — `--monitor` for the monitor
+host), `scripts/deploy-assets.sh` (optional Cloudflare Pages offload),
+`scripts/backup-stack.sh`. Single-host installs are
 still supported: add `--profile monitor` to the store-host commands.
 
 ## Topology
@@ -97,7 +100,7 @@ verbatim when you prefer to run them by hand.
    GHCR image, waits for health, and probes the store once from that host):
 
    ```sh
-   sudo scripts/deploy-monitor.sh --target-url https://store.example.com
+   sudo scripts/deploy.sh --monitor-host --target-url https://store.example.com
    # ghcr.io unreachable from the host? add --image-registry ghcr.m.daocloud.io
    # air-gapped? add --build to compile the image locally instead
    ```
@@ -118,6 +121,40 @@ verbatim when you prefer to run them by hand.
    (ADR-011: a status page that needs a login is useless during an outage);
    the WAF's CC protection is its traffic defense. Upgrades on this host:
    `docker compose -f docker-compose.monitor.yml pull && docker compose -f docker-compose.monitor.yml up -d`.
+
+## deploy.conf — shared script configuration
+
+`deploy.sh` and `deploy-assets.sh` read optional KEY=VALUE settings from a
+`deploy.conf` at the repo root (gitignored; mode 600 — the assets
+questionnaire stores the Cloudflare token in it). Precedence: command-line
+flags > environment variables > `deploy.conf` > built-in defaults — scripted
+environments that export the variables directly are therefore unaffected.
+
+```conf
+STORE_BASE_URL=https://www.example.com          # deploy.sh store prefill
+MONITOR_TARGET_BASE_URL=https://www.example.com # deploy.sh --monitor-host
+MONITOR_ALERT_WEBHOOK=
+MONITOR_IMAGE_REGISTRY=ghcr.m.daocloud.io       # GHCR proxy when needed
+MONITOR_IMAGE_TAG=latest
+APT_MIRROR=mirrors.aliyun.com
+REGISTRY_MIRRORS="https://docker.m.daocloud.io https://docker.1ms.run"
+ASSETS_BASE_URL=https://assets.example.com      # deploy-assets.sh
+ASSETS_PAGES_PROJECT=infinia-assets
+CLOUDFLARE_ACCOUNT_ID=<id>
+CLOUDFLARE_API_TOKEN=<token>                    # Pages · Edit; secret!
+NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+NODE_IMAGE=node:22-alpine
+```
+
+Interactive: `deploy.sh` asks which host to deploy (store / 监控 answers
+work too) whenever the flags don't already imply it — `--target-url` and the
+other monitor-only flags select the monitor host, store flags the store, and
+a box already running the standalone monitor is preselected; `upgrade.sh`
+auto-detects the same way. `deploy-assets.sh` asks for missing
+Cloudflare/Pages values and offers to save them to `deploy.conf` —
+`scripts/deploy-assets.sh --configure` runs only that questionnaire (answers
+can be piped in for pre-provisioning). Unattended contexts (scripts, `--yes`) never prompt: missing values fail
+fast with the fix hints.
 
 ## First admin
 
@@ -166,30 +203,76 @@ never contacts the store host. The HTML shell and the API keep coming from
 the origin exactly as before, and the whole mechanism is opt-in — with
 `ASSETS_BASE_URL` unset, nothing changes for any deployment.
 
-Setup (one-time):
+Setup (one-time, one command):
 
-1. **Pages project + domain** — the zone is already on Cloudflare. Create the
-   project and publish the current SPA once (needs Node/npx locally):
+```sh
+scripts/deploy-assets.sh --all
+```
+
+`--all` does everything in order: interactive configuration when values are
+missing (saved to `deploy.conf`), build & publish (auto-detects the host: on
+the store host it extracts the SPA from the freshly built image's jar;
+anywhere else it builds in a throwaway node container from the same
+lockfile), attaches the custom domain via the Cloudflare API, waits until
+the domain actually serves the files, and switches the store container after
+its health check. On a non-store host it does everything except the switch
+and prints the final command to run on the server.
+
+No CI involvement: the store host is the single publishing source. Once the
+offload is active (`ASSETS_BASE_URL` in `.env` + `deploy.conf` present),
+every `scripts/upgrade.sh` re-publishes the new jar's SPA to Pages right
+after a successful deploy, so hashed files stay in sync on their own.
+
+The manual equivalent, step by step:
+
+1. **Pages project + domain** — the zone is already on Cloudflare. Publish the
+   current SPA once, from whichever host is convenient:
+
+   **From a dev machine** (needs Node/npx):
 
    ```sh
+   ASSETS_BASE_URL=https://assets.example.com yarn web:build
    CLOUDFLARE_API_TOKEN=<token with Cloudflare Pages · Edit> \
    CLOUDFLARE_ACCOUNT_ID=<account id> \
    PAGES_INIT=1 ASSETS_PAGES_PROJECT=infinia-assets \
-     scripts/publish-assets.sh
+     scripts/deploy-assets.sh --dist store-web/dist
+   ```
+
+   **From the store host** (Docker-only; publishes the exact files the next
+   jar will embed, so hashes cannot drift). The old container keeps serving
+   until the final `up -d`:
+
+   ```sh
+   cd /opt/infinia-store
+   echo 'ASSETS_BASE_URL=https://assets.example.com' >> .env
+   docker compose --profile app build store
+   # Extract the SPA out of the freshly built image's jar:
+   docker create --name web-extract infinia-webservice
+   docker cp web-extract:/app/InfiniaWebService.jar /tmp/web.jar
+   docker rm web-extract
+   rm -rf /tmp/pages-dist && mkdir -p /tmp/pages-dist
+   cd /tmp/pages-dist && unzip -q /tmp/web.jar 'BOOT-INF/classes/static/*' \
+     && mv BOOT-INF/classes/static/* . && rmdir BOOT-INF/classes/static BOOT-INF/classes BOOT-INF
+   # (no unzip on the host? apt-get install -y unzip)
+   cd - >/dev/null
+   CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> \
+   PAGES_INIT=1 scripts/deploy-assets.sh --dist /tmp/pages-dist
+   # Optionally speed up the in-container wrangler download on China hosts:
+   #   export NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
    ```
 
    Then bind the custom domain (e.g. `assets.infinia.fyi`) in the Pages
-   project settings — the DNS record is created for you.
-2. **Repository wiring** (Settings → Secrets and variables → Actions):
-   variables `ASSETS_PAGES_PROJECT=infinia-assets` and
-   `ASSETS_BASE_URL=https://assets.infinia.fyi` (the CI publish and the store
-   image build must use the *same* `ASSETS_BASE_URL` — it changes bundle
-   hashes, so a mismatch would reference files Pages never received), plus
-   secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. From then on
-   every green push publishes the SPA's dist before the deploy job runs.
-3. **Server `.env`** — set the same `ASSETS_BASE_URL=https://assets.infinia.fyi`
-   and redeploy (`docker compose --profile app up -d --build`). Do this only
-   after step 1: the shell will reference the assets domain from then on.
+   project settings — the DNS record is created for you. On the store host,
+   finish the switch after verifying the domain serves the files:
+
+   ```sh
+   docker compose --profile app up -d   # no --build: image is already built
+   ```
+2. **Server `.env`** — set the same `ASSETS_BASE_URL=https://assets.infinia.fyi`
+   and redeploy (`docker compose --profile app up -d --build`). Bootstrapped
+   from the store host with `--all`? This already happened in step 1 (`.env` +
+   build + `up -d`) — the script verifies the assets domain answers before
+   that final switch: the shell references the domain from then on.
 
 Publishes are additive — hashed files accumulate, so a rollback to an older
 image keeps finding its files. Billing: Pages serves static assets with
@@ -349,7 +432,7 @@ its `DEPLOY_*` secrets are set, so leave them unset once Jenkins owns the
 deploys.
 
 The split-host Jenkins deploy builds the monitor from the same commit as the
-store using `scripts/upgrade-monitor.sh`, so it does not depend on GitHub
+store using `scripts/upgrade.sh --monitor`, so it does not depend on GitHub
 Actions publishing `latest`. It waits for container health and checks the
 image revision label. The host-local `.monitor-release.yml` override selects
 that commit's image; on failure the script restores the previous checkout
@@ -358,7 +441,7 @@ include both files:
 
 ```sh
 docker compose -f docker-compose.monitor.yml -f .monitor-release.yml ps
-sudo bash scripts/upgrade-monitor.sh --path "$PWD" --ref origin/main
+sudo bash scripts/upgrade.sh --monitor --path "$PWD" --ref origin/main
 ```
 
 The Jenkins deployment credentials are `infinia-prod-deploy` and

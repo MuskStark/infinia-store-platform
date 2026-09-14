@@ -32,6 +32,9 @@ logs/
 .env
 .env.local
 
+# Local deploy-script configuration (may hold the Cloudflare API token)
+deploy.conf
+
 # Host-local monitor release image selection
 .monitor-release.yml
 

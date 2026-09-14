@@ -56,27 +56,11 @@ jobs:
       - name: Unit tests (monitor web)
         run: yarn monitor:test
       - name: Typecheck & build (store web)
-        # Same ASSETS_BASE_URL the server image bakes in — it changes bundle
-        # hashes, so the published assets must be built with the exact value
-        # the deployment uses (repo variable, empty = same-origin).
-        env:
-          ASSETS_BASE_URL: ${{ vars.ASSETS_BASE_URL }}
         run: yarn web:build
       - name: Typecheck & build (monitor web)
         run: yarn monitor:build
       - name: Monitor jar embeds its SPA
         run: ./build-monitor-jar.sh --skip-tests --skip-web
-      # Push the SPA the deploy will reference to the Cloudflare Pages project
-      # behind the assets domain (first-visit 522 fix; DEPLOYMENT.md "Static
-      # assets on Cloudflare Pages"). Opt-in like the deploy job: without the
-      # ASSETS_PAGES_PROJECT repo variable CI behaves exactly as before.
-      - name: Publish SPA to Cloudflare Pages
-        if: github.event_name == 'push' && vars.ASSETS_PAGES_PROJECT != ''
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          ASSETS_PAGES_PROJECT: ${{ vars.ASSETS_PAGES_PROJECT }}
-        run: scripts/publish-assets.sh store-web/dist
 
   images:
     name: Images (Docker → GHCR)

@@ -1,53 +1,150 @@
 #!/usr/bin/env bash
 #
-# Unattended upgrade of an existing store deployment (DEPLOYMENT.md
-# "Upgrades" / "Automated deploys"). CI runs this over SSH after a green
-# build (.github/workflows/ci.yml, deploy job); by hand it works the same:
+# Unattended upgrade of an existing deployment (DEPLOYMENT.md "Upgrades" /
+# "Automated deploys"). One script, two hosts; both modes pin the checkout to
+# the target commit (tracked files only — the untracked .env is never touched,
+# local edits to tracked files are discarded), restart via compose, wait for
+# health, and roll back to the previous version when anything fails.
 #
-#   sudo scripts/upgrade.sh                      # deploy origin/main
-#   sudo scripts/upgrade.sh --ref <sha|tag>      # deploy an exact commit
+#   store host (default) — CI runs this over SSH after a green build
+#   (.github/workflows/ci.yml, deploy job); by hand it works the same:
 #
-# Steps: pin the checkout to the target commit (tracked files only — the
-# untracked .env is never touched, local edits to tracked files are
-# discarded), rebuild and restart via compose, wait for the health checks;
-# when anything fails, restore the previous image and checkout (rollback)
-# and exit non-zero so CI goes red.
+#     sudo scripts/upgrade.sh                      # deploy origin/main
+#     sudo scripts/upgrade.sh --ref <sha|tag>      # deploy an exact commit
+#
+#   monitor host (split deployment) — deploys an exact revision without
+#   waiting for another CI system to publish a mutable :latest image:
+#
+#     sudo scripts/upgrade.sh --monitor [--ref <sha>] [--path <checkout>]
+#     # from another checkout / Jenkins (script read from git via stdin):
+#     git show <sha>:scripts/upgrade.sh | sudo bash -s -- --monitor \
+#       --path /opt/infinia-store --ref <sha>
+#
+#   A host already running the standalone monitor (and no store) upgrades the
+#   monitor automatically, even without --monitor.
+#
+# Options:
+#   --ref <sha|tag>   commit to deploy (default origin/main)
+#   --monitor         upgrade the standalone monitor instead of the store
+#   --path <dir>      checkout to run in (default: this script's repo root;
+#                     required when the script itself is piped via stdin)
 #
 # Requirements: the repo cloned on this host with credentials for an
-# unattended `git fetch origin` (GitHub deploy key or credential helper)
-# and a working Docker Engine + compose plugin.
+# unattended `git fetch origin` (GitHub deploy key or credential helper) and a
+# working Docker Engine + compose plugin.
 set -euo pipefail
-cd "$(dirname "$0")/.."
-
-usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; }
 
 log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARNING:\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+usage() { sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; }
+
 # ---------------------------------------------------------------- flags -----
 ORIGINAL_ARGS=("$@")
 REF="origin/main"
+DEPLOY_PATH=""
+MONITOR=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ref)     REF=${2:?}; shift 2 ;;
+    --path)    DEPLOY_PATH=${2:?}; shift 2 ;;
+    --monitor) MONITOR=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)         usage >&2; die "unknown option: $1" ;;
   esac
 done
 
+# ------------------------------------------------------------- locate -------
+# Stdin invocation (git show … | bash -s --) has no usable $0 — --path drives.
+if [[ -n $DEPLOY_PATH ]]; then
+  cd "$DEPLOY_PATH"
+else
+  cd "$(dirname "$0")/.."
+fi
+
 # ---------------------------------------------------------- host checks -----
 [[ $(uname -s) == "Linux" ]] || die "this upgrader targets Linux production hosts"
 if [[ ${EUID} -ne 0 ]]; then
   # Never prompt: unattended callers (CI, cron) must fail fast instead.
-  command -v sudo >/dev/null 2>&1 || die "must run as root (try: sudo scripts/upgrade.sh)"
-  exec sudo -n bash "$0" "${ORIGINAL_ARGS[@]}"
+  command -v sudo >/dev/null 2>&1 || die "must run as root (try: sudo scripts/upgrade.sh [--monitor])"
+  if [[ -f $0 ]]; then
+    exec sudo -n bash "$0" "${ORIGINAL_ARGS[@]}"
+  else
+    die "must run as root — stdin invocation cannot self-elevate; prefix sudo"
+  fi
 fi
-[[ -f docker-compose.yml ]] || die "run from the repo checkout (docker-compose.yml not found next to scripts/)"
+[[ -f docker-compose.yml ]] || die "run from the repo checkout (docker-compose.yml not found)"
 command -v git >/dev/null 2>&1 || die "git not installed"
 docker info >/dev/null 2>&1 || die "docker daemon not reachable"
 docker compose version >/dev/null 2>&1 || die "docker compose plugin missing"
 
+# Host detection: a box running the standalone monitor (and no store) means a
+# bare upgrade targets the monitor; explicit --monitor wins either way, and
+# store hosts (single-host installs included) are never misdetected because
+# their store container answers the probe.
+if [[ $MONITOR -eq 0 ]]; then
+  MON_RUNNING=$(docker compose -f docker-compose.monitor.yml ps -q monitor 2>/dev/null || true)
+  STORE_RUNNING=$(docker compose --profile app ps -q store 2>/dev/null || true)
+  if [[ -n $MON_RUNNING && -z $STORE_RUNNING ]]; then
+    log "standalone monitor detected — upgrading the monitor (store upgrades run on the store host)"
+    MONITOR=1
+  fi
+fi
+
+# ====================================================== monitor host =========
+if [[ $MONITOR -eq 1 ]]; then
+  COMPOSE_FILE="docker-compose.monitor.yml"
+  OVERRIDE=".monitor-release.yml"
+  [[ -f $COMPOSE_FILE ]] || die "$COMPOSE_FILE not found"
+  [[ -f .env ]] || die "existing monitor .env is required (bootstrap with scripts/deploy.sh --monitor-host)"
+  exec 9>.git/monitor-deploy.lock
+  flock -n 9 || die "another monitor deployment is active"
+
+  OLD_REF=$(git rev-parse HEAD)
+  OLD_CID=$(docker compose -f "$COMPOSE_FILE" ps -q monitor)
+  OLD_IMAGE=
+  if [[ -n $OLD_CID ]]; then
+    OLD_IMAGE=$(docker inspect -f '{{.Image}}' "$OLD_CID")
+  fi
+  BACKUP=$(mktemp)
+  HAD_OVERRIDE=0
+  if [[ -f $OVERRIDE ]]; then cp "$OVERRIDE" "$BACKUP"; HAD_OVERRIDE=1; fi
+  trap 'rm -f "$BACKUP"' EXIT
+
+  rollback() {
+    trap - ERR
+    warn "monitor deploy failed; restoring ${OLD_REF:0:12}"
+    git checkout --detach "$OLD_REF"
+    if [[ $HAD_OVERRIDE -eq 1 ]]; then
+      cp "$BACKUP" "$OVERRIDE"
+    elif [[ -n $OLD_IMAGE ]]; then
+      printf 'services:\n  monitor:\n    image: "%s"\n' "$OLD_IMAGE" > "$OVERRIDE"
+    fi
+    if [[ -n $OLD_IMAGE ]]; then
+      docker compose -f "$COMPOSE_FILE" -f "$OVERRIDE" up -d --no-build --pull never --wait --wait-timeout 300 || true
+    fi
+    die "rolled back to ${OLD_REF:0:12} (investigate: docker compose -f $COMPOSE_FILE logs --tail 100 monitor)"
+  }
+
+  git fetch origin --prune
+  NEW_REF=$(git rev-parse --verify "${REF}^{commit}") || die "unknown ref: $REF"
+  trap rollback ERR
+  log "monitor: ${OLD_REF:0:12} -> ${NEW_REF:0:12}"
+  git checkout --detach "$NEW_REF"
+  IMAGE="infinia-monitor:$NEW_REF"
+  docker build -f Dockerfile.monitor --label "org.opencontainers.image.revision=$NEW_REF" -t "$IMAGE" .
+  printf 'services:\n  monitor:\n    image: "%s"\n' "$IMAGE" > "$OVERRIDE"
+  docker compose -f "$COMPOSE_FILE" -f "$OVERRIDE" up -d --no-build --pull never --wait --wait-timeout 300
+  CID=$(docker compose -f "$COMPOSE_FILE" -f "$OVERRIDE" ps -q monitor)
+  [[ $(docker inspect -f '{{.State.Health.Status}}' "$CID") == healthy ]]
+  [[ $(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$CID") == "$NEW_REF" ]]
+  trap - ERR
+  log "monitor deployed and healthy: ${NEW_REF:0:12}"
+  exit 0
+fi
+
+# ========================================================= store host ========
 # ------------------------------------------------------------ fetch ---------
 OLD_REF=$(git rev-parse HEAD)
 log "fetching origin (current checkout: ${OLD_REF:0:12})"
@@ -135,6 +232,19 @@ curl -fsS http://127.0.0.1:8080/actuator/health | grep -q '"UP"' \
 if [[ $WITH_MONITOR -eq 1 ]]; then
   curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null \
     || warn "monitor health endpoint not reachable"
+fi
+
+# Asset offload sync: when the deployment serves hashed assets from Cloudflare
+# Pages (ASSETS_BASE_URL in .env) and the host carries its deploy.conf, the
+# new jar's files must reach Pages or the fresh shell references files that
+# are not there. Publish from this exact image — the store host stays the
+# single publishing source (no CI involved).
+if grep -q '^ASSETS_BASE_URL=https\?://' .env 2>/dev/null && [[ -f deploy.conf ]]; then
+  log "asset offload active — publishing the new SPA to Cloudflare Pages"
+  if ! DEPLOY_ASSETS_HOOK=1 scripts/deploy-assets.sh --from-image; then
+    warn "asset publish failed — the running shell references the assets domain;"
+    warn "retry manually: scripts/deploy-assets.sh --from-image"
+  fi
 fi
 
 # Drop the dangling layers the rebuild left behind so repeated deploys don't

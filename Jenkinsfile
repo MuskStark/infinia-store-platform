@@ -120,7 +120,7 @@ pipeline {
               sh '''
                 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
                     "$PROD_USER@$MONITOR_HOST" \
-                    "cd '$MONITOR_PATH' && git fetch origin --prune && git show '$GIT_COMMIT:scripts/upgrade-monitor.sh' | sudo -n bash -s -- --path '$MONITOR_PATH' --ref '$GIT_COMMIT'"
+                    "cd '$MONITOR_PATH' && git fetch origin --prune && git show '$GIT_COMMIT:scripts/upgrade.sh' | sudo -n bash -s -- --monitor --path '$MONITOR_PATH' --ref '$GIT_COMMIT'"
               '''
             }
           } else {
