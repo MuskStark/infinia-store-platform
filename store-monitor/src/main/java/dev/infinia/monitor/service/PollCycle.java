@@ -1,6 +1,8 @@
 package dev.infinia.monitor.service;
 
+import dev.infinia.monitor.config.MonitorProperties;
 import dev.infinia.store.contract.api.StatusDtos;
+import dev.infinia.store.contract.status.ComponentStateMachine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -11,14 +13,26 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /**
- * One poll cycle, every {@code monitor.poll-interval-ms}: probe the store's
- * public URL, record the external bucket and incidents, mirror the store's
- * status snapshot (a failed fetch freezes the last one), then diff the merged
- * indicators for alerting. The order matters: probe first, so a store that is
- * going down reports a red external component even if the mirror fetch races
- * the shutdown.
+ * The monitor's heartbeat, split into independently scheduled rounds so one
+ * slow check can never hold up another (each {@code @Scheduled} method runs
+ * with fixedDelay semantics — the same check never overlaps itself — and the
+ * sized scheduler pool runs them on separate threads):
+ * <ul>
+ *   <li>{@link #probeCycle()} — probe the store's public URL every
+ *       {@code monitor.probe-interval-ms} and feed the confirmation machine;</li>
+ *   <li>{@link #mirrorCycle()} — fetch the store's status snapshot every
+ *       {@code monitor.mirror-interval-ms} (a failed fetch freezes the last
+ *       one) and diff it for alerting;</li>
+ *   <li>{@link #rollupCycle()} — once a minute, record the confirmed external
+ *       state into the day buckets (keeping statistics weights independent of
+ *       the probe cadence) and prune old history.</li>
+ * </ul>
+ * Probing runs before mirroring at boot, so a store that is going down
+ * reports a red external component even if the mirror fetch races the
+ * shutdown.
  */
 @Component
 public class PollCycle {
@@ -30,36 +44,99 @@ public class PollCycle {
     private final ExternalHistory history;
     private final MonitorIncidentService incidents;
     private final AlertService alerts;
+    private final StatusEventBus events;
+    private final MonitorProperties properties;
     private LocalDate lastPruneDay = null;
 
     public PollCycle(TargetProber prober, StatusMirror mirror, ExternalHistory history,
-            MonitorIncidentService incidents, AlertService alerts) {
+            MonitorIncidentService incidents, AlertService alerts, StatusEventBus events,
+            MonitorProperties properties) {
         this.prober = prober;
         this.mirror = mirror;
         this.history = history;
         this.incidents = incidents;
         this.alerts = alerts;
+        this.events = events;
+        this.properties = properties;
     }
 
-    @Scheduled(fixedDelayString = "${monitor.poll-interval-ms:60000}",
-            initialDelayString = "${monitor.poll-initial-delay-ms:0}")
-    public void scheduled() {
+    @Scheduled(fixedDelayString = "${monitor.probe-interval-ms:5000}",
+            initialDelayString = "${monitor.probe-initial-delay-ms:0}")
+    public void probeCycle() {
         try {
-            cycle();
+            probeOnce();
         } catch (Exception e) {
-            // A poll failure must never kill the scheduler.
-            log.warn("Poll cycle failed: {}", e.getMessage());
+            // A probe failure must never kill the scheduler.
+            log.warn("Probe cycle failed: {}", e.getMessage());
         }
     }
 
+    @Scheduled(fixedDelayString = "${monitor.mirror-interval-ms:5000}",
+            initialDelayString = "${monitor.mirror-initial-delay-ms:200}")
+    public void mirrorCycle() {
+        try {
+            mirrorOnce();
+        } catch (Exception e) {
+            log.warn("Mirror cycle failed: {}", e.getMessage());
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${monitor.rollup-interval-ms:60000}",
+            initialDelayString = "${monitor.rollup-initial-delay-ms:1000}")
+    public void rollupCycle() {
+        try {
+            rollupOnce();
+        } catch (Exception e) {
+            log.warn("Rollup cycle failed: {}", e.getMessage());
+        }
+    }
+
+    /** One full round (probe + mirror); the integration tests drive this manually. */
     public void cycle() {
+        probeOnce();
+        mirrorOnce();
+    }
+
+    private void probeOnce() {
         Instant now = Instant.now();
-        String external = prober.probe();
-        history.record(external, now);
-        incidents.track(external, now);
-        mirror.fetch();
+        TargetProber.Outcome outcome = prober.probe();
+        ComponentStateMachine.Result result = history.observe(outcome.indicator(), now);
+        switch (result.kind()) {
+            case CONFIRMED -> {
+                String confirmed = result.state().indicatorOrNoData();
+                history.record(confirmed, now);
+                for (StatusDtos.IncidentDto incident : incidents.track(confirmed, now)) {
+                    events.incidentUpdated(incident);
+                }
+                publishComponent(now);
+            }
+            case PENDING, PENDING_CLEARED -> publishComponent(now);
+            case STEADY -> { /* observedAt refreshes silently with every read */ }
+        }
+    }
+
+    private void mirrorOnce() {
+        Optional<StatusMirror.Snapshot> fetched = mirror.fetch();
+        if (fetched.isPresent()) {
+            // The mirror's frozen internals never flap; a diff here means the
+            // store itself transitioned — worth alerting on immediately.
+            alerts.onIndicators(mergedIndicators(history.liveIndicator()), Instant.now());
+        }
+    }
+
+    private void rollupOnce() {
+        Instant now = Instant.now();
+        String confirmed = history.liveState().indicator();
+        if (confirmed != null && !Indicators.NO_DATA.equals(confirmed)) {
+            history.record(confirmed, now);
+        }
         pruneDaily(now);
-        alerts.onIndicators(mergedIndicators(external), now);
+    }
+
+    private void publishComponent(Instant now) {
+        Map<String, String> merged = mergedIndicators(history.liveIndicator());
+        events.componentUpdated(history.component(), Indicators.worst(merged.values()),
+                now.toString());
     }
 
     /** Mirrored components keep their last-known indicator; external is live. */

@@ -2,6 +2,7 @@ package dev.infinia.store.app;
 
 import dev.infinia.store.app.config.StoreProperties;
 import dev.infinia.store.app.service.StatusService;
+import dev.infinia.store.contract.api.StatusDtos.ComponentDto;
 import dev.infinia.store.contract.api.StatusDtos.StatusPageDto;
 import dev.infinia.store.domain.port.BlobStorage;
 import dev.infinia.store.domain.port.PublishingRepositories.UpstreamSourceRepository;
@@ -22,7 +23,7 @@ import static org.mockito.Mockito.*;
 
 class StatusSamplingTest {
     @Test
-    void readsDoNotConsumeHttpWindowOrResolveFaultBeforeNextSample() throws Exception {
+    void readsDoNotConsumeHttpWindowAndFaultsNeedConfirmedStreaks() throws Exception {
         var dataSource = mock(DataSource.class);
         var connection = mock(Connection.class);
         var statement = mock(Statement.class);
@@ -38,39 +39,59 @@ class StatusSamplingTest {
         try {
             var service = new StatusService(dataSource, properties,
                     mock(BlobStorageProperties.class), mock(BlobStorage.class),
-                    mock(UpstreamSourceRepository.class), uptime, incidents, registry, false, false);
+                    mock(UpstreamSourceRepository.class), uptime, incidents, registry,
+                    false, false, 2, 2, 180_000L);
             var ok = registry.timer("http.server.requests", "status", "200");
             var errors = registry.timer("http.server.requests", "status", "500");
             // Bootstrap before the scheduler runs initializes exactly one sample.
             var initial = service.page();
             assertSame(initial, service.page());
             clearInvocations(uptime, incidents);
-            for (int i = 0; i < 95; i++) ok.record(1, TimeUnit.MILLISECONDS);
-            for (int i = 0; i < 5; i++) errors.record(1, TimeUnit.MILLISECONDS);
+            record(ok, errors, 95, 5);
             assertSame(initial, service.page());
             verifyNoInteractions(uptime, incidents);
 
+            // One failing window alone is 确认中: the confirmed indicator holds.
             service.sample();
-            var failed = service.page();
-            assertEquals("major_outage", httpIndicator(failed));
+            var pending = httpComponent(service.page());
+            assertEquals("operational", pending.indicator());
+            assertEquals(Boolean.TRUE, pending.pending());
+            assertFalse(Boolean.TRUE.equals(pending.stale()));
+
+            // A second failing window confirms the fault.
+            record(ok, errors, 95, 5);
+            service.sample();
+            var failedPage = service.page();
+            var failed = httpComponent(failedPage);
+            assertEquals("major_outage", failed.indicator());
+            assertEquals(Boolean.FALSE, failed.pending());
             clearInvocations(uptime, incidents);
-            // Blackbox probe followed by mirror fetch must see the same failure.
-            assertSame(failed, service.page());
-            assertSame(failed, service.page());
+            // Reads are still side-effect free: no window consumed, no samples added.
+            assertSame(failedPage, service.page());
+            assertSame(failedPage, service.page());
             verifyNoInteractions(uptime, incidents);
 
-            for (int i = 0; i < 100; i++) ok.record(1, TimeUnit.MILLISECONDS);
-            assertSame(failed, service.page());
+            // Recovery is equally deliberate: two clean windows.
+            record(ok, errors, 100, 0);
             service.sample();
-            assertEquals("operational", httpIndicator(service.page()));
-            assertNotSame(failed, service.page());
+            assertEquals("major_outage", httpComponent(service.page()).indicator(),
+                    "one clean window must not claim recovery");
+            record(ok, errors, 100, 0);
+            service.sample();
+            assertEquals("operational", httpComponent(service.page()).indicator());
         } finally {
             registry.close();
         }
     }
 
-    private static String httpIndicator(StatusPageDto page) {
+    private static void record(io.micrometer.core.instrument.Timer ok,
+            io.micrometer.core.instrument.Timer errors, int okCount, int errorCount) {
+        for (int i = 0; i < okCount; i++) ok.record(1, TimeUnit.MILLISECONDS);
+        for (int i = 0; i < errorCount; i++) errors.record(1, TimeUnit.MILLISECONDS);
+    }
+
+    private static ComponentDto httpComponent(StatusPageDto page) {
         return page.components().stream().filter(c -> c.key().equals("http-quality"))
-                .findFirst().orElseThrow().indicator();
+                .findFirst().orElseThrow();
     }
 }

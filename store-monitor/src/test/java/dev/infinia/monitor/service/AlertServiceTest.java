@@ -58,9 +58,9 @@ class AlertServiceTest {
 
     private AlertService testable(List<Dispatch> sent, int throttleMinutes) {
         MonitorProperties properties = new MonitorProperties(
-                URI.create("https://store.example.com"), null, null,
+                URI.create("https://store.example.com"), null, null, null, null,
                 "/tmp/monitor-test", "https://alerts.example.com/hook", throttleMinutes,
-                null, null);
+                null, null, null, null, null, null, null, null);
         return new AlertService(properties, JsonMapper.builder().build(),
                 (url, json) -> sent.add(new Dispatch(url, json)));
     }

@@ -20,6 +20,13 @@ spring:
   web:
     resources:
       add-mappings: true
+  # The status samplers (core 5 s + metrics 30 s + rollup) share the scheduler
+  # with order-close, the scan watchdog and upstream retries; the default
+  # single-thread pool would let a capped 6 s database probe delay them all.
+  task:
+    scheduling:
+      pool:
+        size: 4
 
 server:
   port: 8080
@@ -138,6 +145,19 @@ store:
     http-5xx-warn-percent: ${STORE_MONITOR_HTTP_5XX_WARN_PERCENT:1.0}
     http-5xx-critical-percent: ${STORE_MONITOR_HTTP_5XX_CRITICAL_PERCENT:5.0}
     http-p95-warn-millis: ${STORE_MONITOR_HTTP_P95_WARN_MS:1500}
+  # Status sampling: core services (liveness + database) every 5 s so a
+  # confirmed fault reaches the mirrored page within the ~15 s budget; resource
+  # metrics on the slower clock. 2 consecutive failures confirm a fault, 2
+  # successes confirm recovery; the first conflicting observation shows as
+  # 确认中 (pending). An observation older than the validity window is stale.
+  status:
+    core-sample-interval-ms: ${STORE_STATUS_CORE_INTERVAL_MS:5000}
+    # Legacy store.status.sample-interval-ms still steers the metrics tier for
+    # deployments that tuned it (chained default, evaluated when the env var is unset).
+    metrics-sample-interval-ms: ${STORE_STATUS_METRICS_INTERVAL_MS:${store.status.sample-interval-ms:30000}}
+    confirm-failure-threshold: ${STORE_STATUS_CONFIRM_FAILURE:2}
+    confirm-recovery-threshold: ${STORE_STATUS_CONFIRM_RECOVERY:2}
+    observation-validity-ms: ${STORE_STATUS_OBSERVATION_VALIDITY_MS:180000}
 
 ---
 spring:

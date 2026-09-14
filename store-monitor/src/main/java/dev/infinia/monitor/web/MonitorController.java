@@ -45,22 +45,21 @@ public class MonitorController {
         StatusMirror.Snapshot snapshot = mirror.current();
 
         // The external component is always live (the monitor's own freshest
-        // probe); mirrored components render at their last-known indicator —
-        // frozen during an outage, honestly labelled as stale.
-        String external = history.liveIndicator();
+        // confirmed state); mirrored components render at their last-known
+        // indicator — frozen during an outage, honestly labelled as stale.
         List<ComponentDto> components = new ArrayList<>();
         List<String> indicators = new ArrayList<>();
+        boolean mirrorStale = snapshot == null
+                || now.isAfter(snapshot.fetchedAt().plusMillis(properties.staleAfterMs()));
         if (snapshot != null) {
-            components.addAll(snapshot.page().components());
             for (ComponentDto component : snapshot.page().components()) {
+                components.add(mirrorStale ? withStale(component) : component);
                 indicators.add(component.indicator());
             }
         }
-        components.add(history.component(external));
-        indicators.add(external);
-
-        boolean stale = snapshot == null
-                || now.isAfter(snapshot.fetchedAt().plusMillis(properties.staleAfterMs()));
+        ComponentDto external = history.component();
+        components.add(external);
+        indicators.add(external.indicator());
         // A cold monitor that has seen nothing must not claim all-green.
         String overall = indicators.stream().allMatch(Indicators.NO_DATA::equals)
                 ? Indicators.NO_DATA
@@ -70,7 +69,14 @@ public class MonitorController {
                 components,
                 now.toString(),
                 snapshot == null ? null : snapshot.fetchedAt().toString(),
-                stale);
+                mirrorStale);
+    }
+
+    /** A frozen mirrored component must wear its staleness on the cell itself. */
+    private static ComponentDto withStale(ComponentDto component) {
+        return new ComponentDto(component.key(), component.indicator(), component.uptime90d(),
+                component.history(), component.observedAt(), component.lastSuccessAt(),
+                component.pending(), true);
     }
 
     @GetMapping("/incidents")

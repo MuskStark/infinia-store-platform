@@ -23,7 +23,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "monitor.target-base-url=http://127.0.0.1:1",
-                "monitor.poll-interval-ms=3600000",
+                // Fast probe cadence: the boot-time probe round confirms the
+                // first verdict on its own, the await loop just settles timing.
+                "monitor.probe-interval-ms=300",
+                "monitor.mirror-interval-ms=3600000",
+                "monitor.rollup-interval-ms=3600000",
                 // Fresh in-memory database: this store has never been mirrored.
                 "spring.datasource.url=jdbc:h2:mem:monitor-cold;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
         })

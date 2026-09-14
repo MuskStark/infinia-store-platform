@@ -29,8 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         properties = {
                 // Polling is driven manually in tests; no startup sample races
                 // these writes to today's bucket.
-                "monitor.poll-interval-ms=3600000",
-                "monitor.poll-initial-delay-ms=3600000",
+                "monitor.probe-interval-ms=3600000",
+                "monitor.mirror-interval-ms=3600000",
+                "monitor.rollup-interval-ms=3600000",
                 "spring.datasource.url=jdbc:h2:mem:monitor-uptime;"
                         + "MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;"
                         + "DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
@@ -56,7 +57,7 @@ class ExternalHistoryUptimeTest {
         long available = bucket.ok + bucket.degraded;
         assertTrue(bucket.degraded > 0, "the degraded sample must be in the bucket");
 
-        var component = history.component(Indicators.DEGRADED);
+        var component = history.component();
         var today = component.history().get(component.history().size() - 1);
 
         double expected = Math.round(1000.0 * available / total) / 10.0;

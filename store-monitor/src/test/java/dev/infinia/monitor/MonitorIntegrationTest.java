@@ -29,17 +29,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end monitor behaviour against a fake store: a healthy cycle mirrors
- * the store's components, a failing store freezes the snapshot (the page keeps
- * rendering with a red external component and, past the stale window, a stale
- * flag), recovery resolves the outage incident — and a monitor restart during
- * an outage still renders the persisted snapshot.
+ * the store's components; a failing store needs two probe rounds (确认中, then
+ * confirmed) before the external component turns red, freezes the snapshot
+ * (the page keeps rendering, past the stale window with a stale flag) and
+ * opens the outage incident; recovery is equally confirmed before the incident
+ * resolves — and a monitor restart during an outage still renders the
+ * persisted snapshot.
  */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 // Drive PollCycle manually; keep the scheduler out of the assertions.
-                "monitor.poll-interval-ms=3600000",
-                "monitor.poll-initial-delay-ms=3600000",
+                "monitor.probe-interval-ms=3600000",
+                "monitor.mirror-interval-ms=3600000",
+                "monitor.rollup-interval-ms=3600000",
                 "monitor.stale-after-ms=30000",
                 // Dedicated in-memory database: this class is a stateful sequence.
                 "spring.datasource.url=jdbc:h2:mem:monitor-it;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
@@ -108,11 +111,19 @@ class MonitorIntegrationTest {
     @Autowired
     MirrorSnapshotRepository snapshots;
 
+    /** Two probe rounds: enough to confirm any transition with thresholds of 2. */
+    private void runCycles(int rounds) {
+        for (int i = 0; i < rounds; i++) {
+            pollCycle.cycle();
+        }
+    }
+
     @Test
     @Order(1)
     @SuppressWarnings("unchecked")
     void healthyCycleMirrorsStoreAndExternalComponent() {
-        pollCycle.cycle();
+        runCycles(1); // the first real observation confirms immediately
+
         Map<String, Object> page = get("/api/v1/status");
 
         assertEquals("operational", page.get("indicator"));
@@ -129,20 +140,31 @@ class MonitorIntegrationTest {
     @Order(2)
     @SuppressWarnings("unchecked")
     void failingStoreFreezesSnapshotAndOpensIncident() throws Exception {
-        pollCycle.cycle();
+        runCycles(1);
         StatusMirror.Snapshot before = mirror.current();
         assertNotNull(before);
 
         storeHealthy.set(false);
-        pollCycle.cycle();
+        runCycles(1); // first failing probe: 确认中, page must not flip yet
 
         Map<String, Object> page = get("/api/v1/status");
         List<Map<String, Object>> components = (List<Map<String, Object>>) page.get("components");
+        Map<String, Object> external = components.get(2);
+        assertEquals("operational", external.get("indicator"),
+                "one failed probe must not flip the external component");
+        assertEquals(Boolean.TRUE, external.get("pending"), "the page says 确认中 instead");
+        assertEquals(0, incidents().size(), "no incident before the fault is confirmed");
+
+        runCycles(1); // second failing probe: confirmed
+
+        page = get("/api/v1/status");
+        components = (List<Map<String, Object>>) page.get("components");
         assertEquals(3, components.size(), "frozen internals still render");
         assertEquals("operational", components.get(0).get("indicator"),
                 "frozen component keeps last-known state");
         assertEquals("external", components.get(2).get("key"));
         assertEquals("major_outage", components.get(2).get("indicator"));
+        assertFalse((Boolean) components.get(2).get("pending"));
         assertEquals("major_outage", page.get("indicator"));
 
         List<Map<String, Object>> incidents = incidents();
@@ -171,7 +193,10 @@ class MonitorIntegrationTest {
     @SuppressWarnings("unchecked")
     void recoveryResolvesTheIncident() {
         storeHealthy.set(true);
-        pollCycle.cycle();
+        runCycles(1); // first healthy probe: recovery being confirmed, incident stays
+        assertEquals("investigating", incidents().get(0).get("status"));
+
+        runCycles(1); // second healthy probe: recovery confirmed
 
         List<Map<String, Object>> incidents = incidents();
         assertEquals(1, incidents.size());
@@ -189,7 +214,7 @@ class MonitorIntegrationTest {
     @SuppressWarnings("unchecked")
     void monitorRestartDuringOutageStillRendersPersistedSnapshot() throws Exception {
         storeHealthy.set(false);
-        pollCycle.cycle(); // outage recorded, snapshot frozen
+        runCycles(2); // outage recorded, snapshot frozen
 
         // Simulate the restart: reload the persisted snapshot from disk.
         mirror.restore();

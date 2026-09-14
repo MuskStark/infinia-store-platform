@@ -26,20 +26,25 @@ public class MonitorIncidentService {
         this.incidents = incidents;
     }
 
-    /** Called once per poll with the external component's live indicator. */
-    public void track(String indicator, Instant now) {
+    /**
+     * Called on confirmed external transitions (and by the rollup while an
+     * incident stays open) with the component's confirmed indicator. Returns
+     * the incidents that changed, so the caller can push them to the page.
+     */
+    public List<IncidentDto> track(String indicator, Instant now) {
         boolean outage = Indicators.rank(indicator) >= 2;
         boolean degraded = Indicators.DEGRADED.equals(indicator);
         var existing = incidents
                 .findFirstByComponentAndStatusOrderByStartedAtDesc(
                         ExternalHistory.COMPONENT_KEY, "investigating");
+        MonitorIncidentEntity changed = null;
         if (outage || degraded) {
             String impact = outage ? "outage" : "degraded";
             if (existing.isPresent()) {
                 MonitorIncidentEntity open = existing.orElseThrow();
                 open.impact = impact;
                 open.updatedAt = now;
-                incidents.save(open);
+                changed = incidents.save(open);
             } else {
                 MonitorIncidentEntity fresh = new MonitorIncidentEntity();
                 fresh.id = UUID.randomUUID();
@@ -50,25 +55,29 @@ public class MonitorIncidentService {
                 fresh.status = "investigating";
                 fresh.startedAt = now;
                 fresh.updatedAt = now;
-                incidents.save(fresh);
+                changed = incidents.save(fresh);
             }
         } else if (existing.isPresent()) {
             MonitorIncidentEntity open = existing.orElseThrow();
             open.status = "resolved";
             open.resolvedAt = now;
             open.updatedAt = now;
-            incidents.save(open);
+            changed = incidents.save(open);
         }
         incidents.flush();
+        return changed == null ? List.of() : List.of(toDto(changed));
+    }
+
+    private static IncidentDto toDto(MonitorIncidentEntity entity) {
+        return new IncidentDto(entity.id.toString(), entity.component, entity.title,
+                entity.impact, entity.status, entity.startedAt.toString(),
+                entity.resolvedAt == null ? null : entity.resolvedAt.toString(),
+                entity.updatedAt.toString());
     }
 
     public List<IncidentDto> recent(int limit) {
         return incidents.findTop50ByOrderByStartedAtDesc().stream()
-                .map(entity -> new IncidentDto(entity.id.toString(), entity.component,
-                        entity.title, entity.impact, entity.status,
-                        entity.startedAt.toString(),
-                        entity.resolvedAt == null ? null : entity.resolvedAt.toString(),
-                        entity.updatedAt.toString()))
+                .map(MonitorIncidentService::toDto)
                 .limit(Math.clamp(limit, 1, 200))
                 .toList();
     }

@@ -5,6 +5,7 @@ import dev.infinia.store.contract.api.StatusDtos.ComponentDto;
 import dev.infinia.store.contract.api.StatusDtos.DayDto;
 import dev.infinia.store.contract.api.StatusDtos.IncidentDto;
 import dev.infinia.store.contract.api.StatusDtos.StatusPageDto;
+import dev.infinia.store.contract.status.ComponentStateMachine;
 import dev.infinia.store.domain.port.BlobStorage;
 import dev.infinia.store.domain.port.PublishingRepositories.UpstreamSourceRepository;
 import dev.infinia.store.domain.port.StatusRepositories.DailySample;
@@ -30,6 +31,7 @@ import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -37,6 +39,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -44,12 +48,16 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Public service status (需求：store 服务监控页, modeled on the npm status
- * page): live probes per component, per-UTC-day uptime sampling for the 90-day
- * history bars, and incidents that open/resolve themselves from probe outcomes
- * so the page needs no manual tooling.
+ * page): tiered live probes per component (core services every few seconds,
+ * resource metrics on a slower clock), a confirmation state machine per
+ * component so one bad probe shows as 确认中 instead of flipping the page,
+ * per-UTC-day uptime sampling for the 90-day history bars, and incidents that
+ * open/resolve themselves from confirmed outcomes so the page needs no manual
+ * tooling.
  *
  * <p>Indicator ladder (contract {@code StatusIndicator}): operational, degraded,
- * partial_outage, major_outage — plus no_data for history days without samples.</p>
+ * partial_outage, major_outage — plus no_data for components without a valid
+ * observation.</p>
  */
 @Service
 public class StatusService {
@@ -65,6 +73,15 @@ public class StatusService {
 
     /** A database round-trip above this is reported as degraded, not down. */
     private static final long DEGRADED_DB_MS = 1500;
+
+    /**
+     * Core services — user-facing liveness and the database — probe every few
+     * seconds so a confirmed fault is visible fast. Everything else (storage,
+     * host resources, pool saturation, HTTP quality) rides the slower metrics
+     * clock: 15–30 s is plenty for trend signals and keeps probe cost sane.
+     */
+    private static final Set<String> CORE_KEYS =
+            Set.of("api", "web", "auth", "database", "scanner");
 
     private record Component(String key, boolean probed, String displayName) {}
 
@@ -107,13 +124,21 @@ public class StatusService {
     /** Serializes sample/incident persistence so concurrent requests cannot race an upsert. */
     private final Object recordLock = new Object();
 
+    /** Confirmation machines: raw probe → confirmed indicator + pending/timestamps. */
+    private final Map<String, ComponentStateMachine> machines = new LinkedHashMap<>();
+
+    private final long observationValidityMs;
+
+    /** Rendered 90-day bars per component; refreshed by the rollup and on transitions. */
+    private final Map<String, HistoryRender> historyCache = new ConcurrentHashMap<>();
+
     private LocalDate lastPruneDay = null;
 
     /** Published atomically; reads must not consume probe windows or add samples. */
     private volatile StatusPageDto latestPage;
 
-    /** Previous http.server.requests counters; window deltas judge HTTP quality. */
-    private volatile HttpCounters lastHttpCounters = null;
+    /** Previous http.server.requests counters + their wall-clock instant. */
+    private volatile HttpWindow lastHttpWindow = null;
 
     private final boolean seedEnabled;
     /** Demo history variety is opt-in per profile: tests keep the honest empty comb. */
@@ -124,7 +149,10 @@ public class StatusService {
             UpstreamSourceRepository upstreams, UptimeRepository uptimeRepo,
             IncidentRepository incidentRepo, MeterRegistry registry,
             @Value("${store.seed.enabled:false}") boolean seedEnabled,
-            @Value("${store.seed.status-history:false}") boolean statusHistorySeeded) {
+            @Value("${store.seed.status-history:false}") boolean statusHistorySeeded,
+            @Value("${store.status.confirm-failure-threshold:2}") int confirmFailureThreshold,
+            @Value("${store.status.confirm-recovery-threshold:2}") int confirmRecoveryThreshold,
+            @Value("${store.status.observation-validity-ms:180000}") long observationValidityMs) {
         this.dataSource = dataSource;
         this.properties = properties;
         this.storageProperties = storageProperties;
@@ -135,12 +163,57 @@ public class StatusService {
         this.registry = registry;
         this.seedEnabled = seedEnabled;
         this.statusHistorySeeded = statusHistorySeeded;
+        this.observationValidityMs = observationValidityMs;
+        for (Component component : COMPONENTS) {
+            machines.put(component.key(),
+                    new ComponentStateMachine(confirmFailureThreshold, confirmRecoveryThreshold));
+        }
     }
 
-    /** Background sampler so downtime is recorded even when nobody is watching. */
-    @Scheduled(fixedDelayString = "${store.status.sample-interval-ms:60000}")
+    /** Core tier: user-facing liveness + the database, every few seconds. */
+    @Scheduled(fixedDelayString = "${store.status.core-sample-interval-ms:5000}")
+    public synchronized void sampleCore() {
+        sampleTier(CORE_KEYS);
+    }
+
+    /** Metrics tier: storage, host, pool and HTTP quality on the slower clock. */
+    @Scheduled(fixedDelayString =
+            "${store.status.metrics-sample-interval-ms:${store.status.sample-interval-ms:30000}}")
+    public synchronized void sampleMetrics() {
+        sampleTier(metricsKeys());
+    }
+
+    /**
+     * Once-a-minute rollup: record every component's confirmed state into the
+     * day buckets — a fixed cadence, so raising the probe frequency never
+     * reweights the statistics — then refresh the rendered bars.
+     */
+    @Scheduled(fixedDelayString = "60000", initialDelayString = "15000")
+    public synchronized void rollupSamples() {
+        Instant now = Instant.now();
+        LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
+        synchronized (recordLock) {
+            for (Component component : COMPONENTS) {
+                String confirmed = machines.get(component.key()).state().indicator();
+                if (confirmed != null && !NO_DATA.equals(confirmed)) {
+                    recordSample(component.key(), confirmed, today);
+                }
+            }
+            if (!today.equals(lastPruneDay)) {
+                uptimeRepo.pruneBefore(today.minusDays(HISTORY_DAYS + 30));
+                lastPruneDay = today;
+            }
+        }
+        for (Component component : COMPONENTS) {
+            historyCache.put(component.key(), renderHistory(component.key()));
+        }
+        latestPage = assemblePage(now);
+    }
+
+    /** One probe round over both tiers; the scheduler runs them separately in production. */
     public synchronized void sample() {
-        latestPage = collectPage();
+        sampleTier(CORE_KEYS);
+        sampleTier(metricsKeys());
     }
 
     /**
@@ -211,42 +284,6 @@ public class StatusService {
         }
     }
 
-    /** Runs only during sampling, so HTTP windows and history have one cadence. */
-    private StatusPageDto collectPage() {
-        Instant now = Instant.now();
-        LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
-
-        Map<String, String> live = new LinkedHashMap<>();
-        for (Component component : COMPONENTS) {
-            live.put(component.key(), probe(component));
-        }
-
-        synchronized (recordLock) {
-            for (Component component : COMPONENTS) {
-                String indicator = live.get(component.key());
-                uptimeRepo.record(new DailySample(component.key(), today,
-                        OPERATIONAL.equals(indicator) ? 1 : 0,
-                        DEGRADED.equals(indicator) ? 1 : 0,
-                        isOutage(indicator) ? 1 : 0));
-            }
-            for (Component component : COMPONENTS) {
-                if (component.probed()) {
-                    trackIncident(component, live.get(component.key()), now);
-                }
-            }
-            if (!today.equals(lastPruneDay)) {
-                uptimeRepo.pruneBefore(today.minusDays(HISTORY_DAYS + 30));
-                lastPruneDay = today;
-            }
-        }
-
-        List<ComponentDto> components = new ArrayList<>();
-        for (Component component : COMPONENTS) {
-            components.add(componentPage(component.key(), live.get(component.key()), today));
-        }
-        return new StatusPageDto(worst(live.values()), components, now.toString());
-    }
-
     /** Newest-first incident feed for the "Past Incidents" section. */
     public List<IncidentDto> incidents(int limit) {
         return incidentRepo.findRecent(Math.clamp(limit, 1, 200)).stream()
@@ -257,7 +294,75 @@ public class StatusService {
                 .toList();
     }
 
-    private ComponentDto componentPage(String key, String liveIndicator, LocalDate today) {
+    private static Set<String> metricsKeys() {
+        Set<String> keys = new java.util.LinkedHashSet<>();
+        for (Component component : COMPONENTS) {
+            if (!CORE_KEYS.contains(component.key())) {
+                keys.add(component.key());
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * Probes one tier and feeds every outcome through its confirmation machine.
+     * Confirmed transitions record a bucket sample immediately (a fault must
+     * land in today's bar at once), open/resolve incidents, and refresh that
+     * component's rendered bars; the page is rebuilt every round so the
+     * observation timestamps stay fresh.
+     */
+    private void sampleTier(Set<String> keys) {
+        Instant now = Instant.now();
+        LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
+        for (Component component : COMPONENTS) {
+            if (!keys.contains(component.key())) {
+                continue;
+            }
+            String raw = probe(component);
+            ComponentStateMachine.Result result = machines.get(component.key()).observe(raw, now);
+            if (result.kind() == ComponentStateMachine.Kind.CONFIRMED) {
+                String confirmed = result.state().indicator();
+                synchronized (recordLock) {
+                    recordSample(component.key(), confirmed, today);
+                    if (component.probed()) {
+                        trackIncident(component, confirmed, now);
+                    }
+                }
+                historyCache.put(component.key(), renderHistory(component.key()));
+            }
+        }
+        latestPage = assemblePage(now);
+    }
+
+    /** Builds the page from confirmed states; reads no probes and adds no samples. */
+    private StatusPageDto assemblePage(Instant now) {
+        List<ComponentDto> components = new ArrayList<>(COMPONENTS.size());
+        List<String> indicators = new ArrayList<>(COMPONENTS.size());
+        for (Component component : COMPONENTS) {
+            ComponentStateMachine.State state = machines.get(component.key()).state();
+            HistoryRender render = historyCache.computeIfAbsent(component.key(),
+                    this::renderHistory);
+            boolean stale = state.observedAt() == null
+                    || now.isAfter(state.observedAt().plusMillis(observationValidityMs));
+            components.add(new ComponentDto(component.key(), state.indicatorOrNoData(),
+                    render.uptime90d(), render.history(),
+                    iso(state.observedAt()), iso(state.lastSuccessAt()),
+                    state.pending(), stale));
+            indicators.add(state.indicatorOrNoData());
+        }
+        String overall = indicators.stream().allMatch(NO_DATA::equals)
+                ? NO_DATA : worst(indicators);
+        return new StatusPageDto(overall, components, now.toString());
+    }
+
+    private static String iso(Instant at) {
+        return at == null ? null : at.toString();
+    }
+
+    private record HistoryRender(Double uptime90d, List<DayDto> history) {}
+
+    private HistoryRender renderHistory(String key) {
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate from = today.minusDays(HISTORY_DAYS - 1L);
         Map<LocalDate, DailySample> byDay = new LinkedHashMap<>();
         for (DailySample sample : uptimeRepo.findSince(key, from)) {
@@ -292,7 +397,7 @@ public class StatusService {
             history.add(new DayDto(day.toString(), dayIndicator, uptimePercent));
         }
         Double uptime90d = total == 0 ? null : Math.round(1000.0 * available / total) / 10.0;
-        return new ComponentDto(key, liveIndicator, uptime90d, history);
+        return new HistoryRender(uptime90d, history);
     }
 
     private String probe(Component component) {
@@ -461,18 +566,25 @@ public class StatusService {
 
     /**
      * 5xx ratio and p95 latency over the http.server.requests counters observed
-     * since the previous check. Windows with too little traffic skip the ratio
-     * so a single error on a quiet instance cannot flash a false outage.
+     * since the previous check, normalized to a per-minute window by wall-clock
+     * elapsed time — the metrics tier's cadence must not change what counts as
+     * "a busy window". Windows with too little traffic skip the ratio so a
+     * single error on a quiet instance cannot flash a false outage.
      */
     private String probeHttpQuality() {
         HttpCounters current = httpCounters();
-        HttpCounters previous = lastHttpCounters;
-        lastHttpCounters = current;
-        if (previous == null || current.total() < previous.total()) {
+        Instant now = Instant.now();
+        HttpWindow previous = lastHttpWindow;
+        lastHttpWindow = new HttpWindow(current, now);
+        if (previous == null || current.total() < previous.counters().total()) {
             return OPERATIONAL; // first window after boot, or a registry reset
         }
-        return classifyHttpWindow(current.total() - previous.total(),
-                current.errors() - previous.errors(), httpP95Millis(),
+        long elapsedMs = Math.max(1, Duration.between(previous.at(), now).toMillis());
+        long windowTotal = current.total() - previous.counters().total();
+        long windowErrors = current.errors() - previous.counters().errors();
+        long perMinuteTotal = Math.round(windowTotal * 60_000.0 / elapsedMs);
+        long perMinuteErrors = Math.round(windowErrors * 60_000.0 / elapsedMs);
+        return classifyHttpWindow(perMinuteTotal, perMinuteErrors, httpP95Millis(),
                 properties.monitoring());
     }
 
@@ -552,6 +664,9 @@ public class StatusService {
         return OPERATIONAL;
     }
 
+    /** http.server.requests counters plus the wall-clock instant they were read. */
+    private record HttpWindow(HttpCounters counters, Instant at) {}
+
     /** http.server.requests counters feeding the HTTP-quality window deltas. */
     private record HttpCounters(long total, long errors) {}
 
@@ -569,9 +684,17 @@ public class StatusService {
         return OPERATIONAL;
     }
 
+    /** One confirmed outcome into today's bucket (accumulating semantics). */
+    private void recordSample(String key, String indicator, LocalDate day) {
+        uptimeRepo.record(new DailySample(key, day,
+                OPERATIONAL.equals(indicator) ? 1 : 0,
+                DEGRADED.equals(indicator) ? 1 : 0,
+                isOutage(indicator) ? 1 : 0));
+    }
+
     /**
-     * Auto incident lifecycle: a failing probe opens (or keeps open) one
-     * incident per component, a recovered probe resolves it. Only really
+     * Auto incident lifecycle: a confirmed failing probe opens (or keeps open)
+     * one incident per component, a confirmed recovery resolves it. Only really
      * probed components participate — derived ones share the database's fate.
      */
     private void trackIncident(Component component, String indicator, Instant now) {

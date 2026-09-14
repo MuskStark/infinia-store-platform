@@ -13,13 +13,21 @@ import java.net.URI;
 @ConfigurationProperties(prefix = "monitor")
 public record MonitorProperties(
         URI targetBaseUrl,
-        Long pollIntervalMs,
+        Long probeIntervalMs,
+        Long mirrorIntervalMs,
         Long probeTimeoutMs,
+        Long mirrorTimeoutMs,
         String mirrorDir,
         String alertWebhook,
         Integer alertThrottleMinutes,
         Integer staleAfterMs,
-        Integer historyDays) {
+        Integer historyDays,
+        Integer confirmFailureThreshold,
+        Integer confirmRecoveryThreshold,
+        Integer observationValidityMs,
+        Integer sseMaxConnections,
+        Integer sseHeartbeatMs,
+        Integer sseReplayCapacity) {
 
     public MonitorProperties {
         if (targetBaseUrl == null) {
@@ -31,11 +39,19 @@ public record MonitorProperties(
             throw new IllegalStateException("monitor.target-base-url must be an absolute "
                     + "http(s) URL pointing at the store, got: " + targetBaseUrl);
         }
-        if (pollIntervalMs == null || pollIntervalMs <= 0) {
-            pollIntervalMs = 60_000L;
+        // Tiered probing: the external probe and the mirror fetch run on their own
+        // clocks (5 s each) so a fault reaches the page within the ~15 s budget.
+        if (probeIntervalMs == null || probeIntervalMs <= 0) {
+            probeIntervalMs = 5_000L;
+        }
+        if (mirrorIntervalMs == null || mirrorIntervalMs <= 0) {
+            mirrorIntervalMs = 5_000L;
         }
         if (probeTimeoutMs == null || probeTimeoutMs <= 0) {
             probeTimeoutMs = 8_000L;
+        }
+        if (mirrorTimeoutMs == null || mirrorTimeoutMs <= 0) {
+            mirrorTimeoutMs = 8_000L;
         }
         // A relative storage path silently splits data when the working directory
         // changes between launches — refuse to boot instead (StoreProperties style).
@@ -57,6 +73,24 @@ public record MonitorProperties(
         }
         if (historyDays == null || historyDays <= 0) {
             historyDays = 90;
+        }
+        if (confirmFailureThreshold == null || confirmFailureThreshold < 1) {
+            confirmFailureThreshold = 2;
+        }
+        if (confirmRecoveryThreshold == null || confirmRecoveryThreshold < 1) {
+            confirmRecoveryThreshold = 2;
+        }
+        if (observationValidityMs == null || observationValidityMs <= 0) {
+            observationValidityMs = 180_000;
+        }
+        if (sseMaxConnections == null || sseMaxConnections <= 0) {
+            sseMaxConnections = 200;
+        }
+        if (sseHeartbeatMs == null || sseHeartbeatMs <= 0) {
+            sseHeartbeatMs = 15_000;
+        }
+        if (sseReplayCapacity == null || sseReplayCapacity <= 0) {
+            sseReplayCapacity = 1_000;
         }
     }
 }

@@ -49,7 +49,7 @@ public class StatusMirror {
         this.snapshots = snapshots;
         this.mapper = mapper;
         this.http = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofMillis(properties.probeTimeoutMs()))
+                .connectTimeout(Duration.ofMillis(properties.mirrorTimeoutMs()))
                 .build();
     }
 
@@ -99,7 +99,7 @@ public class StatusMirror {
 
     private <T> T get(Class<T> type, String path) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(target(path))
-                .timeout(Duration.ofMillis(properties.probeTimeoutMs()))
+                .timeout(Duration.ofMillis(properties.mirrorTimeoutMs()))
                 .GET()
                 .build();
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
@@ -111,7 +111,7 @@ public class StatusMirror {
 
     private List<StatusDtos.IncidentDto> getIncidents() throws Exception {
         HttpRequest request = HttpRequest.newBuilder(target("/api/v1/status/incidents"))
-                .timeout(Duration.ofMillis(properties.probeTimeoutMs()))
+                .timeout(Duration.ofMillis(properties.mirrorTimeoutMs()))
                 .GET()
                 .build();
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());

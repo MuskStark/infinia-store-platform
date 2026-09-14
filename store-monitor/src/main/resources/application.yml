@@ -20,6 +20,11 @@ server:
   # peer is a trusted internal proxy (see store-application's application.yml).
   forward-headers-strategy: native
 
+# Probe, mirror and rollup rounds are separately scheduled; the pool must
+# have room for all of them plus the SSE heartbeat, or a slow probe would
+# delay the mirror fetch (the very thing the split exists to prevent).
+spring.task.scheduling.pool.size: 3
+
 management:
   endpoints:
     web:
@@ -31,11 +36,26 @@ management:
 # MONITOR_TARGET_BASE_URL and restarting (ADR-011 decision: no hot reload).
 monitor:
   target-base-url: ${MONITOR_TARGET_BASE_URL:http://localhost:8080}
-  poll-interval-ms: ${MONITOR_POLL_INTERVAL_MS:60000}
+  # Tiered probing: external probes and the mirror fetch each run every 5 s so
+  # a confirmed fault reaches the page within the ~15 s budget. The legacy
+  # MONITOR_POLL_INTERVAL_MS still steers probing for deployments that set it.
+  probe-interval-ms: ${MONITOR_PROBE_INTERVAL_MS:${MONITOR_POLL_INTERVAL_MS:5000}}
+  mirror-interval-ms: ${MONITOR_MIRROR_INTERVAL_MS:5000}
   probe-timeout-ms: ${MONITOR_PROBE_TIMEOUT_MS:8000}
+  mirror-timeout-ms: ${MONITOR_MIRROR_TIMEOUT_MS:8000}
   mirror-dir: ${MONITOR_MIRROR_DIR:${user.home}/.infinia-monitor}
   # Empty by default: alerting is opt-in per deployment.
   alert-webhook: ${MONITOR_ALERT_WEBHOOK:}
   alert-throttle-minutes: ${MONITOR_ALERT_THROTTLE_MINUTES:15}
   stale-after-ms: ${MONITOR_STALE_AFTER_MS:180000}
   history-days: ${MONITOR_HISTORY_DAYS:90}
+  # Confirmation: 2 consecutive failures confirm a fault, 2 successes confirm
+  # recovery; the first conflicting observation shows as 确认中 (pending).
+  confirm-failure-threshold: ${MONITOR_CONFIRM_FAILURE_THRESHOLD:2}
+  confirm-recovery-threshold: ${MONITOR_CONFIRM_RECOVERY_THRESHOLD:2}
+  # An observation older than this stops counting as current (数据过期).
+  observation-validity-ms: ${MONITOR_OBSERVATION_VALIDITY_MS:180000}
+  # SSE stream limits (events endpoint); see DEPLOYMENT.md for proxy notes.
+  sse-max-connections: ${MONITOR_SSE_MAX_CONNECTIONS:200}
+  sse-heartbeat-ms: ${MONITOR_SSE_HEARTBEAT_MS:15000}
+  sse-replay-capacity: ${MONITOR_SSE_REPLAY_CAPACITY:1000}

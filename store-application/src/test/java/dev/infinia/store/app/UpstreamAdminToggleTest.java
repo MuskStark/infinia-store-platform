@@ -25,12 +25,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * itself is healthy.
  *
  * <p>Status reads serve the sampler's cached snapshot (reads no longer run
- * probes), so a config change surfaces within one sampling window rather
- * than instantly. This test pins the window at 250 ms and polls to the next
- * sample instead of expecting a same-request flip.</p>
+ * probes), and a config change needs its confirmation streak — with thresholds
+ * of 2 and a 250 ms cadence that is two sampling windows, not one. This test
+ * pins the cadence and polls to the confirmed sample instead of expecting a
+ * same-request flip.</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "store.status.sample-interval-ms=250")
+        properties = {
+                "store.status.core-sample-interval-ms=250",
+                "store.status.metrics-sample-interval-ms=250",
+        })
 @ActiveProfiles("test")
 class UpstreamAdminToggleTest {
 

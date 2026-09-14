@@ -5,20 +5,23 @@ import dev.infinia.monitor.persistence.ExternalDayEntity;
 import dev.infinia.monitor.persistence.ExternalDayRepository;
 import dev.infinia.store.contract.api.StatusDtos.ComponentDto;
 import dev.infinia.store.contract.api.StatusDtos.DayDto;
+import dev.infinia.store.contract.status.ComponentStateMachine;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Day buckets for the components the monitor observes itself (external
- * reachability). The bucket math mirrors the store's own history rendering so
- * both halves of the merged page show identical bars — one honest lattice.
+ * The monitor's own component: external reachability of the store's public
+ * URL. Holds the confirmation state machine fed by every probe (confirmed
+ * indicator, pending flag, observation timestamps) and the day buckets the
+ * 90-day bars render from — the bucket math mirrors the store's own history
+ * rendering so both halves of the merged page show identical bars.
  */
 @Component
 public class ExternalHistory {
@@ -27,29 +30,45 @@ public class ExternalHistory {
 
     private final ExternalDayRepository days;
     private final MonitorProperties properties;
-    /** Latest probe outcome; no_data until the first poll after boot. */
-    private final java.util.concurrent.atomic.AtomicReference<String> liveIndicator =
-            new java.util.concurrent.atomic.AtomicReference<>(Indicators.NO_DATA);
+    /** Confirmed external state; unconfirmed (no_data) until the first probe. */
+    private final ComponentStateMachine machine;
 
     public ExternalHistory(ExternalDayRepository days, MonitorProperties properties) {
         this.days = days;
         this.properties = properties;
+        this.machine = new ComponentStateMachine(properties.confirmFailureThreshold(),
+                properties.confirmRecoveryThreshold());
     }
 
-    /** The freshest probe outcome — the live indicator the page renders. */
+    /** Feeds one raw probe outcome; the caller acts on the returned kind. */
+    public ComponentStateMachine.Result observe(String rawIndicator, Instant at) {
+        return machine.observe(rawIndicator, at);
+    }
+
+    /** The confirmed external state (indicator, pending, observation timestamps). */
+    public ComponentStateMachine.State liveState() {
+        return machine.state();
+    }
+
+    /** The confirmed indicator the page renders — freshest verdict that survived confirmation. */
     public String liveIndicator() {
-        return liveIndicator.get();
+        return machine.state().indicatorOrNoData();
     }
 
-    /** Records one probe outcome into today's bucket (accumulating upsert). */
+    /**
+     * Records one confirmed outcome into today's bucket (accumulating upsert).
+     * Called on confirmed transitions and by the per-minute rollup — a per-probe
+     * cadence here would reweight day statistics as probing gets faster.
+     */
     public void record(String indicator, Instant at) {
         if (!java.util.Set.of(Indicators.OPERATIONAL, Indicators.DEGRADED,
                 Indicators.PARTIAL_OUTAGE, Indicators.MAJOR_OUTAGE, Indicators.NO_DATA).contains(indicator)) {
             throw new IllegalArgumentException("Unknown status indicator: " + indicator);
         }
-        liveIndicator.set(indicator);
         // Missing observations are neither successful nor failed samples.
-        if (Indicators.NO_DATA.equals(indicator)) return;
+        if (Indicators.NO_DATA.equals(indicator)) {
+            return;
+        }
         LocalDate day = LocalDate.ofInstant(at, ZoneOffset.UTC);
         ExternalDayEntity bucket = days
                 .findById(new ExternalDayEntity.Key(COMPONENT_KEY, day))
@@ -64,8 +83,8 @@ public class ExternalHistory {
         days.flush();
     }
 
-    /** The external component's page section: live indicator + 90-day history. */
-    public ComponentDto component(String liveIndicator) {
+    /** The external component's page section: confirmed live state + 90-day history. */
+    public ComponentDto component() {
         int historyDays = properties.historyDays();
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate from = today.minusDays(historyDays - 1L);
@@ -106,7 +125,14 @@ public class ExternalHistory {
             history.add(new DayDto(day.toString(), dayIndicator, uptimePercent));
         }
         Double uptime = total == 0 ? null : Math.round(1000.0 * available / total) / 10.0;
-        return new ComponentDto(COMPONENT_KEY, liveIndicator, uptime, history);
+
+        ComponentStateMachine.State state = machine.state();
+        boolean stale = state.observedAt() == null || Instant.now()
+                .isAfter(state.observedAt().plusMillis(properties.observationValidityMs()));
+        return new ComponentDto(COMPONENT_KEY, state.indicatorOrNoData(), uptime, history,
+                state.observedAt() == null ? null : state.observedAt().toString(),
+                state.lastSuccessAt() == null ? null : state.lastSuccessAt().toString(),
+                state.pending(), stale);
     }
 
     /** Housekeeping outside the observation window. */
