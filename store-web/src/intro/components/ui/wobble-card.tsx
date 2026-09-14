@@ -65,12 +65,24 @@ export const WobbleCard = ({
   );
 };
 
+// Grayscale fractal-noise texture, inlined as a data URI: the vendored Magic UI
+// component pointed at /noise.webp, which never shipped with it (404 in prod).
+const NOISE_BACKGROUND = `url("data:image/svg+xml,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'>"
+    + "<filter id='n'>"
+    + "<feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/>"
+    + "<feColorMatrix type='saturate' values='0'/>"
+    + "</filter>"
+    + "<rect width='120' height='120' filter='url(#n)'/>"
+    + "</svg>",
+)}")`;
+
 const Noise = () => {
   return (
     <div
       className="absolute inset-0 w-full h-full scale-[1.2] transform opacity-10 [mask-image:radial-gradient(#fff,transparent,75%)]"
       style={{
-        backgroundImage: "url(/noise.webp)",
+        backgroundImage: NOISE_BACKGROUND,
         backgroundSize: "30%",
       }}
     ></div>
