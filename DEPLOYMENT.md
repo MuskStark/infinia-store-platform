@@ -241,11 +241,13 @@ different values in that host's `deploy.conf`.) Caveats: the CI-published
 GHCR monitor image builds without the asset origin (same-origin), so an
 offloaded monitor builds locally — the script writes the build override, and
 `upgrade.sh --monitor` bakes the origin into its build automatically and
-re-publishes after every successful deploy. Pages direct-upload deployments
-are atomic snapshots, but Cloudflare intentionally keeps files from earlier
-deployments serving on the production domain (so the other SPA's files
-survive a subtree-only publish); don't prune old deployments of a shared
-project.
+re-publishes after every successful deploy. A Pages deployment REPLACES the
+whole project tree, so `deploy-assets.sh` mirrors the other SPA's half from
+the live domain into every publish (the files are content-hashed and
+immutable — a verbatim copy of exactly what that side's own publish
+uploaded). If a publish ever warns that the other half is not reachable,
+re-run the opposite side's publish once to restore the complete tree, and
+don't prune old deployments of a shared project.
 
 The manual equivalent, step by step:
 

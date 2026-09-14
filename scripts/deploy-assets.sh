@@ -387,6 +387,48 @@ write_shared_headers() { # write_shared_headers <stage-dir>
 HEADERS
 }
 
+# A Pages deployment REPLACES the whole project tree, but the shared project
+# carries both SPAs (store at the root, monitor under /monitor): publishing
+# one side's subtree alone drops the other side's hashed files from the
+# production domain (verified the hard way — a monitor-only publish 404'd the
+# store's bundle). So mirror the other half from the live domain into this
+# publish: the files are content-hashed and immutable, a verbatim copy is
+# exactly what that side's own publish uploaded. An unreachable other half
+# (first-time setup, dedicated-domain setups) skips with a warning.
+mirror_shared_half() { # mirror_shared_half <stage-dir> <own-target: monitor|store>
+  local stage=$1 own=$2 domain other shell
+  domain=${BASE_URL#https://}; domain=${domain%%/*}
+  if [[ $own == monitor ]]; then
+    other="https://$domain"          # the store half lives at the root
+  else
+    other="https://$domain/monitor"  # the monitor half lives under /monitor
+  fi
+  if ! shell=$(curl -fsSL --max-time 30 "$other/" 2>/dev/null); then
+    warn "shared-domain mirror: the other half is not serving at $other/ —"
+    warn "publishing without it (run that side's own publish once, then re-run here)"
+    return 0
+  fi
+  log "shared-domain mirror: copying the other SPA's files from $other into this publish"
+  local url ref dest ctype
+  printf '%s\n' "$shell" | grep -oE "https://$domain/[A-Za-z0-9._/-]+" | sort -u | while read -r url; do
+    ref=${url#https://$domain}
+    [[ $ref == /_headers ]] && continue
+    dest="$stage$ref"
+    mkdir -p "$(dirname "$dest")"
+    if ! ctype=$(curl -fsSL --max-time 30 -o "$dest" -w '%{content_type}' "$url"); then
+      warn "mirror: could not fetch $url — continuing"
+      rm -f "$dest"
+      continue
+    fi
+    # Guard against an HTML fallback page (200 text/html) poisoning the tree.
+    case "$ref" in
+      *.js)   [[ $ctype == *javascript* ]] || { warn "mirror: $url served '$ctype' — skipped"; rm -f "$dest"; } ;;
+      *.css)  [[ $ctype == *css* ]]        || { warn "mirror: $url served '$ctype' — skipped"; rm -f "$dest"; } ;;
+      *.svg)  [[ $ctype == *svg* || $ctype == *octet-stream* ]] || { warn "mirror: $url served '$ctype' — skipped"; rm -f "$dest"; } ;;
+    esac
+  done
+}
+
 if [[ $MODE == image && $TARGET == monitor ]]; then
   # ---- monitor host: publish exactly what the next jar embeds --------------
   log "monitor host: upserting ASSETS_BASE_URL=$BASE_URL in .env"
@@ -429,6 +471,7 @@ OVERRIDE
   extract_jar_static "$TMPDIST/web.jar" "$TMPDIST/extract" && rm -f "$TMPDIST/web.jar"
   mv "$TMPDIST"/extract/* "$TMPDIST/stage/monitor/"
   write_shared_headers "$TMPDIST/stage"
+  mirror_shared_half "$TMPDIST/stage" monitor
   DIST=$TMPDIST/stage
   INDEX_HTML=monitor/index.html
 elif [[ $MODE == image ]]; then
@@ -449,6 +492,7 @@ elif [[ $MODE == image ]]; then
   docker cp web-extract-$$:/app/InfiniaWebService.jar "$TMPDIST/web.jar"
   docker rm web-extract-$$ >/dev/null
   extract_jar_static "$TMPDIST/web.jar" "$TMPDIST" && rm -f "$TMPDIST/web.jar"
+  mirror_shared_half "$TMPDIST" store
   DIST=$TMPDIST
 else
   # ---- any host: build in a node container from the same lockfile ----------
@@ -473,10 +517,12 @@ else
     mkdir -p "$STAGE/monitor"
     cp -R "$PWD/$DISTDIR/." "$STAGE/monitor/"
     write_shared_headers "$STAGE"
+    mirror_shared_half "$STAGE" monitor
     DIST=$STAGE
     INDEX_HTML=monitor/index.html
   else
     DIST=$PWD/$DISTDIR
+    mirror_shared_half "$DIST" store
   fi
 fi
 
