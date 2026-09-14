@@ -31,6 +31,34 @@ public final class StatusRepositories {
     }
 
     /**
+     * One recorded stretch of a component's confirmed state (interval
+     * statistics): from {@code startedAt} inclusive to {@code endedAt}
+     * exclusive, null end while the state is ongoing. Gaps between intervals
+     * are unknown time — what the coverage metric discloses.
+     */
+    public record StatusInterval(String component, String indicator,
+            Instant startedAt, Instant endedAt) {}
+
+    public interface IntervalRepository {
+
+        /**
+         * Closes the open interval at {@code at} and opens one for the
+         * indicator; a no-op when the open interval already holds it, so
+         * steady state stays a single ongoing interval.
+         */
+        void transition(String component, String indicator, Instant at, String source);
+
+        /** Ends the open interval at the validity boundary (unknown time starts there). */
+        void expireOpen(String component, Instant boundary);
+
+        /** Intervals overlapping [from, now). */
+        List<StatusInterval> findOverlapping(String component, Instant from, Instant now);
+
+        /** Drops intervals that ended before the boundary; returns the count. */
+        int pruneEndedBefore(Instant before);
+    }
+
+    /**
      * An incident is opened automatically when a probed component starts
      * failing and resolved when its probe recovers — no manual tooling needed.
      */

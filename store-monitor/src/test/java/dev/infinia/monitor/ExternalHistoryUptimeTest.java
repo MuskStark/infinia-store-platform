@@ -28,10 +28,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
                 // Polling is driven manually in tests; no startup sample races
-                // these writes to today's bucket.
+                // these writes to today's bucket or starts an interval.
                 "monitor.probe-interval-ms=3600000",
+                "monitor.probe-initial-delay-ms=3600000",
                 "monitor.mirror-interval-ms=3600000",
+                "monitor.mirror-initial-delay-ms=3600000",
                 "monitor.rollup-interval-ms=3600000",
+                "monitor.rollup-initial-delay-ms=3600000",
                 "spring.datasource.url=jdbc:h2:mem:monitor-uptime;"
                         + "MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;"
                         + "DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",

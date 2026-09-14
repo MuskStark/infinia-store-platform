@@ -167,6 +167,16 @@ class MonitorIntegrationTest {
         assertFalse((Boolean) components.get(2).get("pending"));
         assertEquals("major_outage", page.get("indicator"));
 
+        // Interval statistics: today is time-based — coverage discloses how much
+        // of the day was actually observed, never silently "100%".
+        List<Map<String, Object>> externalHistory =
+                (List<Map<String, Object>>) components.get(2).get("history");
+        Map<String, Object> today = externalHistory.get(externalHistory.size() - 1);
+        assertEquals(Boolean.FALSE, today.get("sampled"), "interval era, not sampled");
+        assertNotNull(today.get("coveragePercent"), "today carries coverage");
+        assertEquals("partial_outage", today.get("indicator"),
+                "a day mixing healthy time and outage colours orange, not red");
+
         List<Map<String, Object>> incidents = incidents();
         assertEquals(1, incidents.size());
         assertEquals("external", incidents.get(0).get("component"));

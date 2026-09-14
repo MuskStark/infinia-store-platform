@@ -6,8 +6,10 @@ import dev.infinia.store.contract.api.StatusDtos.DayDto;
 import dev.infinia.store.contract.api.StatusDtos.IncidentDto;
 import dev.infinia.store.contract.api.StatusDtos.StatusPageDto;
 import dev.infinia.store.contract.status.ComponentStateMachine;
+import dev.infinia.store.contract.status.StatusIntervals;
 import dev.infinia.store.domain.port.BlobStorage;
 import dev.infinia.store.domain.port.PublishingRepositories.UpstreamSourceRepository;
+import dev.infinia.store.domain.port.StatusRepositories;
 import dev.infinia.store.domain.port.StatusRepositories.DailySample;
 import dev.infinia.store.domain.port.StatusRepositories.Incident;
 import dev.infinia.store.domain.port.StatusRepositories.IncidentRepository;
@@ -74,6 +76,9 @@ public class StatusService {
     /** A database round-trip above this is reported as degraded, not down. */
     private static final long DEGRADED_DB_MS = 1500;
 
+    /** Observation source recorded on the store's status intervals. */
+    private static final String SOURCE_STORE_SAMPLER = "store-sampler";
+
     /**
      * Core services — user-facing liveness and the database — probe every few
      * seconds so a confirmed fault is visible fast. Everything else (storage,
@@ -118,6 +123,7 @@ public class StatusService {
     private final BlobStorage blobs;
     private final UpstreamSourceRepository upstreams;
     private final UptimeRepository uptimeRepo;
+    private final StatusRepositories.IntervalRepository intervalRepo;
     private final IncidentRepository incidentRepo;
     private final MeterRegistry registry;
 
@@ -147,6 +153,7 @@ public class StatusService {
     public StatusService(DataSource dataSource, StoreProperties properties,
             BlobStorageProperties storageProperties, BlobStorage blobs,
             UpstreamSourceRepository upstreams, UptimeRepository uptimeRepo,
+            StatusRepositories.IntervalRepository intervalRepo,
             IncidentRepository incidentRepo, MeterRegistry registry,
             @Value("${store.seed.enabled:false}") boolean seedEnabled,
             @Value("${store.seed.status-history:false}") boolean statusHistorySeeded,
@@ -159,6 +166,7 @@ public class StatusService {
         this.blobs = blobs;
         this.upstreams = upstreams;
         this.uptimeRepo = uptimeRepo;
+        this.intervalRepo = intervalRepo;
         this.incidentRepo = incidentRepo;
         this.registry = registry;
         this.seedEnabled = seedEnabled;
@@ -197,10 +205,20 @@ public class StatusService {
                 String confirmed = machines.get(component.key()).state().indicator();
                 if (confirmed != null && !NO_DATA.equals(confirmed)) {
                     recordSample(component.key(), confirmed, today);
+                    // Observations older than the validity window stop counting:
+                    // close the open interval at the boundary, then reopen from
+                    // now (the gap stays unknown, disclosed by coverage).
+                    ComponentStateMachine.State state = machines.get(component.key()).state();
+                    Instant expiry = state.observedAt().plusMillis(observationValidityMs);
+                    if (now.isAfter(expiry)) {
+                        intervalRepo.expireOpen(component.key(), expiry);
+                    }
+                    intervalRepo.transition(component.key(), confirmed, now, SOURCE_STORE_SAMPLER);
                 }
             }
             if (!today.equals(lastPruneDay)) {
                 uptimeRepo.pruneBefore(today.minusDays(HISTORY_DAYS + 30));
+                intervalRepo.pruneEndedBefore(now.minus(Duration.ofDays(HISTORY_DAYS + 30L)));
                 lastPruneDay = today;
             }
         }
@@ -324,6 +342,7 @@ public class StatusService {
                 String confirmed = result.state().indicator();
                 synchronized (recordLock) {
                     recordSample(component.key(), confirmed, today);
+                    intervalRepo.transition(component.key(), confirmed, now, SOURCE_STORE_SAMPLER);
                     if (component.probed()) {
                         trackIncident(component, confirmed, now);
                     }
@@ -364,18 +383,43 @@ public class StatusService {
     private HistoryRender renderHistory(String key) {
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate from = today.minusDays(HISTORY_DAYS - 1L);
+        Instant now = Instant.now();
         Map<LocalDate, DailySample> byDay = new LinkedHashMap<>();
         for (DailySample sample : uptimeRepo.findSince(key, from)) {
             byDay.put(sample.day(), sample);
         }
+        // Interval statistics: days from the cutover render with coverage;
+        // earlier days keep the legacy per-poll buckets, marked as sampled.
+        List<dev.infinia.store.contract.status.StatusInterval> intervals =
+                intervalRepo.findOverlapping(key,
+                        from.atStartOfDay(ZoneOffset.UTC).toInstant(), now).stream()
+                        .map(i -> new dev.infinia.store.contract.status.StatusInterval(
+                                i.component(), i.indicator(), i.startedAt(), i.endedAt()))
+                        .toList();
+        LocalDate cutoverDay = intervals.isEmpty() ? null
+                : LocalDate.ofInstant(intervals.get(0).startedAt(), ZoneOffset.UTC);
+        List<StatusIntervals.DayStat> stats = intervals.isEmpty() ? List.of()
+                : StatusIntervals.daily(intervals, from, HISTORY_DAYS, now);
+
         List<DayDto> history = new ArrayList<>(HISTORY_DAYS);
-        // Degraded samples count as availability (the statuspage.io convention:
-        // "slow but serving" is uptime); only down reduces the number, so a
+        // Degraded counts as availability (the statuspage.io convention: "slow
+        // but serving" is uptime); only down reduces the number, so a
         // sub-100% day can only ever appear orange/red — never a 0.0% yellow.
-        long available = 0;
-        long total = 0;
+        List<StatusIntervals.DayPart> parts = new ArrayList<>(HISTORY_DAYS);
         for (int i = 0; i < HISTORY_DAYS; i++) {
             LocalDate day = from.plusDays(i);
+            if (cutoverDay != null && !day.isBefore(cutoverDay)) {
+                StatusIntervals.DayStat stat = stats.get(i);
+                long window = StatusIntervals.windowMillis(day, now);
+                history.add(new DayDto(day.toString(), stat.indicator(),
+                        stat.uptimePercent(), stat.coveragePercentOf(window), false));
+                if (stat.observedMillis() > 0) {
+                    parts.add(new StatusIntervals.DayPart(
+                            (double) stat.availableMillis() / stat.observedMillis(),
+                            Math.min(stat.observedMillis(), window)));
+                }
+                continue;
+            }
             DailySample sample = byDay.get(day);
             if (sample == null || sample.ok() + sample.degraded() + sample.down() == 0) {
                 history.add(new DayDto(day.toString(), NO_DATA, null));
@@ -383,8 +427,6 @@ public class StatusService {
             }
             long dayTotal = sample.ok() + sample.degraded() + sample.down();
             long dayAvailable = sample.ok() + sample.degraded();
-            available += dayAvailable;
-            total += dayTotal;
             double uptimePercent = Math.round(1000.0 * dayAvailable / dayTotal) / 10.0;
             String dayIndicator;
             if (sample.down() > 0) {
@@ -394,10 +436,13 @@ public class StatusService {
             } else {
                 dayIndicator = OPERATIONAL;
             }
-            history.add(new DayDto(day.toString(), dayIndicator, uptimePercent));
+            history.add(new DayDto(day.toString(), dayIndicator, uptimePercent, null, true));
+            // Sampled days weigh as whole days (elapsed for today): their ratio
+            // is the sample mix, the weight must not be the sample count.
+            parts.add(new StatusIntervals.DayPart((double) dayAvailable / dayTotal,
+                    StatusIntervals.windowMillis(day, now)));
         }
-        Double uptime90d = total == 0 ? null : Math.round(1000.0 * available / total) / 10.0;
-        return new HistoryRender(uptime90d, history);
+        return new HistoryRender(StatusIntervals.blendedUptime(parts), history);
     }
 
     private String probe(Component component) {

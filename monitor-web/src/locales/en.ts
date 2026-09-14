@@ -10,7 +10,7 @@ export default {
     retry: 'Retry',
   },
   status: {
-    samplingHint: 'Availability is based on collected samples, not elapsed time. Degraded samples count as available; missing observations are excluded.',
+    samplingHint: 'Availability: new days are time-based — uptime over observed time, with per-day coverage in the day detail; older days carry a "sampled statistics" mark from per-poll sampling. Degraded counts as available; unobserved time is excluded, not averaged away.',
     title: 'Service Status',
     hiveHint: 'One hive: the center is the platform overall, every other comb is a service with its last 90 days inside.',
     overall: 'Overall',

@@ -45,6 +45,7 @@ public class PollCycle {
     private final MonitorIncidentService incidents;
     private final AlertService alerts;
     private final StatusEventBus events;
+    private final IntervalStatistics intervalStatistics;
     private final MonitorProperties properties;
     private LocalDate lastPruneDay = null;
     /** Last mirror state published per component (indicator + staleness). */
@@ -54,13 +55,14 @@ public class PollCycle {
 
     public PollCycle(TargetProber prober, StatusMirror mirror, ExternalHistory history,
             MonitorIncidentService incidents, AlertService alerts, StatusEventBus events,
-            MonitorProperties properties) {
+            IntervalStatistics intervalStatistics, MonitorProperties properties) {
         this.prober = prober;
         this.mirror = mirror;
         this.history = history;
         this.incidents = incidents;
         this.alerts = alerts;
         this.events = events;
+        this.intervalStatistics = intervalStatistics;
         this.properties = properties;
     }
 
@@ -109,6 +111,8 @@ public class PollCycle {
             case CONFIRMED -> {
                 String confirmed = result.state().indicatorOrNoData();
                 history.record(confirmed, now);
+                intervalStatistics.transition(ExternalHistory.COMPONENT_KEY, confirmed, now,
+                        IntervalStatistics.SOURCE_EXTERNAL_PROBE);
                 publishComponent(now); // the cell flips before its incident appears
                 for (StatusDtos.IncidentDto incident : incidents.track(confirmed, now)) {
                     events.incidentUpdated(incident);
@@ -157,6 +161,16 @@ public class PollCycle {
         String confirmed = history.liveState().indicator();
         if (confirmed != null && !Indicators.NO_DATA.equals(confirmed)) {
             history.record(confirmed, now);
+            // Observations older than the validity window stop counting: close
+            // the open interval at the boundary, then reopen from now (the gap
+            // stays unknown, disclosed by coverage). Steady state is a no-op.
+            ComponentStateMachine.State state = history.liveState();
+            Instant expiry = state.observedAt().plusMillis(properties.observationValidityMs());
+            if (now.isAfter(expiry)) {
+                intervalStatistics.expireOpen(ExternalHistory.COMPONENT_KEY, expiry);
+            }
+            intervalStatistics.transition(ExternalHistory.COMPONENT_KEY, confirmed, now,
+                    IntervalStatistics.SOURCE_EXTERNAL_PROBE);
         }
         // The per-minute history refresh: today's bar moved for everyone.
         StatusDtos.ComponentDto external = history.component();
@@ -197,6 +211,8 @@ public class PollCycle {
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
         if (!today.equals(lastPruneDay)) {
             history.prune();
+            intervalStatistics.prune(now.minus(
+                    java.time.Duration.ofDays(properties.historyDays() + 30L)));
             lastPruneDay = today;
         }
     }

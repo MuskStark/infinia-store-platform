@@ -6,6 +6,8 @@ import dev.infinia.monitor.persistence.ExternalDayRepository;
 import dev.infinia.store.contract.api.StatusDtos.ComponentDto;
 import dev.infinia.store.contract.api.StatusDtos.DayDto;
 import dev.infinia.store.contract.status.ComponentStateMachine;
+import dev.infinia.store.contract.status.StatusInterval;
+import dev.infinia.store.contract.status.StatusIntervals;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -30,12 +32,15 @@ public class ExternalHistory {
 
     private final ExternalDayRepository days;
     private final MonitorProperties properties;
+    private final IntervalStatistics intervalStatistics;
     /** Confirmed external state; unconfirmed (no_data) until the first probe. */
     private final ComponentStateMachine machine;
 
-    public ExternalHistory(ExternalDayRepository days, MonitorProperties properties) {
+    public ExternalHistory(ExternalDayRepository days, MonitorProperties properties,
+            IntervalStatistics intervalStatistics) {
         this.days = days;
         this.properties = properties;
+        this.intervalStatistics = intervalStatistics;
         this.machine = new ComponentStateMachine(properties.confirmFailureThreshold(),
                 properties.confirmRecoveryThreshold());
     }
@@ -88,21 +93,41 @@ public class ExternalHistory {
         int historyDays = properties.historyDays();
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate from = today.minusDays(historyDays - 1L);
+        Instant now = Instant.now();
 
         Map<LocalDate, ExternalDayEntity> byDay = new LinkedHashMap<>();
         for (ExternalDayEntity bucket : days
                 .findByComponentAndDayGreaterThanEqual(COMPONENT_KEY, from)) {
             byDay.put(bucket.day, bucket);
         }
+        // Interval statistics: days from the cutover render with coverage;
+        // earlier days keep the legacy per-poll buckets, marked as sampled.
+        List<StatusInterval> intervals = intervalStatistics.overlapping(COMPONENT_KEY,
+                from.atStartOfDay(ZoneOffset.UTC).toInstant(), now);
+        LocalDate cutoverDay = intervals.isEmpty() ? null
+                : LocalDate.ofInstant(intervals.get(0).startedAt(), ZoneOffset.UTC);
+        List<StatusIntervals.DayStat> stats = intervals.isEmpty() ? List.of()
+                : StatusIntervals.daily(intervals, from, historyDays, now);
 
         List<DayDto> history = new ArrayList<>(historyDays);
-        // Degraded samples count as availability (the statuspage.io convention,
-        // mirrored with the store's own history): only down reduces the
-        // number, so a sub-100% day can only ever appear orange/red.
-        long available = 0;
-        long total = 0;
+        // Degraded counts as availability (the statuspage.io convention, kept
+        // by the interval math too): only down reduces the number, so a
+        // sub-100% day can only ever appear orange/red.
+        List<StatusIntervals.DayPart> parts = new ArrayList<>(historyDays);
         for (int i = 0; i < historyDays; i++) {
             LocalDate day = from.plusDays(i);
+            if (cutoverDay != null && !day.isBefore(cutoverDay)) {
+                StatusIntervals.DayStat stat = stats.get(i);
+                long window = StatusIntervals.windowMillis(day, now);
+                history.add(new DayDto(day.toString(), stat.indicator(),
+                        stat.uptimePercent(), stat.coveragePercentOf(window), false));
+                if (stat.observedMillis() > 0) {
+                    parts.add(new StatusIntervals.DayPart(
+                            (double) stat.availableMillis() / stat.observedMillis(),
+                            Math.min(stat.observedMillis(), window)));
+                }
+                continue;
+            }
             ExternalDayEntity sample = byDay.get(day);
             if (sample == null || sample.ok + sample.degraded + sample.down == 0) {
                 history.add(new DayDto(day.toString(), Indicators.NO_DATA, null));
@@ -110,8 +135,6 @@ public class ExternalHistory {
             }
             long dayTotal = sample.ok + sample.degraded + sample.down;
             long dayAvailable = sample.ok + sample.degraded;
-            available += dayAvailable;
-            total += dayTotal;
             double uptimePercent = Math.round(1000.0 * dayAvailable / dayTotal) / 10.0;
             String dayIndicator;
             if (sample.down > 0) {
@@ -122,12 +145,16 @@ public class ExternalHistory {
             } else {
                 dayIndicator = Indicators.OPERATIONAL;
             }
-            history.add(new DayDto(day.toString(), dayIndicator, uptimePercent));
+            history.add(new DayDto(day.toString(), dayIndicator, uptimePercent, null, true));
+            // Sampled days weigh as whole days (elapsed for today): their ratio
+            // is the sample mix, the weight must not be the sample count.
+            parts.add(new StatusIntervals.DayPart((double) dayAvailable / dayTotal,
+                    StatusIntervals.windowMillis(day, now)));
         }
-        Double uptime = total == 0 ? null : Math.round(1000.0 * available / total) / 10.0;
+        Double uptime = StatusIntervals.blendedUptime(parts);
 
         ComponentStateMachine.State state = machine.state();
-        boolean stale = state.observedAt() == null || Instant.now()
+        boolean stale = state.observedAt() == null || now
                 .isAfter(state.observedAt().plusMillis(properties.observationValidityMs()));
         return new ComponentDto(COMPONENT_KEY, state.indicatorOrNoData(), uptime, history,
                 state.observedAt() == null ? null : state.observedAt().toString(),

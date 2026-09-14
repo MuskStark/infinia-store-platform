@@ -34,12 +34,13 @@ class StatusSamplingTest {
         when(properties.monitoring()).thenReturn(new StoreProperties.Monitoring(
                 null, null, null, null, null, null, null, null, null, null));
         var uptime = mock(UptimeRepository.class);
+        var intervals = mock(dev.infinia.store.domain.port.StatusRepositories.IntervalRepository.class);
         var incidents = mock(IncidentRepository.class);
         var registry = new SimpleMeterRegistry();
         try {
             var service = new StatusService(dataSource, properties,
                     mock(BlobStorageProperties.class), mock(BlobStorage.class),
-                    mock(UpstreamSourceRepository.class), uptime, incidents, registry,
+                    mock(UpstreamSourceRepository.class), uptime, intervals, incidents, registry,
                     false, false, 2, 2, 180_000L);
             var ok = registry.timer("http.server.requests", "status", "200");
             var errors = registry.timer("http.server.requests", "status", "500");
@@ -65,11 +66,14 @@ class StatusSamplingTest {
             var failed = httpComponent(failedPage);
             assertEquals("major_outage", failed.indicator());
             assertEquals(Boolean.FALSE, failed.pending());
-            clearInvocations(uptime, incidents);
+            verify(intervals).transition(org.mockito.ArgumentMatchers.eq("http-quality"),
+                    org.mockito.ArgumentMatchers.eq("major_outage"),
+                    org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
+            clearInvocations(uptime, incidents, intervals);
             // Reads are still side-effect free: no window consumed, no samples added.
             assertSame(failedPage, service.page());
             assertSame(failedPage, service.page());
-            verifyNoInteractions(uptime, incidents);
+            verifyNoInteractions(uptime, incidents, intervals);
 
             // Recovery is equally deliberate: two clean windows.
             record(ok, errors, 100, 0);
