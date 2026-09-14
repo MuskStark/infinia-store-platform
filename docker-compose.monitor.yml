@@ -32,6 +32,19 @@ services:
       # measures true external reachability) or the store host's LAN address.
       MONITOR_TARGET_BASE_URL: ${MONITOR_TARGET_BASE_URL:?set in .env — the store's URL as this host reaches it}
       MONITOR_ALERT_WEBHOOK: ${MONITOR_ALERT_WEBHOOK:-}
+      # Real-time probing & SSE knobs (defaults mirror application.yml so an
+      # unset .env changes nothing). Legacy MONITOR_POLL_INTERVAL_MS still
+      # steers the probe cadence for deployments that tuned it.
+      MONITOR_PROBE_INTERVAL_MS: ${MONITOR_PROBE_INTERVAL_MS:-${MONITOR_POLL_INTERVAL_MS:-5000}}
+      MONITOR_MIRROR_INTERVAL_MS: ${MONITOR_MIRROR_INTERVAL_MS:-5000}
+      MONITOR_PROBE_TIMEOUT_MS: ${MONITOR_PROBE_TIMEOUT_MS:-8000}
+      MONITOR_MIRROR_TIMEOUT_MS: ${MONITOR_MIRROR_TIMEOUT_MS:-8000}
+      MONITOR_CONFIRM_FAILURE_THRESHOLD: ${MONITOR_CONFIRM_FAILURE_THRESHOLD:-2}
+      MONITOR_CONFIRM_RECOVERY_THRESHOLD: ${MONITOR_CONFIRM_RECOVERY_THRESHOLD:-2}
+      MONITOR_OBSERVATION_VALIDITY_MS: ${MONITOR_OBSERVATION_VALIDITY_MS:-180000}
+      MONITOR_SSE_MAX_CONNECTIONS: ${MONITOR_SSE_MAX_CONNECTIONS:-200}
+      MONITOR_SSE_HEARTBEAT_MS: ${MONITOR_SSE_HEARTBEAT_MS:-15000}
+      MONITOR_SSE_REPLAY_CAPACITY: ${MONITOR_SSE_REPLAY_CAPACITY:-1000}
     ports:
       # All interfaces by default so a WAF on another host can reach it;
       # MONITOR_BIND_HOST=127.0.0.1 tightens it for a co-located proxy.

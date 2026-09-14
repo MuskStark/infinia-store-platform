@@ -160,6 +160,13 @@ services:
       # disable or retarget it per deployment.
       STORE_UPSTREAM_DEFAULTS_ENABLED: ${STORE_UPSTREAM_DEFAULTS_ENABLED:-true}
       STORE_UPSTREAM_SKILLHUB_URL: ${STORE_UPSTREAM_SKILLHUB_URL:-https://api.skillhub.cn/api/skills?pages=1}
+      # Status sampling tiers (defaults mirror application.yml): core services
+      # every 5 s, resource metrics every 30 s, 2-failure/2-success confirmation.
+      STORE_STATUS_CORE_INTERVAL_MS: ${STORE_STATUS_CORE_INTERVAL_MS:-5000}
+      STORE_STATUS_METRICS_INTERVAL_MS: ${STORE_STATUS_METRICS_INTERVAL_MS:-30000}
+      STORE_STATUS_CONFIRM_FAILURE: ${STORE_STATUS_CONFIRM_FAILURE:-2}
+      STORE_STATUS_CONFIRM_RECOVERY: ${STORE_STATUS_CONFIRM_RECOVERY:-2}
+      STORE_STATUS_OBSERVATION_VALIDITY_MS: ${STORE_STATUS_OBSERVATION_VALIDITY_MS:-180000}
       # Membership purchase gateways: all optional — the first configured one
       # wins (bmac → epay → xunhu); unset means the purchase page reports
       # payment_not_configured and nothing else changes.
@@ -211,6 +218,18 @@ services:
       # through the proxy/WAF instead.
       MONITOR_TARGET_BASE_URL: ${MONITOR_TARGET_BASE_URL:-http://store:8080}
       MONITOR_ALERT_WEBHOOK: ${MONITOR_ALERT_WEBHOOK:-}
+      # Real-time probing & SSE knobs (defaults mirror application.yml; the
+      # legacy MONITOR_POLL_INTERVAL_MS still steers the probe cadence).
+      MONITOR_PROBE_INTERVAL_MS: ${MONITOR_PROBE_INTERVAL_MS:-${MONITOR_POLL_INTERVAL_MS:-5000}}
+      MONITOR_MIRROR_INTERVAL_MS: ${MONITOR_MIRROR_INTERVAL_MS:-5000}
+      MONITOR_PROBE_TIMEOUT_MS: ${MONITOR_PROBE_TIMEOUT_MS:-8000}
+      MONITOR_MIRROR_TIMEOUT_MS: ${MONITOR_MIRROR_TIMEOUT_MS:-8000}
+      MONITOR_CONFIRM_FAILURE_THRESHOLD: ${MONITOR_CONFIRM_FAILURE_THRESHOLD:-2}
+      MONITOR_CONFIRM_RECOVERY_THRESHOLD: ${MONITOR_CONFIRM_RECOVERY_THRESHOLD:-2}
+      MONITOR_OBSERVATION_VALIDITY_MS: ${MONITOR_OBSERVATION_VALIDITY_MS:-180000}
+      MONITOR_SSE_MAX_CONNECTIONS: ${MONITOR_SSE_MAX_CONNECTIONS:-200}
+      MONITOR_SSE_HEARTBEAT_MS: ${MONITOR_SSE_HEARTBEAT_MS:-15000}
+      MONITOR_SSE_REPLAY_CAPACITY: ${MONITOR_SSE_REPLAY_CAPACITY:-1000}
     ports:
       # Same rule as the store: MONITOR_BIND_HOST=127.0.0.1 tightens it.
       - "${MONITOR_BIND_HOST:-0.0.0.0}:8090:8090"
