@@ -2,8 +2,13 @@
 # assets on Cloudflare Pages"). Copied verbatim into dist/ by the Vite build;
 # Spring serves it harmlessly at /_headers when assets stay same-origin.
 #
-# Module scripts, dynamic imports and font loads fetch CORS-mode, so the
-# cross-origin SPA shell on www needs ACAO to load them from this origin.
+# The store SPA serves from /assets/* and the monitor SPA from
+# /monitor/assets/* — one Pages project, one domain (asset.infinia.fyi);
+# whichever subtree a deployment carries, BOTH rules must ship so the other
+# SPA's cross-origin module/font loads never lose CORS.
 /assets/*
+  Access-Control-Allow-Origin: *
+  X-Content-Type-Options: nosniff
+/monitor/assets/*
   Access-Control-Allow-Origin: *
   X-Content-Type-Options: nosniff

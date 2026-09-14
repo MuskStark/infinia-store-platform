@@ -223,15 +223,29 @@ offload is active (`ASSETS_BASE_URL` in `.env` + `deploy.conf` present),
 every `scripts/upgrade.sh` re-publishes the new jar's SPA to Pages right
 after a successful deploy, so hashed files stay in sync on their own.
 
-**Monitor host** (split deployment): the same offload exists for the monitor
-SPA — on the monitor host run `scripts/deploy-assets.sh --monitor --all`
-(defaults: Pages project `infinia-monitor-assets`, suggested domain
-`status-assets.example.com`; auto-detected on a monitor-only host, so the
-flag is optional there). One caveat: the CI-published GHCR image builds
-without the asset origin (same-origin), so an offloaded monitor builds its
-image locally — the script writes the build override itself, and
-`upgrade.sh --monitor` passes the origin to its build automatically, then
-re-publishes after every successful deploy (same contract as the store).
+**Monitor host** (split deployment): the same offload covers the monitor SPA,
+by default as a **/monitor subtree of the store's Pages project and domain**
+— e.g. the store at `https://asset.example.com/` and the monitor at
+`https://asset.example.com/monitor/`. One project, one domain; hashed
+filenames never collide and each publish carries a shared root `_headers`
+with CORS for both `/assets/*` and `/monitor/assets/*`. On the monitor host:
+
+```sh
+scripts/deploy-assets.sh --monitor --configure   # ASSETS_BASE_URL=https://asset.example.com/monitor
+                                                 # ASSETS_PAGES_PROJECT=infinia-assets (shared)
+scripts/deploy-assets.sh --monitor --all
+```
+
+(A dedicated project/domain per SPA remains possible — just configure
+different values in that host's `deploy.conf`.) Caveats: the CI-published
+GHCR monitor image builds without the asset origin (same-origin), so an
+offloaded monitor builds locally — the script writes the build override, and
+`upgrade.sh --monitor` bakes the origin into its build automatically and
+re-publishes after every successful deploy. Pages direct-upload deployments
+are atomic snapshots, but Cloudflare intentionally keeps files from earlier
+deployments serving on the production domain (so the other SPA's files
+survive a subtree-only publish); don't prune old deployments of a shared
+project.
 
 The manual equivalent, step by step:
 

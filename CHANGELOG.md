@@ -48,8 +48,11 @@
   over), `--dist <dir>` (publish-only) and `--configure` (questionnaire only)
   remain for step-by-step use.
 - The same offload covers the monitor SPA: `scripts/deploy-assets.sh
-  --monitor [--all]` (auto-detected on a monitor-only host; defaults: project
-  `infinia-monitor-assets`, suggested domain `status-assets.example.com`).
+  --monitor [--all]` (auto-detected on a monitor-only host), staged by
+  default as a /monitor subtree of the SAME Pages project/domain as the
+  store (e.g. https://asset.example.com/monitor on project infinia-assets;
+  a dedicated project/domain per SPA stays possible via deploy.conf). Every
+  publish carries a shared root _headers with CORS for both path prefixes.
   monitor-web gains the identical `ASSETS_BASE_URL` base support and a
   `public/_headers`; `Dockerfile.monitor` takes the build arg;
   `upgrade.sh --monitor` bakes the origin into its build and re-publishes

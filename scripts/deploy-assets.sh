@@ -7,8 +7,11 @@
 #   store (default)     — store-web SPA, assets domain e.g. assets.example.com,
 #                         Pages project infinia-assets
 #   monitor (--monitor) — monitor-web SPA (split deployment's monitor host),
-#                         assets domain e.g. status-assets.example.com, Pages
-#                         project infinia-monitor-assets
+#                         staged under the /monitor subtree of the SAME Pages
+#                         project/domain as the store by default (e.g.
+#                         https://asset.example.com/monitor on project
+#                         infinia-assets) — or its own project/domain by
+#                         setting deploy.conf accordingly on that host.
 #
 # The host is auto-detected (store host / monitor host by its compose project;
 # anything else builds in a throwaway node container). Full run per target,
@@ -147,6 +150,8 @@ if [[ -z $PROJECT ]]; then
   fi
 fi
 NODE_IMAGE=${NODE_IMAGE:-node:22-alpine}
+# Index location inside the publish dir ('monitor/index.html' for staged publishes).
+INDEX_HTML=index.html
 
 # Target-host last resort: the running deployment's .env already names the
 # origin (kept there by the image mode below / upgrade.sh's re-publish).
@@ -194,7 +199,8 @@ upsert_conf() { # upsert_conf <key> <value> — into deploy.conf
 
 configure_assets() { # configure_assets <need-base-url 0|1> — fill + optionally save
   local need_base=$1 def_sub
-  if [[ $TARGET == monitor ]]; then def_sub=status-assets; else def_sub=assets; fi
+  # Shared-domain style by default: one project/domain, monitor under /monitor.
+  if [[ $TARGET == monitor ]]; then def_sub=asset.example.com/monitor; else def_sub=asset.example.com; fi
   log "configuration — missing values (answers can be saved to $CONFIG_FILE)"
   if [[ $need_base -eq 1 && -z ${ASSETS_BASE_URL:-} ]]; then
     while :; do
@@ -282,14 +288,14 @@ wrangler_deploy() { # wrangler_deploy <dist-abs> — publish the directory
 }
 
 # Publish a built dist (dist layout at its root) to the Pages project.
-publish_dist() { # publish_dist <dist-dir>
+publish_dist() { # publish_dist <dist-dir> — index per $INDEX_HTML
   local dist=$1
-  test -f "$dist/index.html" || { echo "error: $dist/index.html not found — build 'yarn web:build' first" >&2; return 1; }
+  test -f "$dist/$INDEX_HTML" || { echo "error: $dist/$INDEX_HTML not found — build first" >&2; return 1; }
   local dist_abs
   dist_abs=$(cd "$dist" && pwd)
 
   # Visibility check: which base mode is this dist carrying?
-  if grep -q 'src="https://[^"]*/assets/' "$dist_abs/index.html"; then
+  if grep -q 'src="https://[^"]*/assets/' "$dist_abs/$INDEX_HTML"; then
     log "dist uses an absolute assets origin (matches a server built with ASSETS_BASE_URL set)"
   else
     log "NOTE: dist references same-origin /assets/* — if the server runs with ASSETS_BASE_URL set, rebuild with the same value before publishing"
@@ -367,6 +373,20 @@ PY
   fi
 }
 
+# Root _headers for a staged (shared-domain) publish: Pages reads only the
+# deployment ROOT _headers, so a subtree-only deployment must still carry the
+# CORS rules for BOTH SPAs — keep in sync with store-web/public/_headers.
+write_shared_headers() { # write_shared_headers <stage-dir>
+  cat > "$1/_headers" <<'HEADERS'
+/assets/*
+  Access-Control-Allow-Origin: *
+  X-Content-Type-Options: nosniff
+/monitor/assets/*
+  Access-Control-Allow-Origin: *
+  X-Content-Type-Options: nosniff
+HEADERS
+}
+
 if [[ $MODE == image && $TARGET == monitor ]]; then
   # ---- monitor host: publish exactly what the next jar embeds --------------
   log "monitor host: upserting ASSETS_BASE_URL=$BASE_URL in .env"
@@ -402,8 +422,15 @@ OVERRIDE
   trap 'docker rm -f mon-extract-$$ >/dev/null 2>&1 || true; cleanup' EXIT
   docker cp mon-extract-$$:/app/store-monitor.jar "$TMPDIST/web.jar"
   docker rm mon-extract-$$ >/dev/null
-  extract_jar_static "$TMPDIST/web.jar" "$TMPDIST" && rm -f "$TMPDIST/web.jar"
-  DIST=$TMPDIST
+  # Shared-domain layout: the monitor SPA lives under /monitor on the same
+  # Pages project/domain as the store (ASSETS_BASE_URL=…/monitor), so stage
+  # the extracted dist as a subtree plus the shared root _headers.
+  mkdir -p "$TMPDIST/extract" "$TMPDIST/stage/monitor"
+  extract_jar_static "$TMPDIST/web.jar" "$TMPDIST/extract" && rm -f "$TMPDIST/web.jar"
+  mv "$TMPDIST"/extract/* "$TMPDIST/stage/monitor/"
+  write_shared_headers "$TMPDIST/stage"
+  DIST=$TMPDIST/stage
+  INDEX_HTML=monitor/index.html
 elif [[ $MODE == image ]]; then
   # ---- store host: publish exactly what the next jar embeds ----------------
   log "store host: upserting ASSETS_BASE_URL=$BASE_URL in .env"
@@ -440,7 +467,17 @@ else
     -e NPM_CONFIG_REGISTRY -e COREPACK_NPM_REGISTRY \
     "$NODE_IMAGE" sh -c \
       "corepack enable && yarn install --immutable && yarn workspace $WORKSPACE build"
-  DIST=$PWD/$DISTDIR
+  if [[ $TARGET == monitor ]]; then
+    # Same /monitor subtree staging as the image path (shared-domain layout).
+    STAGE="$TMPDIST/stage"
+    mkdir -p "$STAGE/monitor"
+    cp -R "$PWD/$DISTDIR/." "$STAGE/monitor/"
+    write_shared_headers "$STAGE"
+    DIST=$STAGE
+    INDEX_HTML=monitor/index.html
+  else
+    DIST=$PWD/$DISTDIR
+  fi
 fi
 
 test -f "$DIST/index.html" || die "no dist/index.html under $DIST — build failed?"
@@ -448,7 +485,8 @@ publish_dist "$DIST"
 
 # ---- domain: attach via API, then wait until it actually serves ------------
 DOMAIN=${BASE_URL#https://}; DOMAIN=${DOMAIN%%/*}
-ENTRY=$(ls "$DIST/assets" | grep -E '^index-[^/]+\.js$' | head -1)
+if [[ $TARGET == monitor ]]; then ASSET_REL=monitor; else ASSET_REL=.; fi
+ENTRY=$(ls "$DIST/$ASSET_REL/assets" | grep -E '^index-[^/]+\.js$' | head -1)
 PROBE_URL="$BASE_URL/assets/$ENTRY"
 
 attach_domain() { # attach $DOMAIN to the Pages project — idempotent
