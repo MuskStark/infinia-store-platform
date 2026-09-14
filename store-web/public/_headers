@@ -3,7 +3,7 @@
 # Spring serves it harmlessly at /_headers when assets stay same-origin.
 #
 # The store SPA serves from /assets/* and the monitor SPA from
-# /monitor/assets/* — one Pages project, one domain (asset.infinia.fyi);
+# /monitor/assets/* — one Pages project, one domain (assets.infinia.fyi);
 # whichever subtree a deployment carries, BOTH rules must ship so the other
 # SPA's cross-origin module/font loads never lose CORS.
 /assets/*
