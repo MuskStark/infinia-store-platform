@@ -33,8 +33,7 @@ store-platform/
 ├── store-monitor/          # Standalone status monitor (ADR-011): probes + mirrors the
 │                           #   store, serves the status page when the store is down
 ├── store-web/              # React + Vite frontend: store / publisher / review + project introduction
-├── monitor-web/            # Vue 3 status-page SPA (embedded in the monitor jar)
-│   └── src/intro/          # Official Infinia introduction page (same SPA, /)
+├── monitor-web/            # React status-page SPA (embedded in the monitor jar)
 └── store-web/src/components/magicui/  # Magic UI original components (MIT, verbatim from the registry)
 ```
 
@@ -253,6 +252,17 @@ monitor via runtime config — set `STORE_MONITOR_PUBLIC_URL` (e.g.
 needed (`VITE_MONITOR_BASE_URL` at build time still works as a fallback). A
 cheap third-party ping on the
 monitor itself is recommended — it is the one component nothing else watches.
+
+The page updates live: the monitor probes the store every 5 s, confirms faults
+after 2 consecutive failures (the first failure shows as 确认中, not a flip),
+and pushes confirmed changes to browsers over SSE
+(`GET /api/v1/status/events`) — snapshot on connect, per-component events
+afterwards, missed events replayed on reconnect. Reverse-proxy requirements
+for the stream (no buffering, read timeout above the 15 s heartbeat) are in
+DEPLOYMENT.md "Status page live stream (SSE)". Availability statistics are
+interval-based (uptime over observed time, per-day coverage; outage time
+counts as unavailable) — days from before the cutover keep their
+sampled-statistics marks.
 
 ## The publishing pipeline
 

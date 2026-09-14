@@ -527,6 +527,59 @@ Never archive or distribute the server's private `.b64` file.
   on every push to `main`; pin by digest in `.env`-driven overrides if you
   prefer immutability over `--build`.
 
+## Status page live stream (SSE)
+
+The status page updates live over `GET /api/v1/status/events` (Server-Sent
+Events, served by the monitor only — never the store): a snapshot on connect,
+then `component.updated` / `incident.updated` / `history.updated` events as
+confirmed changes land. Comment-only heartbeats fire every 15 s and the server
+sends `X-Accel-Buffering: no`, but the reverse proxy must cooperate:
+
+- **SafeLine (monitor site)** — response buffering must be off for the events
+  route (the `X-Accel-Buffering: no` response header does this for
+  nginx-family upstreams; verify in the site's advanced config), the proxy
+  read timeout must sit comfortably above the 15 s heartbeat (≥ 60 s
+  recommended), and CC protection must not cap concurrent long-lived
+  connections from one IP — several open dashboard tabs are several held
+  connections by design. The page tolerates a broken stream: it shows
+  重连中 (reconnecting), retries with exponential backoff, and falls back to
+  30 s polling when the stream is unavailable (a full connection cap answers
+  503 on purpose).
+- **Cloudflare zone** (if the status domain is proxied) — the events route
+  must stay out of any cache rule (the zone already BYPASSes `/api/v1/status`
+  — keep the `/events` suffix covered too). Cloudflare's ~100 s idle timeout
+  is safely above the 15 s heartbeat.
+- **Connection bounds** — the monitor caps concurrent streams
+  (`MONITOR_SSE_MAX_CONNECTIONS`, default 200) and keeps a bounded replay
+  buffer (`MONITOR_SSE_REPLAY_CAPACITY`, default 1000 events); a dead client
+  is dropped on its first failed send and recovers via snapshot on reconnect,
+  so slow clients cannot pin memory.
+
+### Acceptance drill (after deploying the real-time stack)
+
+Verify on the production status page, in this order:
+
+1. **Fault appears in time** — stop the store (`docker compose stop store` on
+   the store host): within ~10 s the external component shows 确认中
+   (confirming), within ~15 s confirmed red, and the incident opens after
+   confirmation. No page reload needed.
+2. **Recovery is deliberate** — start the store again: after two confirmed
+   probe rounds the page returns to green and the incident resolves.
+3. **A dropped connection never fakes normal** — cut the browser's network
+   (offline mode): the chip shows 连接中断 (connection lost), the last data
+   stays with an as-of timestamp, and past the 3-minute validity window it is
+   flagged stale rather than passing as live.
+4. **Reconnect loses nothing** — restore the network: backoff reconnect,
+   missed events replay (no full-page flash), state consistent.
+5. **Monitor restart** — `docker compose -f docker-compose.monitor.yml
+   restart`: the client reconnects and receives a fresh snapshot (event ids
+   reset with the process, by design).
+6. **Proxy soak** — leave tabs open for hours; the heartbeat keeps streams
+   alive and the monitor's memory stays bounded.
+7. **Statistics did not change meaning** — old history days keep the
+   采样统计 (sampled statistics) mark; new days show coverage in the day
+   detail; a fully-observed outage day reads 0% with coverage, not "100%".
+
 ## Operational limits & knobs
 
 - Resource ceilings per service: `DOCKER_CPUS_LIMIT` / `DOCKER_MEM_LIMIT`
