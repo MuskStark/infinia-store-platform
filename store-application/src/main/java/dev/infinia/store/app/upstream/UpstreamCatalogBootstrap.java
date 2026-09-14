@@ -77,10 +77,15 @@ public class UpstreamCatalogBootstrap {
                         && (source.lastSyncAt() == null
                                 || !Boolean.TRUE.equals(source.lastSyncOk())))
                 .forEach(source -> {
-                    UpstreamSyncService.SyncResult result = sync.sync(source.id());
-                    log.info("{} {}: imported={}, skipped={}, failed={}", logLabel,
-                            source.name(), result.imported(), result.skipped(),
-                            result.failed());
+                    // Background, never the caller's thread: as a synchronous
+                    // ApplicationReadyEvent listener the blocking sync() ran for
+                    // minutes on the main thread while /actuator/health answered
+                    // 503 (the app is not accepting traffic until the listener
+                    // returns) — long enough for upgrade.sh's health gate to
+                    // roll back every deploy on a cold catalog. The run row the
+                    // background start opens keeps the admin UI informed.
+                    sync.startBackgroundSync(source.id());
+                    log.info("{} {}: background sync started", logLabel, source.name());
                 });
     }
 

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### fix(deploy): first-boot upstream sync no longer rolls back every upgrade
+
+- The initial upstream catalog index ran as a synchronous
+  ApplicationReadyEvent listener, and `/actuator/health` answered 503 until
+  it returned — on a cold catalog that is 5-6 minutes of failing
+  healthchecks, so `upgrade.sh`'s health gate rolled back every deploy (and
+  the rolled-back container then failed the same way). The bootstrap now
+  uses `UpstreamSyncService.startBackgroundSync` (background executor,
+  in-flight dedup, run row visible in the admin UI); the app reports healthy
+  seconds after boot while the import continues in the background. The
+  hourly failed-source retry rides the same change and no longer blocks the
+  scheduler thread.
+- Defense in depth: Docker HEALTHCHECK `--start-period` 90s->5m and
+  `--timeout` 5s->10s; `upgrade.sh` / `deploy.sh` only treat *unhealthy* as
+  fatal after 420s (was 120s) and give the store a 900s health budget
+  (was 600s).
+
 ### Optional: SPA static assets served from Cloudflare Pages (first-visit 522 fix)
 
 - Production (www.infinia.fyi behind Cloudflare) intermittently returned 522 on

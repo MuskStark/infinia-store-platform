@@ -200,7 +200,10 @@ wait_healthy() { # wait_healthy <service> <timeout-seconds>; 0 = healthy, 1 = no
       log "$svc is healthy"
       return 0
     fi
-    if [[ $st == unhealthy && $waited -ge 120 ]]; then
+    # A slow first boot (cold-catalog upstream sync) can hold the container
+    # unhealthy for minutes before it recovers — only treat persistent
+    # unhealthy as failure; the overall timeout still bounds the wait.
+    if [[ $st == unhealthy && $waited -ge 420 ]]; then
       docker compose logs --tail 50 "$svc" || true
       return 1
     fi
@@ -220,7 +223,7 @@ git checkout -f --detach "$NEW_REF" >/dev/null
 log "rebuilding and restarting (compose layer cache keeps unchanged builds fast)"
 docker compose "${PROFILES[@]}" up -d --build || rollback
 
-if ! wait_healthy store 600; then rollback; fi
+if ! wait_healthy store 900; then rollback; fi
 if [[ $WITH_MONITOR -eq 1 ]]; then
   if ! wait_healthy monitor 300; then rollback; fi
 fi

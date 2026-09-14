@@ -370,7 +370,8 @@ wait_healthy() { # wait_healthy <service> <timeout-seconds>; uses COMPOSE_ARGS
       log "$svc is healthy"
       return 0
     fi
-    if [[ $st == unhealthy && $waited -ge 120 ]]; then
+    # Same slow-first-boot tolerance as upgrade.sh (cold-catalog sync).
+    if [[ $st == unhealthy && $waited -ge 420 ]]; then
       docker compose "${COMPOSE_ARGS[@]}" logs --tail 50 "$svc" || true
       die "$svc reports unhealthy"
     fi
@@ -538,7 +539,7 @@ fi
 docker compose "${PROFILES[@]}" up -d --build
 
 COMPOSE_ARGS=("${PROFILES[@]}")
-wait_healthy store 600
+wait_healthy store 900
 if [[ $WITH_MONITOR -eq 1 ]]; then
   wait_healthy monitor 300
 fi

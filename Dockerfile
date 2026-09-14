@@ -96,6 +96,8 @@ COPY --from=jar --chown=infinia:infinia /InfiniaWebService.jar InfiniaWebService
 USER infinia
 EXPOSE 8080
 VOLUME /var/lib/infinia-store
-HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
-    CMD curl -fsS http://127.0.0.1:8080/actuator/health | grep -qs UP || exit 1
+# start-period covers the boot-time catalog sync on cold catalogs; retries
+# lowered to fail fast once the period is over.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5m --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8080/actuator/health | grep -qs UP || exit 1
 ENTRYPOINT ["/bin/sh", "-c", "exec java $JAVA_OPTS -jar /app/InfiniaWebService.jar"]
