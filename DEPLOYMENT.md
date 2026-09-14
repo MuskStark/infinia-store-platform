@@ -17,6 +17,10 @@ Internet ──HTTPS── SafeLine WAF (TLS termination, WAF/CC protection)
                        │ http://<store-host>:8080   → InfiniaWebService (/store + / introduction)
                        │ http://<monitor-host>:8090 → monitor (public status page)
 
+Optional: with Cloudflare in front and assets offloaded (see "Static assets
+on Cloudflare Pages"), the hashed /assets/** files are served by Cloudflare
+Pages and only the HTML shell + API go through the WAF to the store host.
+
 Store host: docker compose --profile app          Monitor host: -f docker-compose.monitor.yml
    ├── postgres:17 (pgdata)                          └── monitor (monitordata: H2 mirror
    ├── minio       (miniodata, store-blobs)               + history; GHCR image,
@@ -148,6 +152,54 @@ Prefer the ports not answer the LAN at all when the proxy is co-located?
 Set `STORE_BIND_HOST=127.0.0.1` (and `MONITOR_BIND_HOST`) in `.env`. The
 forwarded-header trust needs no change either way: a WAF hop from a private
 address is covered by the default internal-proxies.
+
+## Static assets on Cloudflare Pages
+
+Optional, recommended when the site is published through Cloudflare (as
+`www.infinia.fyi` is): first-visit 522s on `/assets/**` come from Cloudflare
+having to fetch every static file from the origin over a flaky
+edge→origin link — made permanent there by a zone cache rule that returns
+`cf-cache-status: BYPASS` for static files. Offloading the SPA's hashed
+assets to a Cloudflare Pages project removes them from that path entirely:
+Pages serves `/assets/*` with a year of immutable caching, worldwide, and
+never contacts the store host. The HTML shell and the API keep coming from
+the origin exactly as before, and the whole mechanism is opt-in — with
+`ASSETS_BASE_URL` unset, nothing changes for any deployment.
+
+Setup (one-time):
+
+1. **Pages project + domain** — the zone is already on Cloudflare. Create the
+   project and publish the current SPA once (needs Node/npx locally):
+
+   ```sh
+   CLOUDFLARE_API_TOKEN=<token with Cloudflare Pages · Edit> \
+   CLOUDFLARE_ACCOUNT_ID=<account id> \
+   PAGES_INIT=1 ASSETS_PAGES_PROJECT=infinia-assets \
+     scripts/publish-assets.sh
+   ```
+
+   Then bind the custom domain (e.g. `assets.infinia.fyi`) in the Pages
+   project settings — the DNS record is created for you.
+2. **Repository wiring** (Settings → Secrets and variables → Actions):
+   variables `ASSETS_PAGES_PROJECT=infinia-assets` and
+   `ASSETS_BASE_URL=https://assets.infinia.fyi` (the CI publish and the store
+   image build must use the *same* `ASSETS_BASE_URL` — it changes bundle
+   hashes, so a mismatch would reference files Pages never received), plus
+   secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. From then on
+   every green push publishes the SPA's dist before the deploy job runs.
+3. **Server `.env`** — set the same `ASSETS_BASE_URL=https://assets.infinia.fyi`
+   and redeploy (`docker compose --profile app up -d --build`). Do this only
+   after step 1: the shell will reference the assets domain from then on.
+
+Publishes are additive — hashed files accumulate, so a rollback to an older
+image keeps finding its files. Billing: Pages serves static assets with
+unlimited requests and bandwidth on the free plan; the paid items to avoid
+are unrelated (Argo, Workers paid).
+
+This offload does not cache the HTML shell itself. If the shell also
+flashes 522 on first visit, additionally remove the zone's bypass-cache rule
+and stop the WAF from setting its `sl-session` cookie on static responses —
+with assets on Pages that only affects the single HTML document.
 
 ## Backups
 

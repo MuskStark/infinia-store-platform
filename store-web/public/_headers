@@ -1,0 +1,9 @@
+# Cloudflare Pages header rules for the assets origin (DEPLOYMENT.md "Static
+# assets on Cloudflare Pages"). Copied verbatim into dist/ by the Vite build;
+# Spring serves it harmlessly at /_headers when assets stay same-origin.
+#
+# Module scripts, dynamic imports and font loads fetch CORS-mode, so the
+# cross-origin SPA shell on www needs ACAO to load them from this origin.
+/assets/*
+  Access-Control-Allow-Origin: *
+  X-Content-Type-Options: nosniff

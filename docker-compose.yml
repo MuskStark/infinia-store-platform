@@ -123,9 +123,13 @@ services:
     build:
       context: .
       args:
-        # Mirror for the image build's Maven downloads (slow links to Maven
-        # Central); empty keeps Maven Central. See .env.example MAVEN_MIRROR.
+      # Mirror for the image build's Maven downloads (slow links to Maven
+      # Central); empty keeps Maven Central. See .env.example MAVEN_MIRROR.
         MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+        # Absolute origin baked in for the SPA's hashed assets when they are
+        # published to Cloudflare Pages; empty keeps assets same-origin.
+        # Must match the CI publish build (see .env.example ASSETS_BASE_URL).
+        ASSETS_BASE_URL: ${ASSETS_BASE_URL:-}
     image: infinia-webservice
     profiles: ["app"]
     depends_on:

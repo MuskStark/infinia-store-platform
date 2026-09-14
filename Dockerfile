@@ -29,7 +29,11 @@ COPY store-web/package.json store-web/package.json
 COPY monitor-web/package.json monitor-web/package.json
 RUN yarn install --immutable
 COPY store-web/ store-web/
-RUN yarn workspace @infinia/store-web build \
+# Absolute asset origin (Cloudflare Pages) — changes the bundle bytes/hashes, so
+# it must equal the ASSETS_BASE_URL the CI asset publish builds with. Empty
+# keeps assets same-origin and existing deployments unchanged.
+ARG ASSETS_BASE_URL=""
+RUN ASSETS_BASE_URL="$ASSETS_BASE_URL" yarn workspace @infinia/store-web build \
  && test -f store-web/dist/index.html
 
 # ---- Stage 2: executable Boot jar -------------------------------------------

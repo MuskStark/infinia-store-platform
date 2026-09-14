@@ -4,7 +4,17 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
+// Absolute origin for the hashed /assets/** files (e.g. https://assets.infinia.fyi/)
+// when the SPA's static files are published to Cloudflare Pages — empty keeps
+// them same-origin. Must match the value the server's image build bakes in
+// (docker-compose ASSETS_BASE_URL); different values change the bundle bytes
+// and therefore the content hashes.
+const assetsBaseUrl = process.env.ASSETS_BASE_URL
+  ? process.env.ASSETS_BASE_URL.replace(/\/*$/, '/')
+  : '/';
+
 export default defineConfig({
+  base: assetsBaseUrl,
   plugins: [
     react(),
     tailwindcss(),
@@ -36,8 +46,9 @@ export default defineConfig({
     proxy: {
       // Same-origin API + authorization server during development.
       '/api': 'http://localhost:8080',
-      '/oauth2': 'http://localhost:8080',
-      '/login': 'http://localhost:8080',
+      // Keep browser-session redirects on Vite, where the current sign-in UI lives.
+      '/oauth2': { target: 'http://localhost:8080', autoRewrite: true },
+      '/login': { target: 'http://localhost:8080', autoRewrite: true },
     },
   },
   test: {

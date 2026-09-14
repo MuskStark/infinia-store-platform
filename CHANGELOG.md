@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Optional: SPA static assets served from Cloudflare Pages (first-visit 522 fix)
+
+- Production (www.infinia.fyi behind Cloudflare) intermittently returned 522 on
+  first-visit `/assets/**` loads: the zone's cache rules bypass the cache for
+  static files, so every hashed asset was a live edge→origin fetch across a
+  flaky cross-border link. The opt-in fix offloads those files to a Cloudflare
+  Pages project (`scripts/publish-assets.sh`, CI "Publish SPA to Cloudflare
+  Pages") bound to a dedicated assets domain; Pages serves `/assets/*` with a
+  year of immutable caching and never touches the origin. Free plan, unlimited
+  static requests/bandwidth.
+- Mechanics: `ASSETS_BASE_URL` (repo variable + server `.env`, must be equal)
+  sets the Vite `base`, so the shell references e.g.
+  `https://assets.infinia.fyi/assets/index-x.js`; unset it keeps assets
+  same-origin and every existing deployment byte-identical. A `public/_headers`
+  file ships CORS (`Access-Control-Allow-Origin: *`) for module scripts,
+  dynamic imports and font loads from the cross-origin shell. Publishes are
+  additive — old hashed files stay, so rollbacks keep resolving.
+- Full runbook: DEPLOYMENT.md "Static assets on Cloudflare Pages".
+
 ### One service, both faces: the store service is now **InfiniaWebService**
 
 - The deployable store service is formally renamed **InfiniaWebService** — the name
