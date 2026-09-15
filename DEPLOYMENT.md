@@ -198,15 +198,14 @@ having to fetch every static file from the origin over a flaky
 edge→origin link — made permanent there by a zone cache rule that returns
 `cf-cache-status: BYPASS` for static files. Offloading the SPA's hashed
 assets to a Cloudflare Pages project removes them from that path entirely:
-Pages serves `/assets/*` with a year of immutable caching, worldwide, and
-never contacts the store host. The HTML shell and the API keep coming from
+Pages serves `/assets/*` worldwide without contacting the store host. The HTML shell and the API keep coming from
 the origin exactly as before, and the whole mechanism is opt-in — with
 `ASSETS_BASE_URL` unset, nothing changes for any deployment.
 
 Setup (one-time, one command):
 
 ```sh
-scripts/deploy-assets.sh --all
+scripts/deploy-assets.sh --all --fresh-project   # only for a NEW, empty Pages project
 ```
 
 `--all` does everything in order: interactive configuration when values are
@@ -218,10 +217,12 @@ the domain actually serves the files, and switches the store container after
 its health check. On a non-store host it does everything except the switch
 and prints the final command to run on the server.
 
-No CI involvement: the store host is the single publishing source. Once the
-offload is active (`ASSETS_BASE_URL` in `.env` + `deploy.conf` present),
-every `scripts/upgrade.sh` re-publishes the new jar's SPA to Pages right
-after a successful deploy, so hashed files stay in sync on their own.
+Once `ASSETS_BASE_URL` is active in `.env`, `scripts/upgrade.sh` builds the
+next image, publishes its exact embedded SPA, and verifies the entry bundle's
+bytes at the assets domain **before switching containers**. Publish or
+verification failures trigger rollback. Cloudflare credentials can come from
+the environment or `deploy.conf`; missing credentials fail the upgrade rather
+than silently leave a new shell pointing at missing assets.
 
 **Monitor host** (split deployment): the same offload covers the monitor SPA,
 by default as a **/monitor subtree of the store's Pages project and domain**
@@ -236,18 +237,54 @@ scripts/deploy-assets.sh --monitor --configure   # ASSETS_BASE_URL=https://asset
 scripts/deploy-assets.sh --monitor --all
 ```
 
-(A dedicated project/domain per SPA remains possible — just configure
-different values in that host's `deploy.conf`.) Caveats: the CI-published
-GHCR monitor image builds without the asset origin (same-origin), so an
-offloaded monitor builds locally — the script writes the build override, and
-`upgrade.sh --monitor` bakes the origin into its build automatically and
-re-publishes after every successful deploy. A Pages deployment REPLACES the
-whole project tree, so `deploy-assets.sh` mirrors the other SPA's half from
-the live domain into every publish (the files are content-hashed and
-immutable — a verbatim copy of exactly what that side's own publish
-uploaded). If a publish ever warns that the other half is not reachable,
-re-run the opposite side's publish once to restore the complete tree, and
-don't prune old deployments of a shared project.
+For a dedicated monitor project/domain, use `ASSETS_BASE_URL=https://status-assets.example.com`
+without `/monitor`; the files then deploy at the project root. The default
+project is `infinia-monitor-assets` for this layout, and `infinia-assets` for
+the shared `/monitor` layout. `--project` or `ASSETS_PAGES_PROJECT` overrides it.
+The CI monitor image has same-origin assets, so offloading builds it locally.
+The script records the published image in `.monitor-release.yml` for cutover;
+`upgrade.sh --monitor` likewise publishes the next image before switching.
+
+**Retaining files and migrating existing deployments**
+
+Pages replaces the entire production tree on each publish. Every full run now
+ships `infinia-assets-manifest.json`, listing all static files and SHA-256
+checksums. Original HTML shells are embedded in the manifest because Cloudflare
+may inject scripts into HTML responses. The next run downloads the previous manifest and retains its files,
+including both HTML shells, lazy JavaScript chunks, fonts, and older hashed
+bundles. Current build files take precedence. A missing manifest, failed
+download, or checksum mismatch stops publication rather than dropping files.
+Serialize publishes from the two hosts: Pages does not merge concurrent uploads.
+
+An existing deployment created by the old script has no manifest. For its
+**first migration**, supply a local copy of the **complete previous Pages tree**,
+with the store at the root and monitor under `monitor/` if sharing a project:
+
+```sh
+scripts/deploy-assets.sh --all --previous-dist /path/to/complete-previous-pages-tree
+# On the monitor host instead:
+scripts/deploy-assets.sh --monitor --all --previous-dist /path/to/complete-previous-pages-tree
+```
+
+Use saved deployment output, or extract the static directories from the exact
+previous store and monitor JARs and combine them in that layout. Include older
+bundles you still need for rollback. Downloading just HTML and its entry script
+is insufficient: it omits lazy imports. If the old script already removed
+files, recover them from saved builds; the live domain cannot restore them.
+After the first migration, omit `--previous-dist`. Use `--fresh-project` only
+for an empty project; it intentionally skips retention. When adding a monitor
+to an existing shared project, **do not** use `--fresh-project`.
+
+`--dist DIR` remains a publish-only operation for a **complete project tree**;
+it generates a manifest but does not merge remote files or infer `/monitor`.
+Do not pass only one SPA's dist when replacing a shared project. Full builds
+use a separate staging directory so the other SPA's files never contaminate
+`store-web/dist` or `monitor-web/dist`.
+
+Node is used for manifests (locally, or through the configured Node Docker
+image). Custom domain attachment uses the [Pages Domains API](https://developers.cloudflare.com/api/resources/pages/subresources/projects/subresources/domains/); verify the domain's
+CNAME/DNS record in Cloudflare if provisioning does not complete. A 200 HTML SPA
+fallback is not a successful bundle probe; `--wait-assets` verifies actual bytes.
 
 The manual equivalent, step by step:
 
@@ -300,8 +337,10 @@ The manual equivalent, step by step:
    build + `up -d`) — the script verifies the assets domain answers before
    that final switch: the shell references the domain from then on.
 
-Publishes are additive — hashed files accumulate, so a rollback to an older
-image keeps finding its files. Billing: Pages serves static assets with
+Full publishes retain hashed files listed in the previous manifest, so a
+rollback keeps finding those bundles. Retention starts with the complete tree
+provided during migration; previously deleted files are not recoverable from
+Pages automatically. Monitor the growing tree against Pages file limits. Billing: Pages serves static assets with
 unlimited requests and bandwidth on the free plan; the paid items to avoid
 are unrelated (Argo, Workers paid).
 
