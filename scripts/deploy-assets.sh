@@ -306,7 +306,10 @@ wrangler_deploy() { # wrangler_deploy <dist-abs> — publish the directory
       "$NODE_IMAGE" npx --yes wrangler@4 pages deploy \
       --project-name="$PROJECT" --branch=main --commit-dirty=true /dist
   fi
-  rm -rf "$dist/.wrangler"
+  # A containerized wrangler leaves .wrangler root-owned; without the
+  # fallback set -e aborts the script AFTER a successful publish.
+  rm -rf "$dist/.wrangler" 2>/dev/null ||
+    docker run --rm -v "$dist:/dist" "$NODE_IMAGE" sh -c 'rm -rf /dist/.wrangler'
 }
 
 # Publish a built dist (dist layout at its root) to the Pages project.
